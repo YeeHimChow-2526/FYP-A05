@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # 泊車副駕 v2.9.1 — Pi 回合報告產生器
 # 用法：.ai/report.sh "<測試指令>"
+#       REPORT_BASE=<commit> .ai/report.sh "<測試指令>"   # 手動指定由邊個 commit 之後開始報
 # 輸出：.ai/LAST_RUN.md（每次覆寫），交 Gemini 審查。
+# 差異範圍：上次報告之後嘅所有 commit（記錄喺 .ai/.last_report_head，唔入庫），
+#           所以一個回合提交幾多次都唔會漏；首次或記錄失效時用 HEAD~1。
 set -u
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "report.sh：唔喺 git repo 入面" >&2; exit 2; }
@@ -41,16 +44,34 @@ else
   STATUS="未提供測試指令"
 fi
 
-# 已提交差異（對上一個 commit）＋未提交差異
+# 已提交差異（上次報告之後所有 commit）＋未提交差異
+BASE_FILE=".ai/.last_report_head"
+COMMIT_LIST=""
 if git rev-parse --verify -q HEAD >/dev/null; then
-  if git rev-parse --verify -q HEAD~1 >/dev/null; then
-    COMMITTED_DIFF="$(git diff HEAD~1 HEAD -- . "${EXCLUDES[@]}")"
-    COMMITTED_STAT="$(git diff --stat HEAD~1 HEAD -- . "${EXCLUDES[@]}")"
-    COMMITTED_LABEL="git diff HEAD~1 HEAD"
+  BASE="${REPORT_BASE:-}"
+  BASE_SRC="REPORT_BASE"
+  if [ -z "$BASE" ] && [ -f "$BASE_FILE" ]; then BASE="$(tr -d ' \r\n' <"$BASE_FILE")"; BASE_SRC="上次報告"; fi
+  # 記錄要係 HEAD 嘅祖先而且唔等於 HEAD，否則退返 HEAD~1
+  if [ -n "$BASE" ]; then
+    BASE_HASH="$(git rev-parse --verify -q "${BASE}^{commit}" 2>/dev/null || true)"
+    if [ -z "$BASE_HASH" ] || [ "$BASE_HASH" = "$(git rev-parse HEAD)" ] || ! git merge-base --is-ancestor "$BASE_HASH" HEAD 2>/dev/null; then
+      BASE=""
+    else
+      BASE="$BASE_HASH"
+    fi
+  fi
+  if [ -z "$BASE" ] && git rev-parse --verify -q HEAD~1 >/dev/null; then BASE="$(git rev-parse HEAD~1)"; BASE_SRC="HEAD~1"; fi
+  if [ -n "$BASE" ]; then
+    SHORT_BASE="$(git rev-parse --short "$BASE")"
+    COMMITTED_DIFF="$(git diff "$BASE" HEAD -- . "${EXCLUDES[@]}")"
+    COMMITTED_STAT="$(git diff --stat "$BASE" HEAD -- . "${EXCLUDES[@]}")"
+    COMMITTED_LABEL="git diff $SHORT_BASE HEAD（起點：$BASE_SRC）"
+    COMMIT_LIST="$(git log --oneline "$BASE"..HEAD)"
   else
     COMMITTED_DIFF="$(git show --stat --format='%h %s' HEAD -- . "${EXCLUDES[@]}")"
     COMMITTED_STAT="$COMMITTED_DIFF"
     COMMITTED_LABEL="git show --stat HEAD（首個 commit）"
+    COMMIT_LIST="$(git log --oneline -1)"
   fi
   UNCOMMITTED_DIFF="$(git diff HEAD -- . "${EXCLUDES[@]}")"
   UNCOMMITTED_STAT="$(git diff --stat HEAD -- . "${EXCLUDES[@]}")"
@@ -82,6 +103,12 @@ TOTAL_DIFF_LINES=$(( $(count_lines "$COMMITTED_DIFF") + $(count_lines "$UNCOMMIT
     echo "$FENCE"
     echo
   fi
+  echo "## 本回合 commit"
+  echo
+  echo "$FENCE"
+  if [ -n "$COMMIT_LIST" ]; then printf '%s\n' "$COMMIT_LIST"; else echo "(無)"; fi
+  echo "$FENCE"
+  echo
   echo "## git status --short"
   echo
   echo "$FENCE"
@@ -119,6 +146,9 @@ TOTAL_DIFF_LINES=$(( $(count_lines "$COMMITTED_DIFF") + $(count_lines "$UNCOMMIT
     echo "$FENCE"
   fi
 } >"$OUT"
+
+# 記低今次報到邊度，下次由呢度開始
+git rev-parse --verify -q HEAD >"$BASE_FILE" 2>/dev/null || true
 
 echo "已生成 $OUT（$STATUS）"
 if [ "$EXIT_CODE" = "-" ]; then exit 0; else exit "$EXIT_CODE"; fi

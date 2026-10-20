@@ -1,0 +1,2 @@
+# 腳本一律用 LF，Windows 都照行得
+*.sh text eol=lf
