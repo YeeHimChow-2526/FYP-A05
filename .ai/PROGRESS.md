@@ -48,15 +48,15 @@
 ### 19.3 Phase 2 — 行車交互精細化與香港特色場景（第 6–10 步）
 
 - [x] W-A.6 偏好三段開關 — commit: 2fbf18b
-- [ ] W-A.7 語音優先口播出卡 — commit: 
+- [ ] W-A.7 語音優先口播出卡 — 首選口播已落地（Step 1.3）；追問出卡未做 — commit: 
 - [ ] W-A.8 倒車雷達避讓 — commit: 
 - [ ] W-A.9 熄匙無痕銷毀 — commit: 
 - [ ] W-A.10 無終點主動喚起 — commit: 
 - [ ] W-A.13 單一 AudioRecord — commit: 
 - [ ] W-A.14 麥克風 FGS 與權限 — commit: 
-- [ ] W-A.19 語音能力檢查 — commit: 
+- [x] W-A.19 語音能力檢查 — commit: 
 - [ ] W-A.20 STT 開發前驗證 — commit: 
-- [ ] W-A.21 指令碼與語言模板 — commit: 
+- [x] W-A.21 指令碼與語言模板 — commit: 
 - [ ] W-A.12 網絡分級重試 — commit: 
 
 ### 19.4 Phase 3 — 商業激戰區強化、安全防禦與眾包反饋（第 11–13 步）
@@ -85,7 +85,7 @@
 
 | MVP 步驟 | 範圍（摘自 `.ai/HANDOFF.md`） | 任務編號 |
 |---|---|---|
-| Step 1 | 雙層骨架＋FGS 握手＋P 膠囊燈號＋`sim/` 殼與 fixtures＋`ApiClient` 分級重試＋三種行程語音模式與能力檢查＋粵語 TTS 口播首選 | Step 1.1：W-A.6；W-A.3 常數檔。Step 1.2：W-A.15；W-A.1 狀態機 |
+| Step 1 | 雙層骨架＋FGS 握手＋P 膠囊燈號＋`sim/` 殼與 fixtures＋`ApiClient` 分級重試＋三種行程語音模式與能力檢查＋粵語 TTS 口播首選 | Step 1.1：W-A.6；W-A.3 常數檔。Step 1.2：W-A.15；W-A.1 狀態機。Step 1.3：W-A.19、W-A.21；W-A.7 首選口播 |
 | Step 2 | 語音追問閉環＋`FloatingCardView` 追問出卡＋手動模式卡片按鈕＋Intent 喚醒 Google Maps 導航 | 由 Gemini 指定 |
 | Step 3 | `LocalPoiTrie.kt` 本地字典樹＋Google Maps 分享接盤＋`DistanceTracker.kt` 到場雙態＋Flutter 今日行程 | 由 Gemini 指定 |
 
