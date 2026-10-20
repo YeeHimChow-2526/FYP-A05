@@ -63,6 +63,7 @@ object NativeConfig {
   const val API_TIMEOUT_MS = 2500L                      // 單次請求逾時門檻
   const val API_MAX_ATTEMPTS = 3                        // 逾時重試總次數 (背景查詢靜默 + GREY_BREATHING；主動要求先口播「網絡有啲慢，我再試吓」，仍失敗「網絡唔順，遲啲再試」；GREY_BREATHING 持續至請求成功、App／FGS 結束或行程結束；背景查詢 3 次均失敗即停止自動重試，等待下一個觸發或司機要求)
   const val API_RETRY_INTERVAL_MS = 1000L               // 兩次嘗試之間的間隔（共 2 段間隔）
+  const val ON_SITE_GPS_ACCURACY_MAX_M = 100            // §4.4 現場即泊 GPS 水平精度上限；不可用或大於此值視作失敗
   // MVP：不設 outbox / DataStore / SQLite 通用離線同步；唯一本機保留項為今日行程待確認（網絡恢復自動送出；香港時間 00:00 清除）
   // 數據新鮮度：只讀伺服器回傳 data_age_seconds／is_stale／source_status；客戶端嚴禁以手機時鐘計算
 }

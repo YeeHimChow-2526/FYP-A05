@@ -27,4 +27,22 @@
 
 ## 條目
 
-（暫無條目）
+### SC-001
+- 日期：2026-10-20
+- 來源：Pi
+- 裝置（如適用）：不適用
+- 發現：Step 1.2 需跑 JVM 單元測試，`android/app/build.gradle.kts` 原本沒有 `testImplementation`。
+- 建議改動：只加測試依賴 `kotlin("test")` 與 `junit:junit:4.13.2`，不加入任何 App 執行期套件。
+- 影響任務編號／常數名／檔案：W-A.1、W-A.15；`android/app/build.gradle.kts`
+- 類別：新增依賴
+- 狀態：待處理
+
+### SC-002
+- 日期：2026-10-20
+- 來源：Pi
+- 裝置（如適用）：不適用
+- 發現：§4.4「現場即泊 GPS 水平精度 ≤100m」未寫入 §4.1 `NativeConfig` 程式碼區塊。業務碼禁止硬編碼距離，故於 `NativeConfig.kt` 增補同值常數供 `TripStateMachine` 引用。
+- 建議改動：實作版 PART 2 §二 `NativeConfig` 區塊補上 `ON_SITE_GPS_ACCURACY_MAX_M = 100`（數值不變，只係把 §4.4 門檻納入常數檔）。
+- 影響任務編號／常數名／檔案：W-A.15；`ON_SITE_GPS_ACCURACY_MAX_M`；`NativeConfig.kt`
+- 類別：規格缺漏
+- 狀態：待處理
