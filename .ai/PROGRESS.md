@@ -36,7 +36,7 @@
 
 - [ ] W-A.1 懸浮膠囊＋狀態機 — commit: 
 - [ ] W-A.2 Maps 接盤與分享跳板 — commit: 
-- [ ] W-A.3 本機字典樹與常數檔 — 常數檔已落地（Step 1.1）；字典樹未做 — commit: 32e2a48
+- [ ] W-A.3 本機字典樹與常數檔 — 常數檔已落地（Step 1.1）；字典樹未做 — commit: 2fbf18b
 - [ ] W-A.15 session_id 生命週期 — commit: 
 - [ ] W-A.16 FGS 啟動握手 — commit: 
 - [ ] W-A.4 軟件距離追蹤 — commit: 
@@ -47,7 +47,7 @@
 
 ### 19.3 Phase 2 — 行車交互精細化與香港特色場景（第 6–10 步）
 
-- [x] W-A.6 偏好三段開關 — commit: 32e2a48
+- [x] W-A.6 偏好三段開關 — commit: 2fbf18b
 - [ ] W-A.7 語音優先口播出卡 — commit: 
 - [ ] W-A.8 倒車雷達避讓 — commit: 
 - [ ] W-A.9 熄匙無痕銷毀 — commit: 
