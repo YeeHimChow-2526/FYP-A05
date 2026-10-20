@@ -1,36 +1,20 @@
 package com.hkparking.copilot.net
 
 import com.hkparking.copilot.NativeConfig
-import com.hkparking.copilot.TripState
+import com.hkparking.copilot.voice.RecommendationCard
 import com.hkparking.copilot.voice.ZhHkTemplates
 
-const val INTERNAL_API_KEY_HEADER = "X-Internal-API-Key"
-const val INTERNAL_API_KEY_PLACEHOLDER = "<INTERNAL_API_KEY>"
-const val JSON_CONTENT_TYPE = "application/json"
-
-data class ApiRequest(
-  val method: String,
-  val path: String,
-  val headers: Map<String, String>,
-  val body: String,
-  val timeoutMs: Long,
-)
-
-data class ApiResponse(
-  val statusCode: Int = 0,
-  val headers: Map<String, String> = emptyMap(),
-  val body: String = "",
-  val timedOut: Boolean = false,
-  val networkError: Boolean = false,
-)
-
-interface ApiTransport {
-  fun execute(request: ApiRequest): ApiResponse
+enum class NetworkLightState {
+  AMBER_STEADY,
+  GREY_BREATHING,
+  NEARBY_READY,
+  ALERT_BREATHING,
 }
 
-interface ApiCapsuleSignals {
-  fun onState(state: TripState)
-  fun speak(cue: String)
+enum class QueryTriggerMode {
+  BACKGROUND_PREFETCH,
+  DRIVER_ACTIVE,
+  B2_RESOLUTION,
 }
 
 data class RecommendRequest(
@@ -42,128 +26,165 @@ data class RecommendRequest(
   val destName: String,
   val preference: String,
   val expandScarcity: Boolean = false,
-)
-
-data class RecommendCard(
-  val carparkId: String,
-  val name: String,
-  val type: String,
-  val vacancies: Int,
-  val distanceMeters: Int,
-  val feeSummary: String?,
-  val spokenCue: String,
-  val isStale: Boolean,
+  val speechLocale: String = NativeConfig.SPEECH_LOCALE_DEFAULT,
 )
 
 data class RecommendResponse(
   val status: String,
-  val speechLocale: String,
-  val speechLocaleFallback: Boolean,
-  val sourceStatus: String,
-  val sourceSnapshotTs: Long,
-  val processedAt: Long,
-  val serverNow: Long,
-  val dataAgeSeconds: Int,
-  val awaitVoiceReply: Boolean,
-  val cards: List<RecommendCard>,
-)
+  val speechLocale: String = NativeConfig.SPEECH_LOCALE_DEFAULT,
+  val speechLocaleFallback: Boolean = false,
+  val sourceStatus: String = "ok",
+  val sourceSnapshotTs: String = "",
+  val processedAt: String = "",
+  val serverNow: String = "",
+  val dataAgeSeconds: Int = 0,
+  val cards: List<RecommendationCard> = emptyList(),
+  val awaitVoiceReply: Boolean = false,
+) {
+  fun sanitizedCards(): List<RecommendationCard> {
+    return cards.map { card ->
+      if (card.type == METER_TYPE && (card.isStale || sourceStatus == SOURCE_DEGRADED)) {
+        card.copy(vacancies = UNKNOWN_VACANCIES, spokenCue = ZhHkTemplates.METER_STALE_SPOKEN)
+      } else {
+        card
+      }
+    }
+  }
+}
 
-data class CommitResult(
-  val ok: Boolean,
-  val lockFull: Boolean = false,
+data class TransportResult(
+  val httpStatus: Int = 200,
+  val retryAfterSeconds: Long? = null,
+  val timedOut: Boolean = false,
+  val networkError: Boolean = false,
+  val recommendResponse: RecommendResponse? = null,
   val spokenCue: String? = null,
 )
 
-data class TripReportResult(
-  val accepted: Boolean,
-  val silentConflict: Boolean = false,
+interface ApiTransport {
+  fun post(
+    endpoint: String,
+    headers: Map<String, String>,
+    payload: Map<String, Any?>,
+    timeoutMs: Long,
+  ): TransportResult
+}
+
+data class CallOutcome(
+  val succeeded: Boolean,
+  val httpStatus: Int?,
+  val finalLightState: NetworkLightState,
+  val stateTimeline: List<NetworkLightState>,
+  val spokenCues: List<String>,
+  val attempts: Int,
+  val waitIntervalsMs: List<Long>,
+  val response: RecommendResponse? = null,
+  val actionSpokenCue: String? = null,
 )
 
 class ApiClient(
   private val transport: ApiTransport,
-  private val signals: ApiCapsuleSignals,
-  private val apiKey: String = INTERNAL_API_KEY_PLACEHOLDER,
-  private val delayMs: (Long) -> Unit = {},
-  @Suppress("unused") private val nowMs: () -> Long = { 0L },
+  private val sleepMs: (Long) -> Unit = {},
 ) {
+  var currentLightState: NetworkLightState = NetworkLightState.AMBER_STEADY
+    private set
+
+  fun defaultHeaders(): Map<String, String> {
+    return mapOf(
+      HEADER_API_KEY to INTERNAL_API_KEY,
+      HEADER_CONTENT_TYPE to JSON_CONTENT_TYPE,
+    )
+  }
+
   fun recommendAndRoute(
     request: RecommendRequest,
-    isUserInitiated: Boolean,
-    isB2Resolution: Boolean = false,
-  ): RecommendResponse? {
-    val response = execute(
-      path = "/v1/recommend-and-route",
-      body = recommendBody(request),
-      mode = recommendMode(isUserInitiated, isB2Resolution),
-    ) ?: return null
-    if (!isSuccess(response)) {
-      return null
+    mode: QueryTriggerMode = QueryTriggerMode.BACKGROUND_PREFETCH,
+  ): CallOutcome {
+    return dispatch(
+      endpoint = RECOMMEND,
+      payload = recommendPayload(request),
+      mode = mode,
+      gradedRetries = true,
+      readyOnSuccess = true,
+      conflictCue = false,
+      silentConflict = false,
+    )
+  }
+
+  fun commitSession(sessionId: String, targetCarparkId: String): CallOutcome {
+    return dispatch(
+      endpoint = COMMIT,
+      payload = mapOf(
+        "session_id" to sessionId,
+        "target_carpark_id" to targetCarparkId,
+      ),
+      mode = null,
+      gradedRetries = true,
+      readyOnSuccess = false,
+      conflictCue = true,
+      silentConflict = false,
+    )
+  }
+
+  fun releaseSession(
+    sessionId: String,
+    targetCarparkId: String,
+    isOnline: Boolean = true,
+  ): CallOutcome {
+    if (!isOnline) {
+      return abandoned()
     }
-    return parseRecommend(response.body)
+    return dispatch(
+      endpoint = RELEASE,
+      payload = mapOf(
+        "session_id" to sessionId,
+        "target_carpark_id" to targetCarparkId,
+        "reason" to PARKED_CONFIRMED,
+      ),
+      mode = null,
+      gradedRetries = false,
+      readyOnSuccess = false,
+      conflictCue = false,
+      silentConflict = false,
+    )
   }
 
-  fun commitSession(sessionId: String, targetCarparkId: String): CommitResult {
-    val response = execute(
-      path = "/v1/session/commit",
-      body = obj(
-        "session_id" to jsonString(sessionId),
-        "target_carpark_id" to jsonString(targetCarparkId),
+  fun syncDriverConfirmed(sessionId: String, timestampSec: Long): CallOutcome {
+    return dispatch(
+      endpoint = SYNC,
+      payload = mapOf(
+        "session_id" to sessionId,
+        "event_type" to DRIVER_CONFIRMED,
+        "timestamp" to timestampSec,
       ),
-      mode = silentGraded(),
-    ) ?: return CommitResult(ok = false)
-    if (response.statusCode == 409) {
-      val cue = parseObject(response.body).string("spoken_cue")
-      if (!cue.isNullOrEmpty()) {
-        signals.speak(cue)
-      }
-      return CommitResult(ok = false, lockFull = statusOf(response) == "LOCK_FULL", spokenCue = cue)
-    }
-    return CommitResult(ok = isSuccess(response))
-  }
-
-  fun releaseSession(sessionId: String, targetCarparkId: String): Boolean {
-    val response = execute(
-      path = "/v1/session/release",
-      body = obj(
-        "session_id" to jsonString(sessionId),
-        "target_carpark_id" to jsonString(targetCarparkId),
-        "reason" to jsonString("PARKED_CONFIRMED"),
-      ),
-      mode = abandon(),
-    ) ?: return false
-    return isSuccess(response)
-  }
-
-  fun syncDriverConfirmed(sessionId: String, timestamp: Long): Boolean {
-    val response = execute(
-      path = "/v1/sync/outbox",
-      body = obj(
-        "session_id" to jsonString(sessionId),
-        "event_type" to jsonString("DRIVER_CONFIRMED"),
-        "timestamp" to timestamp.toString(),
-      ),
-      mode = silentGraded(),
-    ) ?: return false
-    return isSuccess(response)
+      mode = null,
+      gradedRetries = true,
+      readyOnSuccess = false,
+      conflictCue = false,
+      silentConflict = false,
+    )
   }
 
   fun submitCrowdReport(
     sessionId: String,
     carparkId: String,
     reportType: String,
-    clientTimestamp: Long,
-  ): Boolean {
-    val response = execute(
-      path = "/v1/feedback/crowd-report",
-      body = obj(
-        "session_id" to jsonString(sessionId),
-        "carpark_id" to jsonString(carparkId),
-        "report_type" to jsonString(reportType),
-        "client_timestamp" to clientTimestamp.toString(),
+    clientTimestampSec: Long,
+  ): CallOutcome {
+    return dispatch(
+      endpoint = CROWD,
+      payload = mapOf(
+        "session_id" to sessionId,
+        "carpark_id" to carparkId,
+        "report_type" to reportType,
+        "client_timestamp" to clientTimestampSec,
       ),
-      mode = silentGraded(),
-    ) ?: return false
-    return isSuccess(response)
+      mode = null,
+      gradedRetries = true,
+      readyOnSuccess = false,
+      conflictCue = false,
+      silentConflict = false,
+    )
   }
 
   fun submitTripReport(
@@ -171,429 +192,282 @@ class ApiClient(
     carparkId: String,
     ratingTag: String,
     perkStatusTag: String,
-    perkNotes: String,
-    tripTimestamp: Long,
+    perkNotes: String = "",
+    tripTimestampSec: Long,
     photoUrl: String? = null,
-  ): TripReportResult {
-    val fields = linkedMapOf(
-      "carpark_id" to jsonString(carparkId),
-      "rating_tag" to jsonString(ratingTag),
-      "perk_status_tag" to jsonString(perkStatusTag),
-      "perk_notes" to jsonString(perkNotes),
-      "session_id" to jsonString(sessionId),
-      "trip_timestamp" to tripTimestamp.toString(),
+  ): CallOutcome {
+    val payload = linkedMapOf<String, Any?>(
+      "carpark_id" to carparkId,
+      "rating_tag" to ratingTag,
+      "perk_status_tag" to perkStatusTag,
+      "perk_notes" to perkNotes,
+      "session_id" to sessionId,
+      "trip_timestamp" to tripTimestampSec,
     )
     if (photoUrl != null) {
-      fields["photo_url"] = jsonString(photoUrl)
+      payload["photo_url"] = photoUrl
     }
-    val response = execute(
-      path = "/v1/feedback/trip-report",
-      body = obj(fields),
-      mode = silentGraded(),
-    ) ?: return TripReportResult(accepted = false)
-    if (response.statusCode == 409) {
-      return TripReportResult(accepted = false, silentConflict = true)
-    }
-    return TripReportResult(accepted = isSuccess(response))
-  }
-
-  private fun recommendMode(isUserInitiated: Boolean, isB2Resolution: Boolean): CallMode {
-    return CallMode(
-      amberWhilePending = isB2Resolution || !isUserInitiated,
-      announceSlow = isUserInitiated && !isB2Resolution,
-      announceFailed = isUserInitiated || isB2Resolution,
-      readyOnSuccess = true,
+    return dispatch(
+      endpoint = TRIP,
+      payload = payload,
+      mode = null,
       gradedRetries = true,
-    )
-  }
-
-  private fun silentGraded(): CallMode {
-    return CallMode(
-      amberWhilePending = false,
-      announceSlow = false,
-      announceFailed = false,
       readyOnSuccess = false,
-      gradedRetries = true,
+      conflictCue = false,
+      silentConflict = true,
     )
   }
 
-  private fun abandon(): CallMode {
-    return CallMode(
-      amberWhilePending = false,
-      announceSlow = false,
-      announceFailed = false,
-      readyOnSuccess = false,
-      gradedRetries = false,
-    )
-  }
-
-  private fun execute(path: String, body: String, mode: CallMode): ApiResponse? {
-    if (mode.amberWhilePending) {
-      signals.onState(TripState.AMBER_STEADY)
+  private fun dispatch(
+    endpoint: String,
+    payload: Map<String, Any?>,
+    mode: QueryTriggerMode?,
+    gradedRetries: Boolean,
+    readyOnSuccess: Boolean,
+    conflictCue: Boolean,
+    silentConflict: Boolean,
+  ): CallOutcome {
+    val timeline = mutableListOf<NetworkLightState>()
+    val cues = mutableListOf<String>()
+    val waits = mutableListOf<Long>()
+    if (mode == QueryTriggerMode.BACKGROUND_PREFETCH || mode == QueryTriggerMode.B2_RESOLUTION) {
+      mark(NetworkLightState.AMBER_STEADY, timeline)
     }
-    var graded = 0
-    while (true) {
-      val response = post(path, body)
-      if (response.statusCode == 429) {
-        return finishRateLimit(path, body, mode)
-      }
-      if (response.statusCode == 409) {
-        return response
-      }
-      if (isSuccess(response)) {
-        if (mode.readyOnSuccess) {
-          signals.onState(TripState.NEARBY_READY)
-        }
-        return response
-      }
-      if (!isRetryable(response)) {
-        return response
-      }
-      signals.onState(TripState.GREY_BREATHING)
-      graded++
-      if (mode.announceSlow && graded == 1) {
-        signals.speak(ZhHkTemplates.NETWORK_SLOW)
-      }
-      val exhausted = !mode.gradedRetries || graded >= NativeConfig.API_MAX_ATTEMPTS
-      if (exhausted) {
-        if (mode.announceFailed) {
-          signals.speak(ZhHkTemplates.NETWORK_FAILED)
-        }
-        return null
-      }
-      delayMs(NativeConfig.API_RETRY_INTERVAL_MS)
-    }
-  }
-
-  private fun finishRateLimit(path: String, body: String, mode: CallMode): ApiResponse? {
-    delayMs(rateLimitWaitMs(lastHeaders))
-    val retry = post(path, body)
-    if (retry.statusCode == 409) {
-      return retry
-    }
-    if (isSuccess(retry)) {
-      if (mode.readyOnSuccess) {
-        signals.onState(TripState.NEARBY_READY)
-      }
-      return retry
-    }
-    signals.onState(TripState.GREY_BREATHING)
-    if (mode.announceFailed) {
-      signals.speak(ZhHkTemplates.NETWORK_FAILED)
-    }
-    return null
-  }
-
-  private var lastHeaders: Map<String, String> = emptyMap()
-
-  private fun post(path: String, body: String): ApiResponse {
-    val response = transport.execute(
-      ApiRequest(
-        method = "POST",
-        path = path,
-        headers = mapOf(
-          INTERNAL_API_KEY_HEADER to apiKey,
-          "Content-Type" to JSON_CONTENT_TYPE,
-        ),
-        body = body,
-        timeoutMs = NativeConfig.API_TIMEOUT_MS,
-      ),
-    )
-    lastHeaders = response.headers
-    return response
-  }
-
-  private fun rateLimitWaitMs(headers: Map<String, String>): Long {
-    val raw = headers.entries.firstOrNull { it.key.equals("Retry-After", ignoreCase = true) }?.value
-    val seconds = raw?.trim()?.toLongOrNull()
-    if (seconds == null || seconds < 0L) {
-      return NativeConfig.RATE_LIMIT_RETRY_DELAY_MS
-    }
-    val requested = seconds * 1000L
-    return minOf(requested, NativeConfig.RATE_LIMIT_MAX_WAIT_MS)
-  }
-
-  private fun isSuccess(response: ApiResponse): Boolean {
-    return !response.timedOut && !response.networkError && response.statusCode in 200..299
-  }
-
-  private fun isRetryable(response: ApiResponse): Boolean {
-    return response.timedOut || response.networkError || response.statusCode in 500..599
-  }
-
-  private fun statusOf(response: ApiResponse): String? {
-    return parseObject(response.body).string("status")
-  }
-
-  private fun recommendBody(request: RecommendRequest): String {
-    return obj(
-      "session_id" to jsonString(request.sessionId),
-      "origin_lat" to request.originLat.toString(),
-      "origin_lng" to request.originLng.toString(),
-      "dest_lat" to request.destLat.toString(),
-      "dest_lng" to request.destLng.toString(),
-      "dest_name" to jsonString(request.destName),
-      "preference" to jsonString(request.preference),
-      "expand_scarcity" to request.expandScarcity.toString(),
-      "speech_locale" to jsonString(NativeConfig.SPEECH_LOCALE_DEFAULT),
-    )
-  }
-
-  private fun parseRecommend(body: String): RecommendResponse {
-    val root = parseObject(body)
-    val sourceStatus = root.string("source_status") ?: ""
-    val cards = root.array("cards").map { card ->
-      val type = card.string("type") ?: ""
-      val stale = card.boolean("is_stale") ?: false
-      val rawVacancies = card.int("vacancies")
-      val vacancies = if (type == "METER" && (stale || sourceStatus == "degraded")) {
-        -1
-      } else {
-        rawVacancies ?: -1
-      }
-      RecommendCard(
-        carparkId = card.string("carpark_id") ?: "",
-        name = card.string("name") ?: "",
-        type = type,
-        vacancies = vacancies,
-        distanceMeters = card.int("distance_meters") ?: 0,
-        feeSummary = card.string("fee_summary"),
-        spokenCue = card.string("spoken_cue") ?: "",
-        isStale = stale,
+    var attempts = 1
+    var result = post(endpoint, payload)
+    if (result.httpStatus == HTTP_TOO_MANY) {
+      return finishRateLimit(
+        endpoint = endpoint,
+        payload = payload,
+        mode = mode,
+        readyOnSuccess = readyOnSuccess,
+        conflictCue = conflictCue,
+        silentConflict = silentConflict,
+        timeline = timeline,
+        cues = cues,
+        waits = waits,
+        attempts = attempts,
       )
     }
-    return RecommendResponse(
-      status = root.string("status") ?: "",
-      speechLocale = root.string("speech_locale") ?: NativeConfig.SPEECH_LOCALE_DEFAULT,
-      speechLocaleFallback = root.boolean("speech_locale_fallback") ?: false,
-      sourceStatus = sourceStatus,
-      sourceSnapshotTs = root.long("source_snapshot_ts") ?: 0L,
-      processedAt = root.long("processed_at") ?: 0L,
-      serverNow = root.long("server_now") ?: 0L,
-      dataAgeSeconds = root.int("data_age_seconds") ?: 0,
-      awaitVoiceReply = root.boolean("await_voice_reply") ?: false,
-      cards = cards,
+    if (isConflict(result, conflictCue, silentConflict)) {
+      return conflictOutcome(result, timeline, cues, waits, attempts, conflictCue)
+    }
+    while (true) {
+      if (isOk(result)) {
+        if (readyOnSuccess) {
+          mark(NetworkLightState.NEARBY_READY, timeline)
+        }
+        return successOutcome(result, timeline, cues, waits, attempts)
+      }
+      if (attempts == 1 && isTransportFailure(result)) {
+        when (mode) {
+          QueryTriggerMode.BACKGROUND_PREFETCH -> mark(NetworkLightState.GREY_BREATHING, timeline)
+          QueryTriggerMode.DRIVER_ACTIVE -> {
+            mark(NetworkLightState.GREY_BREATHING, timeline)
+            cues += ZhHkTemplates.NETWORK_SLOW
+          }
+          QueryTriggerMode.B2_RESOLUTION, null -> Unit
+        }
+      }
+      val retryable = gradedRetries && attempts < NativeConfig.API_MAX_ATTEMPTS && isGradedFailure(result)
+      if (!retryable) {
+        return exhausted(result, mode, timeline, cues, waits, attempts)
+      }
+      sleepMs(NativeConfig.API_RETRY_INTERVAL_MS)
+      waits += NativeConfig.API_RETRY_INTERVAL_MS
+      attempts += 1
+      result = post(endpoint, payload)
+      if (result.httpStatus == HTTP_TOO_MANY) {
+        return exhausted(result, mode, timeline, cues, waits, attempts)
+      }
+      if (isConflict(result, conflictCue, silentConflict)) {
+        return conflictOutcome(result, timeline, cues, waits, attempts, conflictCue)
+      }
+    }
+  }
+
+  private fun finishRateLimit(
+    endpoint: String,
+    payload: Map<String, Any?>,
+    mode: QueryTriggerMode?,
+    readyOnSuccess: Boolean,
+    conflictCue: Boolean,
+    silentConflict: Boolean,
+    timeline: MutableList<NetworkLightState>,
+    cues: MutableList<String>,
+    waits: MutableList<Long>,
+    attempts: Int,
+  ): CallOutcome {
+    val waitMs = rateLimitWaitMs(lastRetryAfterSeconds)
+    sleepMs(waitMs)
+    waits += waitMs
+    val retry = post(endpoint, payload)
+    val totalAttempts = attempts + 1
+    if (isConflict(retry, conflictCue, silentConflict)) {
+      return conflictOutcome(retry, timeline, cues, waits, totalAttempts, conflictCue)
+    }
+    if (isOk(retry)) {
+      if (readyOnSuccess) {
+        mark(NetworkLightState.NEARBY_READY, timeline)
+      }
+      return successOutcome(retry, timeline, cues, waits, totalAttempts)
+    }
+    return exhausted(retry, mode, timeline, cues, waits, totalAttempts)
+  }
+
+  private fun exhausted(
+    result: TransportResult,
+    mode: QueryTriggerMode?,
+    timeline: MutableList<NetworkLightState>,
+    cues: MutableList<String>,
+    waits: MutableList<Long>,
+    attempts: Int,
+  ): CallOutcome {
+    mark(NetworkLightState.GREY_BREATHING, timeline)
+    if (mode == QueryTriggerMode.DRIVER_ACTIVE || mode == QueryTriggerMode.B2_RESOLUTION) {
+      cues += ZhHkTemplates.NETWORK_FAILED
+    }
+    return CallOutcome(
+      succeeded = false,
+      httpStatus = result.httpStatus,
+      finalLightState = currentLightState,
+      stateTimeline = timeline.toList(),
+      spokenCues = cues.toList(),
+      attempts = attempts,
+      waitIntervalsMs = waits.toList(),
+      response = sanitize(result.recommendResponse),
     )
   }
-}
 
-private data class CallMode(
-  val amberWhilePending: Boolean,
-  val announceSlow: Boolean,
-  val announceFailed: Boolean,
-  val readyOnSuccess: Boolean,
-  val gradedRetries: Boolean,
-)
-
-private class JsonObject(private val fields: Map<String, JsonValue>) {
-  fun string(key: String): String? {
-    val value = fields[key] ?: return null
-    return if (value is JsonString) value.value else null
+  private fun successOutcome(
+    result: TransportResult,
+    timeline: MutableList<NetworkLightState>,
+    cues: MutableList<String>,
+    waits: MutableList<Long>,
+    attempts: Int,
+  ): CallOutcome {
+    return CallOutcome(
+      succeeded = true,
+      httpStatus = result.httpStatus,
+      finalLightState = currentLightState,
+      stateTimeline = timeline.toList(),
+      spokenCues = cues.toList(),
+      attempts = attempts,
+      waitIntervalsMs = waits.toList(),
+      response = sanitize(result.recommendResponse),
+    )
   }
 
-  fun boolean(key: String): Boolean? {
-    val value = fields[key] ?: return null
-    return if (value is JsonBool) value.value else null
+  private fun conflictOutcome(
+    result: TransportResult,
+    timeline: MutableList<NetworkLightState>,
+    cues: MutableList<String>,
+    waits: MutableList<Long>,
+    attempts: Int,
+    conflictCue: Boolean,
+  ): CallOutcome {
+    return CallOutcome(
+      succeeded = false,
+      httpStatus = result.httpStatus,
+      finalLightState = currentLightState,
+      stateTimeline = timeline.toList(),
+      spokenCues = cues.toList(),
+      attempts = attempts,
+      waitIntervalsMs = waits.toList(),
+      actionSpokenCue = if (conflictCue) result.spokenCue else null,
+    )
   }
 
-  fun int(key: String): Int? = long(key)?.toInt()
-
-  fun long(key: String): Long? {
-    val value = fields[key] ?: return null
-    return when (value) {
-      is JsonNumber -> value.raw.toLong()
-      is JsonString -> value.value.toLongOrNull()
-      else -> null
-    }
+  private fun abandoned(): CallOutcome {
+    return CallOutcome(
+      succeeded = false,
+      httpStatus = null,
+      finalLightState = currentLightState,
+      stateTimeline = emptyList(),
+      spokenCues = emptyList(),
+      attempts = 0,
+      waitIntervalsMs = emptyList(),
+    )
   }
 
-  fun array(key: String): List<JsonObject> {
-    val value = fields[key] as? JsonArray ?: return emptyList()
-    return value.items.mapNotNull { item ->
-      if (item is JsonObjectValue) JsonObject(item.fields) else null
-    }
-  }
-}
-
-private sealed interface JsonValue
-private data class JsonString(val value: String) : JsonValue
-private data class JsonNumber(val raw: Double) : JsonValue
-private data class JsonBool(val value: Boolean) : JsonValue
-private data object JsonNull : JsonValue
-private data class JsonObjectValue(val fields: Map<String, JsonValue>) : JsonValue
-private data class JsonArray(val items: List<JsonValue>) : JsonValue
-
-private fun parseObject(body: String): JsonObject {
-  if (body.isBlank()) {
-    return JsonObject(emptyMap())
-  }
-  val value = JsonReader(body).parseValue()
-  val fields = (value as? JsonObjectValue)?.fields ?: emptyMap()
-  return JsonObject(fields)
-}
-
-private class JsonReader(private val source: String) {
-  private var index = 0
-
-  fun parseValue(): JsonValue {
-    skip()
-    if (index >= source.length) {
-      return JsonNull
-    }
-    return when (source[index]) {
-      '{' -> readObject()
-      '[' -> readArray()
-      '"' -> JsonString(readString())
-      't' -> literal("true", JsonBool(true))
-      'f' -> literal("false", JsonBool(false))
-      'n' -> literal("null", JsonNull)
-      else -> readNumber()
-    }
+  private fun post(endpoint: String, payload: Map<String, Any?>): TransportResult {
+    val result = transport.post(endpoint, defaultHeaders(), payload, NativeConfig.API_TIMEOUT_MS)
+    lastRetryAfterSeconds = result.retryAfterSeconds
+    return result
   }
 
-  private fun readObject(): JsonValue {
-    index++
-    val fields = linkedMapOf<String, JsonValue>()
-    skip()
-    if (peek('}')) {
-      index++
-      return JsonObjectValue(fields)
+  private var lastRetryAfterSeconds: Long? = null
+
+  private fun rateLimitWaitMs(retryAfterSeconds: Long?): Long {
+    if (retryAfterSeconds != null && retryAfterSeconds > 0L) {
+      return minOf(retryAfterSeconds * 1000L, NativeConfig.RATE_LIMIT_MAX_WAIT_MS)
     }
-    while (index < source.length) {
-      skip()
-      val key = readString()
-      skip()
-      if (peek(':')) {
-        index++
-      }
-      fields[key] = parseValue()
-      skip()
-      when {
-        peek(',') -> index++
-        peek('}') -> {
-          index++
-          return JsonObjectValue(fields)
-        }
-        else -> return JsonObjectValue(fields)
-      }
-    }
-    return JsonObjectValue(fields)
+    return NativeConfig.RATE_LIMIT_RETRY_DELAY_MS
   }
 
-  private fun readArray(): JsonValue {
-    index++
-    val items = mutableListOf<JsonValue>()
-    skip()
-    if (peek(']')) {
-      index++
-      return JsonArray(items)
-    }
-    while (index < source.length) {
-      items += parseValue()
-      skip()
-      when {
-        peek(',') -> index++
-        peek(']') -> {
-          index++
-          return JsonArray(items)
-        }
-        else -> return JsonArray(items)
-      }
-    }
-    return JsonArray(items)
+  private fun mark(state: NetworkLightState, timeline: MutableList<NetworkLightState>) {
+    currentLightState = state
+    timeline += state
   }
 
-  private fun readString(): String {
-    if (peek('"')) {
-      index++
-    }
-    val out = StringBuilder()
-    while (index < source.length) {
-      val ch = source[index++]
-      when (ch) {
-        '"' -> return out.toString()
-        '\\' -> {
-          if (index >= source.length) {
-            return out.toString()
-          }
-          when (val esc = source[index++]) {
-            '"', '\\', '/' -> out.append(esc)
-            'b' -> out.append('\b')
-            'f' -> out.append('\u000C')
-            'n' -> out.append('\n')
-            'r' -> out.append('\r')
-            't' -> out.append('\t')
-            'u' -> {
-              val hex = source.substring(index, minOf(index + 4, source.length))
-              index += hex.length
-              out.append(hex.toIntOrNull(16)?.toChar() ?: '?')
-            }
-            else -> out.append(esc)
-          }
-        }
-        else -> out.append(ch)
-      }
-    }
-    return out.toString()
+  private fun recommendPayload(request: RecommendRequest): Map<String, Any?> {
+    return mapOf(
+      "session_id" to request.sessionId,
+      "origin_lat" to request.originLat,
+      "origin_lng" to request.originLng,
+      "dest_lat" to request.destLat,
+      "dest_lng" to request.destLng,
+      "dest_name" to request.destName,
+      "preference" to request.preference,
+      "expand_scarcity" to request.expandScarcity,
+      "speech_locale" to request.speechLocale,
+    )
   }
 
-  private fun readNumber(): JsonValue {
-    val start = index
-    if (peek('-')) {
-      index++
+  private fun sanitize(response: RecommendResponse?): RecommendResponse? {
+    if (response == null) {
+      return null
     }
-    while (index < source.length && source[index].isDigit()) {
-      index++
-    }
-    if (peek('.')) {
-      index++
-      while (index < source.length && source[index].isDigit()) {
-        index++
-      }
-    }
-    return JsonNumber(source.substring(start, index).toDoubleOrNull() ?: 0.0)
+    return response.copy(cards = response.sanitizedCards())
   }
 
-  private fun literal(token: String, value: JsonValue): JsonValue {
-    index += token.length
-    return value
+  private fun isOk(result: TransportResult): Boolean {
+    return result.httpStatus == HTTP_OK && !result.timedOut && !result.networkError
   }
 
-  private fun skip() {
-    while (index < source.length && source[index].isWhitespace()) {
-      index++
-    }
+  private fun isTransportFailure(result: TransportResult): Boolean {
+    return result.timedOut || result.networkError
   }
 
-  private fun peek(expected: Char): Boolean {
-    return index < source.length && source[index] == expected
+  private fun isGradedFailure(result: TransportResult): Boolean {
+    return isTransportFailure(result) || result.httpStatus >= HTTP_SERVER_ERROR
+  }
+
+  private fun isConflict(result: TransportResult, conflictCue: Boolean, silentConflict: Boolean): Boolean {
+    return result.httpStatus == HTTP_CONFLICT && (conflictCue || silentConflict)
+  }
+
+  companion object {
+    const val HEADER_API_KEY = "X-Internal-API-Key"
+    const val INTERNAL_API_KEY = "<INTERNAL_API_KEY>"
+    const val HEADER_CONTENT_TYPE = "Content-Type"
+    const val JSON_CONTENT_TYPE = "application/json"
+    const val RECOMMEND = "/v1/recommend-and-route"
+    const val COMMIT = "/v1/session/commit"
+    const val RELEASE = "/v1/session/release"
+    const val SYNC = "/v1/sync/outbox"
+    const val CROWD = "/v1/feedback/crowd-report"
+    const val TRIP = "/v1/feedback/trip-report"
+    val ENDPOINTS = listOf(RECOMMEND, COMMIT, RELEASE, SYNC, CROWD, TRIP)
+    private const val PARKED_CONFIRMED = "PARKED_CONFIRMED"
+    private const val DRIVER_CONFIRMED = "DRIVER_CONFIRMED"
+    private const val HTTP_OK = 200
+    private const val HTTP_CONFLICT = 409
+    private const val HTTP_TOO_MANY = 429
+    private const val HTTP_SERVER_ERROR = 500
   }
 }
 
-private fun jsonString(value: String): String {
-  val escaped = buildString {
-    value.forEach { ch ->
-      when (ch) {
-        '\\' -> append("\\\\")
-        '"' -> append("\\\"")
-        '\n' -> append("\\n")
-        '\r' -> append("\\r")
-        '\t' -> append("\\t")
-        else -> append(ch)
-      }
-    }
-  }
-  return "\"$escaped\""
-}
-
-private fun obj(vararg fields: Pair<String, String>): String {
-  return fields.joinToString(prefix = "{", postfix = "}") { (key, value) ->
-    "\"$key\":$value"
-  }
-}
-
-private fun obj(fields: Map<String, String>): String {
-  return fields.entries.joinToString(prefix = "{", postfix = "}") { (key, value) ->
-    "\"$key\":$value"
-  }
-}
+private const val METER_TYPE = "METER"
+private const val SOURCE_DEGRADED = "degraded"
+private const val UNKNOWN_VACANCIES = -1
