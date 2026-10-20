@@ -36,7 +36,7 @@
 
 - [ ] W-A.1 懸浮膠囊＋狀態機 — commit: 
 - [ ] W-A.2 Maps 接盤與分享跳板 — commit: 
-- [ ] W-A.3 本機字典樹與常數檔 — commit: 
+- [ ] W-A.3 本機字典樹與常數檔 — 常數檔已落地（Step 1.1）；字典樹未做 — commit: 32e2a48
 - [ ] W-A.15 session_id 生命週期 — commit: 
 - [ ] W-A.16 FGS 啟動握手 — commit: 
 - [ ] W-A.4 軟件距離追蹤 — commit: 
@@ -47,7 +47,7 @@
 
 ### 19.3 Phase 2 — 行車交互精細化與香港特色場景（第 6–10 步）
 
-- [ ] W-A.6 偏好三段開關 — commit: 
+- [x] W-A.6 偏好三段開關 — commit: 32e2a48
 - [ ] W-A.7 語音優先口播出卡 — commit: 
 - [ ] W-A.8 倒車雷達避讓 — commit: 
 - [ ] W-A.9 熄匙無痕銷毀 — commit: 
@@ -85,7 +85,7 @@
 
 | MVP 步驟 | 範圍（摘自 `.ai/HANDOFF.md`） | 任務編號 |
 |---|---|---|
-| Step 1 | 雙層骨架＋FGS 握手＋P 膠囊燈號＋`sim/` 殼與 fixtures＋`ApiClient` 分級重試＋三種行程語音模式與能力檢查＋粵語 TTS 口播首選 | 由 Gemini 指定 |
+| Step 1 | 雙層骨架＋FGS 握手＋P 膠囊燈號＋`sim/` 殼與 fixtures＋`ApiClient` 分級重試＋三種行程語音模式與能力檢查＋粵語 TTS 口播首選 | Step 1.1：W-A.6；W-A.3 常數檔 |
 | Step 2 | 語音追問閉環＋`FloatingCardView` 追問出卡＋手動模式卡片按鈕＋Intent 喚醒 Google Maps 導航 | 由 Gemini 指定 |
 | Step 3 | `LocalPoiTrie.kt` 本地字典樹＋Google Maps 分享接盤＋`DistanceTracker.kt` 到場雙態＋Flutter 今日行程 | 由 Gemini 指定 |
 

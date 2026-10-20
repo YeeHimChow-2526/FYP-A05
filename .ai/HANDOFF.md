@@ -1,5 +1,5 @@
 請先讀取以下規格作為全局唯一真理源（衝突時以實作版為準）：
-- 《[v2.9.1 實作版] 香港泊車語音副駕 — 系統架構與業務落地方案》：（實作版網址）
+- 《[v2.9.1 實作版] 香港泊車語音副駕 — 系統架構與業務落地方案》：https://docs.google.com/document/d/1wzfVsSobPfCQW-TNcLnRmy9LsEB5KdUSbaUJwOfeEPo/edit?usp=sharing
 - 《[v2.9.1 AI 全局知識] 開發 Agent 總綱》：專案內 `.ai/ARCHITECTURE.md`
 - 客戶端：專案根目錄 `AGENTS.md` + `docs/specs/01–04` + `docs/testing/01_test_plan.md`
 - 進度：`.ai/PROGRESS.md`
