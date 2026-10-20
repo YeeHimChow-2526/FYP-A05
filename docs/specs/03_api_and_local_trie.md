@@ -6,7 +6,8 @@
 
 - `X-Internal-API-Key: <INTERNAL_API_KEY>`（APK 內打包，只作基本識別）
 - `Content-Type: application/json`
-- 入口限流由 Cloud Armor 處理；客戶端遇 429／逾時走分級重試。
+- 入口限流由 Cloud Armor 處理；客戶端遇逾時／5xx 走分級重試（§4）。
+- **429（Cloud Armor 超限）單獨處理，唔即時重試、唔計入分級重試**：回應帶 `Retry-After`（秒）即等候該秒數（上限 `RATE_LIMIT_MAX_WAIT_MS`）；冇 `Retry-After` 即等候 `RATE_LIMIT_RETRY_DELAY_MS`；之後**只重試一次**。該次仍失敗（再 429、逾時或其他錯誤）→ 膠囊 `GREY_BREATHING`，同網絡失敗分支，等司機拍膠囊重試；口播沿用 GREY 分支，唔另加句子。
 
 ## 2. 客戶端需要嘅端點
 
@@ -90,6 +91,7 @@
 | 1km 背景自動查詢 | 靜默重試；`GREY_BREATHING`；**不口播**、唔用 ALERT；3 次皆敗則停自動重試，等下一觸發／司機要求 |
 | 司機主動要求泊車 | 逾時口播「網絡有啲慢，我再試吓」＋ GREY；仍敗「網絡唔順，遲啲再試」（一次）；維持 GREY 至成功／結束 |
 | B-2 背景解析 | 同一公式；網絡敗 → GREY＋上述失敗句；拍膠囊重試 |
+| 任何請求遇 429 | 單獨處理（見 §1）：等候 `Retry-After`（上限 `RATE_LIMIT_MAX_WAIT_MS`）或 `RATE_LIMIT_RETRY_DELAY_MS` 後只重試一次；仍敗 → GREY，拍膠囊重試 |
 
 成功則轉 `NEARBY_READY` pip。**絕不盲猜**無空位車場。
 

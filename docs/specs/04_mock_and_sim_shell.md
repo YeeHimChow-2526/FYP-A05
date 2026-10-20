@@ -4,7 +4,17 @@
 
 ## 1. 原則
 
-- 模擬殼位於原生 `android/app/src/main/kotlin/com/hkparking/copilot/sim/`，**只限 debug 建置**（release 建置不編入）。
+- 模擬殼位於原生 debug source set `android/app/src/debug/kotlin/com/hkparking/copilot/sim/`，**只限 debug 建置**（Android 只將 `src/debug` 編入 debug 建置，release APK 不含任何 sim 代碼）。
+- 介面 `VoiceInput`、`LocationSource`、`ApiTransport` 位於 `src/main`；`src/main` 代碼只引用 `di/Bindings.kt`（debug／release 各一份，見 §4），無執行期旗標。
+
+```
+android/app/src/
+  main/kotlin/com/hkparking/copilot/                   # 介面 VoiceInput／LocationSource／ApiTransport；只引用 Bindings
+  debug/kotlin/com/hkparking/copilot/sim/              # SimVoiceInput、SimLocationSource、FixtureApiTransport、SimEventReceiver、虛擬搖桿
+  debug/kotlin/com/hkparking/copilot/di/Bindings.kt    # 綁 sim 實作
+  debug/assets/mock/*.json                             # fixtures（§2）
+  release/kotlin/com/hkparking/copilot/di/Bindings.kt  # 綁 SttVoiceInput、FusedLocationSource、HttpApiTransport
+```
 - 生產路徑乾淨：`FloatingBubbleService.kt`／`TripStateMachine.kt` 唔塞 TODO、唔散落 mock 註解。
 - 跨層依賴用 Kotlin 介面：`VoiceInput`、`LocationSource`、`ApiTransport`；生產實作綁 SttService／FusedLocation／真 HTTP；sim 實作注入假數據。
 - 註解標記 `// MOCK:` 或 `// SIM:` **只准**出現喺 `sim/` 與 `mock/` 之下。
@@ -12,8 +22,10 @@
 
 ## 2. `mock/` — JSON fixtures
 
+位置：`android/app/src/debug/assets/mock/*.json`（debug 專用 assets，只編入 debug 建置；release APK 不含任何 mock 檔案）。`FixtureApiTransport` 經 `AssetManager` 以路徑 `mock/<name>.json` 讀取。
+
 ```
-mock/
+android/app/src/debug/assets/mock/
   recommend_success_langham.json
   recommend_scarcity_await_reply.json
   recommend_empty_expand.json
@@ -21,6 +33,7 @@ mock/
   recommend_crowd_yellow_flag.json # ≥2 來源：排序封頂＋「近期有司機回報疑似霸位，請留意現場」
   recommend_meter_stale.json      # 咪錶卡 is_stale=true、vacancies=-1、spoken_cue 保守講法
   recommend_source_degraded.json  # source_status=degraded；室內場照常、咪錶不報數字
+  recommend_rate_limited_429.json # HTTP 429（Cloud Armor 超限；可選 Retry-After header）
   commit_lock_full_409.json       # 409 LOCK_FULL
   commit_ok.json
   release_parked_confirmed.json   # reason = PARKED_CONFIRMED
@@ -36,11 +49,11 @@ mock/
   recommend_speech_locale_fallback.json # 不支援之 speech_locale → 回退 zh-HK、speech_locale_fallback = true
 ```
 
-`ApiTransport` 之 sim 實作讀 `mock/*.json`，**唔打**雲端；重試／GREY／口播邏輯仍走同一 `TripStateMachine`（用假延遲模擬 2.5s 逾時）。sim 只經 debug 建置之依賴注入啟用，生產無旗標開關。
+`ApiTransport` 之 sim 實作 `FixtureApiTransport` 經 `AssetManager` 讀 `mock/<name>.json`，**唔打**雲端；重試／GREY／口播邏輯仍走同一 `TripStateMachine`（用假延遲模擬 2.5s 逾時）。sim 只經 debug 版 `di/Bindings.kt` 綁定啟用（見 §4），無執行期旗標。
 
 ## 3. 虛擬搖桿與注入事件（debug 建置）
 
-debug 建置提供虛擬搖桿 overlay／adb broadcast 注入事件：
+debug 建置提供虛擬搖桿 overlay／adb broadcast 注入事件（指令格式見 §3.1；接收器見 §3.2）：
 
 | 事件 | 用途 |
 |------|------|
@@ -69,8 +82,26 @@ debug 建置提供虛擬搖桿 overlay／adb broadcast 注入事件：
 | `TRIE_MISS_RESOLVE_OK` / `TRIE_MISS_NETWORK_FAIL` / `TRIE_MISS_AMBIGUOUS` | B-2 背景解析三結果 |
 | `GPS_BAD_ACCURACY` | 現場即泊精度 >100m 失敗支 |
 | `FORCE_STALE` / `FORCE_DEGRADED` | 下一次 recommend 回對應 fixture |
+| `FORCE_RATE_LIMIT` | 下一次 recommend 回 429 fixture（`recommend_rate_limited_429.json`）；`value` = 2 → 首次嘗試及單次重試皆回 429 |
 | `FORCE_LOCK_FULL` | 下一次 commit 回 409 LOCK_FULL |
 | `FORCE_LOW_WATERMARK` / `FORCE_CROWD_FLAG` | 下一次 recommend 回低水位／黃旗 fixture |
+
+### 3.1 注入指令格式（adb broadcast）
+
+- Action：`com.hkparking.copilot.SIM_EVENT`
+- 字串 extra `event`：上表事件名（例如 `SET_DISTANCE_M`）。
+- 可選 extra `value`：整數用 `--ei`；文字（例如 `INJECT_UTTERANCE` 之句子）用 `--es`。
+
+```bash
+adb shell am broadcast -a com.hkparking.copilot.SIM_EVENT -p com.hkparking.copilot --es event SET_DISTANCE_M --ei value 150
+adb shell am broadcast -a com.hkparking.copilot.SIM_EVENT -p com.hkparking.copilot --es event INJECT_UTTERANCE --es value "好"
+```
+
+### 3.2 接收器 `sim/SimEventReceiver.kt`
+
+- 位於 `android/app/src/debug/kotlin/com/hkparking/copilot/sim/SimEventReceiver.kt`，只喺 debug 建置於執行期以 `ContextCompat.registerReceiver(context, receiver, IntentFilter("com.hkparking.copilot.SIM_EVENT"), ContextCompat.RECEIVER_EXPORTED)` 註冊（minSdk 33 動態註冊接收器須明確指定匯出旗標；adb 屬 App 外來源，故用 `RECEIVER_EXPORTED`）。
+- 虛擬搖桿 overlay 喺 App 內部發送同一 action，兩條路徑共用同一處理函式。
+- 未知事件或 `value` 格式錯誤 → 記 log 並忽略。
 
 ## 4. 介面注入模式（Kotlin）
 
@@ -92,6 +123,13 @@ interface ApiTransport {
 // release：SttVoiceInput + FusedLocationSource + HttpApiTransport
 // debug sim/：SimVoiceInput + SimLocationSource（搖桿／GPX 寫入）+ FixtureApiTransport
 ```
+
+**綁定（`di/Bindings.kt`）**：同名檔 `di/Bindings.kt`（`object Bindings`，兩份 API 相同）分別位於：
+
+- `android/app/src/debug/kotlin/com/hkparking/copilot/di/Bindings.kt` → 綁 `SimVoiceInput`、`SimLocationSource`、`FixtureApiTransport`
+- `android/app/src/release/kotlin/com/hkparking/copilot/di/Bindings.kt` → 綁 `SttVoiceInput`、`FusedLocationSource`、`HttpApiTransport`
+
+`src/main` 代碼只引用 `Bindings`，由建置類型決定編入邊一份；無執行期旗標。
 
 ## 5. 測試策略（W-A.18）
 
@@ -142,6 +180,7 @@ interface ApiTransport {
 - [ ] `FORCE_CROWD_FLAG` → 照播黃旗句、選項仍保留
 - [ ] `FORCE_STALE`／`FORCE_DEGRADED` → 咪錶卡「咪錶資料暫時未更新」、無數字；室內場照常
 - [ ] `FORCE_LOCK_FULL` → 播 409 spoken_cue，膠囊唔轉 ALERT，可講「有冇第二個」
+- [ ] `FORCE_RATE_LIMIT` → 等候（`Retry-After` 上限 `RATE_LIMIT_MAX_WAIT_MS`，或 `RATE_LIMIT_RETRY_DELAY_MS`）後只重試一次；`value` 2（第二次亦 429）→ GREY＋拍膠囊重試；全程冇即時重試迴圈
 
 ## 7. 五階段客戶端路線圖（摘要）
 

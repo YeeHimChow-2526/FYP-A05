@@ -61,7 +61,7 @@ title: "[v2.9.1 AI 全局知識] 香港泊車語音副駕 — 開發 Agent 總�
 25. B-1 路徑 1A（Hey Google／App Actions 冷態入口）屬實驗性能力，只於驗證通過後啟用，不列入必要交付；B-1 路徑 1B 屬必要交付。
 26. `RECORD_AUDIO` 只屬全語音模式之必要權限；播報＋手動／純手動模式不以 RECORD_AUDIO 作開程條件、不升級 microphone 類型。
 27. 系統「大概位置」視為未授權精確位置。
-28. 原生 `sim/` 只限 debug 建置；`// MOCK:`／`// SIM:` 註解只准出現於 `sim/` 與 `mock/`；生產路徑不留 TODO。
+28. 原生 `sim/` 只限 debug 建置，位於 debug source set `android/app/src/debug/kotlin/com/hkparking/copilot/sim/`，fixtures 位於 `android/app/src/debug/assets/mock/`；`src/main` 只引用 `di/Bindings.kt`（debug／release 各一份），無執行期旗標；`// MOCK:`／`// SIM:` 註解只准出現於 `sim/` 與 `mock/`；生產路徑不留 TODO。
 29. MethodChannel／REST 欄位變更先回寫實作版，再同步客戶端資料包與本文件。
 
 # 2. 產品定位與核心原則
@@ -82,7 +82,7 @@ title: "[v2.9.1 AI 全局知識] 香港泊車語音副駕 — 開發 Agent 總�
 | Pre-FGS | 無膠囊；只有 Heads-up 通知 | FGS 未啟動 | 藍牙 ACL 連線（A-1）、Maps 導航偵測（A-3）只發通知 | 預備區 JIT 預取、APPROACH_RADIUS_M 追蹤、到場判定、ALERT 出發判定全部停用；司機點擊合法入口並通過權限檢查才啟動 FGS |
 | CRUISING＝GREY_STEADY | 灰穩態（不呼吸） | 巡航待命 | 收到 FGS_STARTED 後繪出膠囊；首選口播無回應且未有空位數據 | 進入預備區（TRIGGER_DISTANCE_M）或啟動當下已 ≤ TRIGGER_DISTANCE_M 即時觸發 JIT |
 | AMBER_STEADY | 琥珀穩態（不呼吸） | 數據未齊 | 背景 JIT 查詢進行中且未取得完整空位；B-2 Trie Miss 背景解析中 | 成功 → NEARBY_READY 或設定終點；逾時 → GREY_BREATHING |
-| GREY_BREATHING | 灰呼吸 | 網絡有問題（系統端） | 任何請求逾時（API_TIMEOUT_MS）：背景 JIT、司機主動要求、B-2 背景解析 | 自動重試合共 API_MAX_ATTEMPTS 次、間隔 API_RETRY_INTERVAL_MS（總耗時公式見 NativeConfig.kt 註解，口播耗時另計）；之後停止自動重試，等待下一個查詢觸發或司機要求；維持至請求成功、App／FGS 結束或行程結束 |
+| GREY_BREATHING | 灰呼吸 | 網絡有問題（系統端） | 任何請求逾時（API_TIMEOUT_MS）：背景 JIT、司機主動要求、B-2 背景解析；HTTP 429 等候後單次重試仍失敗（RATE_LIMIT_RETRY_DELAY_MS／RATE_LIMIT_MAX_WAIT_MS，§10.1） | 自動重試合共 API_MAX_ATTEMPTS 次、間隔 API_RETRY_INTERVAL_MS（總耗時公式見 NativeConfig.kt 註解，口播耗時另計）；之後停止自動重試，等待下一個查詢觸發或司機要求；維持至請求成功、App／FGS 結束或行程結束 |
 | ALERT_BREATHING | 琥珀呼吸 | 需要司機回應終點 | 四項觸發（見 §3.2），只於 location FGS 運行中 | 每次觸發只口播一次；維持至設定終點或行程結束 |
 | NEARBY_READY | 綠／黃／紅穩態 Status Pip | 空位鬆緊（綠充足／黃緊湊／紅緊張已備後備） | JIT 成功 | 首選口播無回應即維持 pip，不追加口播 |
 | EXPANDED | 原生 FloatingCardView | 追問出卡（一次一張） | 「詳細啲」／「有冇第二個」（切換 CARD_PAGE_TRANSITION_MS）；STT 不可用時拍膠囊 | 保留至確認、「唔使／收埋」、手勢滑走或進入 NAV_TO_GATE／APPROACH_MUTED；不設自動收起計時 |
@@ -182,6 +182,8 @@ object NativeConfig {
   const val API_TIMEOUT_MS = 2500L                      // 單次請求逾時門檻
   const val API_MAX_ATTEMPTS = 3                        // 逾時重試總次數 (背景查詢靜默 + GREY_BREATHING；主動要求先口播「網絡有啲慢，我再試吓」，仍失敗「網絡唔順，遲啲再試」；GREY_BREATHING 持續至請求成功、App／FGS 結束或行程結束；背景查詢 3 次均失敗即停止自動重試，等待下一個觸發或司機要求)
   const val API_RETRY_INTERVAL_MS = 1000L               // 兩次嘗試之間的間隔（共 2 段間隔）
+  const val RATE_LIMIT_RETRY_DELAY_MS = 5000L           // HTTP 429（Cloud Armor 超限）且冇 Retry-After 時之等候時長；等候後只重試一次（429 唔計入上述分級重試、唔即時重試）
+  const val RATE_LIMIT_MAX_WAIT_MS = 10000L             // 429 回應 Retry-After（秒）之等候上限；單次重試仍失敗 → GREY_BREATHING，同網絡失敗分支，等司機拍膠囊重試
   // MVP：不設 outbox / DataStore / SQLite 通用離線同步；唯一本機保留項為今日行程待確認（網絡恢復自動送出；香港時間 00:00 清除）
   // 數據新鮮度：只讀伺服器回傳 data_age_seconds／is_stale／source_status；客戶端嚴禁以手機時鐘計算
 }
@@ -575,6 +577,7 @@ B-1 語句三支：
 - 雲端維持 min_instance = 0；冷啟動延遲由客戶端分級重試吸收；絕不盲猜無空位車場。
 - 背景自動查詢：查詢中 AMBER_STEADY；逾時靜默重試（API_MAX_ATTEMPTS、API_RETRY_INTERVAL_MS），膠囊 GREY_BREATHING，全程不口播、不用 ALERT_BREATHING；均失敗即停止自動重試，等待下一個查詢觸發或司機主動要求；成功轉 NEARBY_READY。
 - 司機主動要求（語音「泊車」／「搵位」或拍開膠囊）：逾時即口播「網絡有啲慢，我再試吓」並 GREY_BREATHING，依同一公式重試；仍失敗口播「網絡唔順，遲啲再試」（只一次），維持 GREY_BREATHING 直至請求成功、App／FGS 結束或行程結束（可再手動重試）。
+- HTTP 429（Cloud Armor 超限）：單獨處理、唔計入分級重試；等候 Retry-After（上限 RATE_LIMIT_MAX_WAIT_MS）或 RATE_LIMIT_RETRY_DELAY_MS 後只重試一次；仍失敗 → GREY_BREATHING，等司機拍膠囊重試（§10.1）。
 - 重發安全：推薦算分為唯讀請求；鎖定寫入以 session_id 為文件鍵（重複寫入只得一份），任何請求重發皆不造成重複副作用。
 
 ## 7.3 語音優先口播與追問出卡
@@ -708,7 +711,7 @@ S_i = W_dist * (1 - D_i / D_max) + W_vac * min((V_i - L_i) / 15, 1.0) + M_i - P_
 
 | 端點 | 回應 | 條件 | 客戶端處理 |
 |---|---|---|---|
-| 全部 | 429 | Cloud Armor 超限 | 實作版未另行規定（客戶端資料包 03 §1：走分級重試） |
+| 全部 | 429 | Cloud Armor 超限 | 唔即時重試、唔計入分級重試：回應帶 Retry-After（秒）即等候該秒數（上限 RATE_LIMIT_MAX_WAIT_MS），否則等候 RATE_LIMIT_RETRY_DELAY_MS，之後只重試一次；仍失敗（再 429、逾時或其他錯誤）→ GREY_BREATHING，同網絡失敗分支，司機拍膠囊重試；口播沿用 GREY 分支 |
 | /v1/session/commit | 409，status = "LOCK_FULL"，附誠實 spoken_cue | 同一 transaction 內有效剩餘 V_i − L_i ≤ 0（V_i = -1 未知時照常寫入） | 口播 spoken_cue；司機可講「有冇第二個」另選 |
 | /v1/feedback/trip-report | 404 | 未知 session_id | — |
 | /v1/feedback/trip-report | 409 | session 存在但未經司機確認（ratable = false，包括 PARKED_CONFIRMED 候選未確認、APPROACH_MUTED 或未到場） | 靜默處理、不口播 |
@@ -945,8 +948,14 @@ android/app/src/main/
     ├── net/ApiClient.kt # Cloud Run REST、API Key、分級重試（§7.2、§10）
     ├── poi/LocalPoiTrie.kt # 本機雙語字典樹（含行政大區標籤）（§9.8）
     ├── trip/TodayTripStore.kt # 今日行程候選與待確認本機保留（§7.5）
-    ├── NativeConfig.kt # 行車常數單一事實來源（§4.1）
-    └── sim/ # 只限 debug 建置之模擬殼（§18）
+    └── NativeConfig.kt # 行車常數單一事實來源（§4.1）
+android/app/src/debug/ # 只限 debug 建置（Android 只將 src/debug 編入 debug 建置）
+├── kotlin/com/hkparking/copilot/
+│   ├── sim/ # 模擬殼：SimVoiceInput、SimLocationSource、FixtureApiTransport、SimEventReceiver、虛擬搖桿（§18）
+│   └── di/Bindings.kt # object Bindings：綁 sim 實作（與 release 版 API 相同）
+└── assets/mock/*.json # fixtures（AssetManager 路徑 mock/<name>.json）
+android/app/src/release/
+└── kotlin/com/hkparking/copilot/di/Bindings.kt # object Bindings：綁 SttVoiceInput、FusedLocationSource、HttpApiTransport
 assets/
 └── hk_poi_master.json # 端雲共用 POI 靜態真理源（§9.8）
 lib/
@@ -1033,7 +1042,7 @@ server/
 
 ## 18.3 模擬器／真機分工
 
-- Android 模擬器：GPX 路線回放（車速、距離、GPS 斷訊）、網絡失敗、宿主機麥克風直通、TTS、Google Maps 分享 Intent、`adb emu power ac off` 模擬車充斷電；原生 sim/ 模擬殼（只限 debug：虛擬搖桿、fixtures、注入事件）重播場景。
+- Android 模擬器：GPX 路線回放（車速、距離、GPS 斷訊）、網絡失敗、宿主機麥克風直通、TTS、Google Maps 分享 Intent、`adb emu power ac off` 模擬車充斷電；原生 sim/ 模擬殼（只限 debug，位於 `android/app/src/debug/`：虛擬搖桿、fixtures、注入事件；adb 注入 action `com.hkparking.copilot.SIM_EVENT`）重播場景。
 - 只限真機：車載藍牙 ACL 斷開、OEM 背景殺程（Xiaomi／Samsung）、市區高樓 GPS 漂移、粵語 Hey Google（B-1 路徑 1A 實驗性驗證）、實際記憶體上限、離線粵語 STT／TTS 能力檢查、裝置端 STT 外部 PCM 注入、收音計時與防自我辨識。
 - 延遲：FgsBootstrapActivity 至 FGS_STARTED 之啟動延遲與粵語 STT 延遲一律真機實測；本機字典樹查表以 TRIE_LOOKUP_BUDGET_MS 為預設門檻。
 

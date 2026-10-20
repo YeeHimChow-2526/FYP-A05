@@ -57,7 +57,14 @@ android/app/src/main/
     poi/LocalPoiTrie.kt               # 本機字典樹由文字查出坐標 <150ms
     trip/TodayTripStore.kt            # 今日行程候選／待確認（SharedPreferences；HKT 00:00 清除）
     NativeConfig.kt                   # ★ 行車常數單一事實源
-    sim/                              # 只限 debug 建置：虛擬搖桿、fixtures、注入事件
+android/app/src/debug/                # 只限 debug 建置（Android 只將 src/debug 編入 debug 建置）
+  kotlin/com/hkparking/copilot/
+    sim/                              # 模擬殼：虛擬搖桿、SimEventReceiver（注入事件）、SimVoiceInput／SimLocationSource／FixtureApiTransport
+    di/Bindings.kt                    # object Bindings：綁 sim 實作（與 release 版 API 相同）
+  assets/mock/*.json                  # fixtures（AssetManager 路徑 mock/<name>.json）
+android/app/src/release/
+  kotlin/com/hkparking/copilot/
+    di/Bindings.kt                    # object Bindings：綁 SttVoiceInput／FusedLocationSource／HttpApiTransport
 assets/hk_poi_master.json
 lib/
   main.dart                           # App 入口 — 保持乾淨
@@ -83,7 +90,7 @@ lib/
 9. **NEVER** 網絡失敗顯示 `ALERT_BREATHING`——必須 `GREY_BREATHING`（**GREY_BREATHING > ALERT**）。
 10. **NEVER** 設通用離線同步／DataStore／Room／WorkManager／SQLite 補發佇列；release 離線即放棄（唯一本機保留項見 ALWAYS 6）。
 11. **NEVER** 喺業務碼 hardcode 距離／逾時／卡片尺寸——**MUST** 引用 `NativeConfig.kt`（App 畫面參數引用 `app_config.dart`）。
-12. **NEVER** 喺生產路徑留 TODO／`# bridge` 註解垃圾；`// MOCK:`／`// SIM:` **只准**喺原生 `sim/`（debug 建置）。
+12. **NEVER** 喺生產路徑留 TODO／`# bridge` 註解垃圾；`// MOCK:`／`// SIM:` **只准**喺原生 `sim/`（debug source set `android/app/src/debug/kotlin/com/hkparking/copilot/sim/`，只編入 debug 建置）。
 13. **NEVER** 將系統「**大概位置**」視為已授權（＝未授權精確位置；橫額「需要精確位置」）。
 14. **NEVER** B-1 無地名亦無現場講法時開 FGS／建 session；**NEVER** 現場即泊喺 GPS 差（>100m）時開程。
 15. **NEVER** 喺咪錶 `is_stale=true` 或 `source_status=degraded` 時顯示／讀出咪錶空位數字；**NEVER** 用本機時鐘推算新鮮度；**NEVER** 將虛擬鎖講成已預約車位。
@@ -99,7 +106,7 @@ lib/
 2. **ALWAYS** FGS 啟動握手：Activity 保持存在直至 Service 經 bound Service／同進程回呼回報 `FGS_STARTED` 先 `finish()`；`FGS_BOOTSTRAP_TIMEOUT_MS = 2000` 逾時照樣 `finish()` 並記錄原因；`MIC_READY` 為獨立訊號，麥克風失敗即**只停用語音輸入**（照常顯示膠囊；TTS 可用則照常口播）。
 3. **ALWAYS** 語音優先：只口播首選；追問先出原生卡；全卡方框盲撳；高度 `min(175dp, 0.4×螢幕高)`（`NativeConfig`）。
 4. **ALWAYS** 燈號優先次序：網絡問題 **`GREY_BREATHING` > `ALERT_BREATHING`**；全語音模式下凡需司機語音作答且 mic FGS 未升級：TTS 句尾加 **「請拍一拍膠囊答我」**（STT 不可用時不作此要求；拍膠囊顯示手動卡「下一個／確認／取消」）。
-5. **ALWAYS** `ApiClient.kt` 分級重試：**3×2.5s 逾時 + 2×1s 間隔 ≈ 9.5s**（口播耗時另計）；背景靜默／主動口播分流見 `03`。
+5. **ALWAYS** `ApiClient.kt` 分級重試：**3×2.5s 逾時 + 2×1s 間隔 ≈ 9.5s**（口播耗時另計）；背景靜默／主動口播分流見 `03`。HTTP 429 單獨處理：等候 `Retry-After`（上限 `RATE_LIMIT_MAX_WAIT_MS`）或 `RATE_LIMIT_RETRY_DELAY_MS` 後只重試一次，仍敗 → `GREY_BREATHING`＋拍膠囊重試（見 `03` §1）。
 6. **ALWAYS** 到場雙態：`APPROACH_MUTED`（只靜音主動口播、行程繼續、不釋放鎖）與 `PARKED_CONFIRMED`（目標場 150m 內或地庫斷訊＋熄匙 → 今日行程候選「可能已泊入 X」→ 在線送 release）。司機於今日行程一撳確認後伺服器先設 `ratable = true`；確認時離線即本機保留、網絡恢復自動送出、**HKT 00:00 清除**——此為唯一本機保留項。
 7. **ALWAYS** 六種起步或現場即泊成功開始即建新 `session_id`；其後 recommend／commit／release／sync／feedback 皆帶此 id；每次開程新 id、無心跳。
 8. **ALWAYS** 照播伺服器 `spoken_cue`：低水位（≤3 個有效空位）只點名一個後備；眾包 ≥2 來源黃旗「近期有司機回報疑似霸位，請留意現場」——客戶端唔自行拼句、唔自行排除選項。

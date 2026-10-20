@@ -89,6 +89,8 @@
 | Step 2 | 語音追問閉環＋`FloatingCardView` 追問出卡＋手動模式卡片按鈕＋Intent 喚醒 Google Maps 導航 | 由 Gemini 指定 |
 | Step 3 | `LocalPoiTrie.kt` 本地字典樹＋Google Maps 分享接盤＋`DistanceTracker.kt` 到場雙態＋Flutter 今日行程 | 由 Gemini 指定 |
 
+- [ ] Step 1 必做：原生 sim/ 模擬殼＋mock/*.json fixtures＋注入事件（屬 W-A.18；規格 docs/specs/04_mock_and_sim_shell.md），Step 1 完成前交付 — commit: 
+
 ## 待真機驗證
 
 模擬器只鎖死行為；以下項目必須真機驗收（步驟見 `docs/testing/01_test_plan.md`），通過後於相關任務標 `[x]` 並記裝置資料：
