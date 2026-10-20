@@ -1,0 +1,46 @@
+# 泊車副駕 v2.9.1 — repomix 打包時略過嘅雜訊
+
+# 建置與快取
+build/
+**/build/
+.dart_tool/
+.gradle/
+**/.gradle/
+.idea/
+*.iml
+
+# Flutter 預設平台腳手架（本專案只做 Android）
+ios/
+web/
+linux/
+macos/
+windows/
+android/gradle/
+android/gradlew
+android/gradlew.bat
+android/local.properties
+.metadata
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# 鎖檔與生成碼
+*.lock
+pubspec.lock
+*.g.dart
+*.freezed.dart
+
+# 二進位資源
+assets/*.png
+assets/*.jpg
+assets/*.jpeg
+assets/*.webp
+**/res/mipmap-*/
+*.png
+*.jpg
+*.apk
+*.aab
+*.jar
+
+# AI 協作臨時輸出
+.ai/LAST_RUN.md
+repomix-output*

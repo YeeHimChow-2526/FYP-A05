@@ -1,0 +1,56 @@
+# 泊車副駕 v2.9.1 — Flutter + 原生 Android
+
+# Flutter / Dart
+.dart_tool/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+build/
+coverage/
+
+# Android / Gradle
+.gradle/
+android/.gradle/
+android/app/build/
+android/app/debug/
+android/app/profile/
+android/app/release/
+android/local.properties
+local.properties
+android/captures/
+android/.cxx/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.keystore
+*.jks
+android/key.properties
+android/app/google-services.json
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# 環境與密鑰
+.env
+.env.*
+
+# AI 協作：每回合臨時檔（其餘 .ai/ 檔案照常入庫）
+.ai/TASK.md
+.ai/LAST_RUN.md
+
+# repomix 輸出
+repomix-output*
+repomix*.xml
+repomix*.md
