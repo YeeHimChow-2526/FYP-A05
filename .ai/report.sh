@@ -29,7 +29,7 @@ EXCLUDES=(
 )
 
 TEST_CMD="${1:-}"
-NOW="$(TZ=Asia/Hong_Kong date '+%Y-%m-%d %H:%M:%S HKT')"
+NOW="$(TZ=HKT-8 date '+%Y-%m-%d %H:%M:%S HKT')"
 BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '(未有 commit)')"
 LAST_COMMIT="$(git log -1 --oneline 2>/dev/null || echo '(未有 commit)')"
 
