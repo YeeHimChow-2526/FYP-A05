@@ -11,7 +11,7 @@ ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "report.sh：唔�
 cd "$ROOT" || exit 2
 mkdir -p .ai
 OUT=".ai/LAST_RUN.md"
-DIFF_CAP=150
+DIFF_CAP=999999
 FENCE='````'  # 四個反引號：內容（例如 .md diff）含 ``` 時都唔會斷開
 
 EXCLUDES=(
