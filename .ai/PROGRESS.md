@@ -34,10 +34,10 @@
 
 ### 19.2 Phase 1 — 垂直骨幹與端雲閉環（第 4–5 步）
 
-- [x] W-A.1 懸浮膠囊＋狀態機 — commit: 4ac4036, eaa4fc1
+- [x] W-A.1 懸浮膠囊＋狀態機 — commit: 4ac4036, eaa4fc1, e8f00f7
 - [ ] W-A.2 Maps 接盤與分享跳板 — commit: 
 - [ ] W-A.3 本機字典樹與常數檔 — 常數檔已落地（Step 1.1）；字典樹未做 — commit: 2fbf18b
-- [x] W-A.15 session_id 生命週期 — commit: 4ac4036
+- [x] W-A.15 session_id 生命週期 — commit: 4ac4036, e8f00f7
 - [x] W-A.16 FGS 啟動握手 — commit: a2017f5
 - [ ] W-A.4 軟件距離追蹤 — commit: 
 - [ ] W-A.5 在線即送 release — commit: 
