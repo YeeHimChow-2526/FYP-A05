@@ -148,6 +148,67 @@ class SimShellTest {
     Bindings.locationSource.reset()
   }
 
+  @Test
+  fun fileFixtureSuccessLanghamBecomesNearbyReady() {
+    val file = mockFixture(FixtureApiTransport.DEFAULT_FIXTURE)
+    assertTrue(file.isFile)
+    assertTrue(file.length() > 0L)
+    val transport = fileTransport()
+    val posted = runSuspend { transport.post(ApiClient.RECOMMEND, "{}") }
+    assertEquals(200, posted.statusCode)
+    assertTrue(posted.bodyJson.contains("CP_LANGHAM"))
+    assertTrue(posted.bodyJson.contains("\"speech_locale\": \"zh-HK\""))
+    val machine = startedMachine()
+    val outcome = runSuspend { ApiClient(transport, machine) { }.recommendAndRoute(sampleRequest()) }
+    assertTrue(outcome.succeeded)
+    assertEquals(TripState.NEARBY_READY, outcome.state)
+    assertEquals(TripState.NEARBY_READY, machine.state)
+  }
+
+  @Test
+  fun fileFixtureRateLimitRetriesOnceAndTurnsGrey() {
+    val file = mockFixture(FixtureApiTransport.RATE_LIMIT_FIXTURE)
+    assertTrue(file.isFile)
+    assertTrue(file.length() > 0L)
+    val machine = startedMachine()
+    val logs = mutableListOf<String>()
+    val receiver = SimEventReceiver(stateMachineProvider = { machine }, logger = { logs += it })
+    Bindings.apiTransport.reset()
+    assertTrue(receiver.dispatchEvent("FORCE_RATE_LIMIT", intValue = 5))
+    assertEquals(FixtureApiTransport.RATE_LIMIT_FIXTURE, Bindings.apiTransport.fixtureName)
+    val transport = fileTransport()
+    transport.forceRateLimit(enabled = true, retryAfterSeconds = 5)
+    val posted = runSuspend { transport.post(ApiClient.RECOMMEND, "{}") }
+    assertEquals(429, posted.statusCode)
+    assertTrue(posted.bodyJson.contains("RATE_LIMITED"))
+    assertTrue(posted.bodyJson.contains("429"))
+    val outcome = runSuspend { ApiClient(transport, machine) { }.recommendAndRoute(sampleRequest()) }
+    assertEquals(429, outcome.httpStatus)
+    assertEquals(2, outcome.attempts)
+    assertNotEquals(NativeConfig.API_MAX_ATTEMPTS, outcome.attempts)
+    assertEquals(TripState.GREY_BREATHING, outcome.state)
+    assertEquals(TripState.GREY_BREATHING, machine.state)
+    assertEquals(CapsuleLight.GREY_BREATHING, machine.capsuleLight)
+    Bindings.apiTransport.reset()
+  }
+
+  private fun fileTransport(): FixtureApiTransport {
+    return FixtureApiTransport { name ->
+      val file = mockFixture(name)
+      if (!file.isFile) null else file.readText()
+    }
+  }
+
+  private fun mockFixture(name: String): java.io.File {
+    val relative = java.io.File("src/debug/assets/mock/$name")
+    val candidates = listOf(
+      relative,
+      java.io.File("app/src/debug/assets/mock/$name"),
+      java.io.File("android/app/src/debug/assets/mock/$name"),
+    )
+    return candidates.firstOrNull { it.isFile } ?: relative
+  }
+
   private fun startedMachine(destinationName: String? = null): TripStateMachine {
     val machine = TripStateMachine()
     machine.requestStart(StartupEntry.A_2, destinationName = destinationName)
