@@ -42,9 +42,11 @@ class FloatingBubbleService : android.app.Service {
       entry = entry,
       recordAudioGranted = recordAudioGranted,
       hotwordEnabled = hotwordEnabled,
-      emitFgsStartedImmediately = false,
     )
-    if (!enterForeground()) return START_NOT_STICKY
+    if (!enterForeground()) {
+      onBootstrapTimedOut()
+      return START_NOT_STICKY
+    }
     reportFgsStarted()
     attachCapsuleWindow()
     return START_NOT_STICKY
@@ -75,15 +77,14 @@ class FloatingBubbleService : android.app.Service {
   var tripEndedReason: String? = null
     private set
   val micSessionEvents = mutableListOf<MicSessionEvent>()
-  val autoCardPopupShown: Boolean = false
   var manualCardVisible: Boolean = false
     private set
   var manualRetryRequested: Boolean = false
     private set
   var abandonedBySystemKill: Boolean = false
     private set
-  val autoRestartScheduled: Boolean = false
 
+  private var hasPendingFgsStart: Boolean = false
   private var pendingFgsStartedCallback: (() -> Unit)? = null
   private var pendingInitialDistanceMeters: Int? = null
 
@@ -97,7 +98,6 @@ class FloatingBubbleService : android.app.Service {
     recordAudioGranted: Boolean,
     hotwordEnabled: Boolean = true,
     initialDistanceMeters: Int? = null,
-    emitFgsStartedImmediately: Boolean = false,
     onFgsStarted: () -> Unit = {},
   ) {
     val initial = capabilityChecker.startupSnapshot(recordAudioGranted, hotwordEnabled, entry)
@@ -125,21 +125,30 @@ class FloatingBubbleService : android.app.Service {
         distanceToDestinationM = initialDistanceMeters,
       )
     }
+    hasPendingFgsStart = true
     pendingFgsStartedCallback = onFgsStarted
     pendingInitialDistanceMeters = initialDistanceMeters
-    if (emitFgsStartedImmediately) reportFgsStarted(initialDistanceMeters, onFgsStarted)
+  }
+
+  fun onBootstrapTimedOut() {
+    hasPendingFgsStart = false
+    pendingFgsStartedCallback = null
+    pendingInitialDistanceMeters = null
   }
 
   fun reportFgsStarted(initialDistanceMeters: Int? = null, onFgsStarted: () -> Unit = {}) {
+    if (!hasPendingFgsStart && !isFgsRunning) return
     val distance = initialDistanceMeters ?: pendingInitialDistanceMeters
+    val saved = pendingFgsStartedCallback
+    hasPendingFgsStart = false
+    pendingFgsStartedCallback = null
+    pendingInitialDistanceMeters = null
     isFgsRunning = true
     isCapsuleVisible = true
     abandonedBySystemKill = false
     tripStateMachine.applyVoiceCapability(capabilityChecker)
     tripStateMachine.onFgsStarted()
     if (distance != null && distance <= NativeConfig.TRIGGER_DISTANCE_M) immediateJitTriggered = true
-    val saved = pendingFgsStartedCallback
-    pendingFgsStartedCallback = null
     if (saved != null && saved !== onFgsStarted) saved.invoke()
     onFgsStarted()
     dispatchFgsStarted(this)

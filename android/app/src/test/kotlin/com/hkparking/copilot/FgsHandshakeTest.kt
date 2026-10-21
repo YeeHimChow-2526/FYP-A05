@@ -31,7 +31,6 @@ class FgsHandshakeTest {
     )
     assertFalse(coarse.allowedToStartFgs)
     assertEquals(listOf(StartupPermissionChecker.FINE_LOCATION), coarse.missingItems)
-    assertFalse(coarse.permissionDialogShown)
 
     val external = StartupPermissionChecker.checkBeforeStart(
       StartupEntry.B_2,
@@ -74,9 +73,9 @@ class FgsHandshakeTest {
     val started = FgsBootstrapActivity(degraded).launchFromEntry(
       StartupEntry.A_2,
       PermissionCheckInput(recordAudioGranted = false),
-      emitFgsStartedImmediately = true,
     )
     assertTrue(started)
+    degraded.reportFgsStarted()
     assertTrue(degraded.isFgsRunning)
     assertEquals(TripVoiceMode.ANNOUNCE_MANUAL, degraded.capabilityChecker.tripVoiceMode)
     assertEquals(VoiceCapabilityChecker.FGS_LOCATION, degraded.activeFgsType)
@@ -90,13 +89,11 @@ class FgsHandshakeTest {
       activity.launchFromEntry(
         StartupEntry.A_1,
         PermissionCheckInput(),
-        emitFgsStartedImmediately = false,
       ),
     )
     assertFalse(activity.isFinished)
     assertFalse(activity.fgsStartedReceived)
     assertFalse(service.isCapsuleVisible)
-    assertFalse(activity.usedFixedSleep)
     service.reportFgsStarted(initialDistanceMeters = NativeConfig.TRIGGER_DISTANCE_M)
     assertTrue(activity.fgsStartedReceived)
     assertTrue(activity.isFinished)
@@ -104,35 +101,58 @@ class FgsHandshakeTest {
     assertTrue(service.isFgsRunning)
     assertTrue(service.immediateJitTriggered)
 
-    val waiting = service()
-    val timed = FgsBootstrapActivity(waiting)
-    timed.launchFromEntry(StartupEntry.A_3, PermissionCheckInput(), startedAtMs = 0L, emitFgsStartedImmediately = false)
-    timed.onHandshakeTick(0L, NativeConfig.FGS_BOOTSTRAP_TIMEOUT_MS)
-    assertTrue(timed.bootstrapTimedOut)
-    assertEquals(FgsBootstrapActivity.FGS_BOOTSTRAP_TIMEOUT, timed.failureReason)
-    assertTrue(timed.isFinished)
-    assertFalse(waiting.isCapsuleVisible)
-
     val slow = service()
     val slowActivity = FgsBootstrapActivity(slow)
     assertTrue(
       slowActivity.launchFromEntry(
         StartupEntry.B_1,
         PermissionCheckInput(),
-        startedAtMs = 0L,
-        emitFgsStartedImmediately = true,
       ),
     )
+    slow.reportFgsStarted()
     assertTrue(slow.isFgsRunning)
     assertTrue(slowActivity.fgsStartedReceived)
     assertFalse(slow.capabilityChecker.downloadPromptRequested)
   }
 
   @Test
+  fun reportFgsStartedIgnoredWithoutPendingStart() {
+    val service = service()
+    service.reportFgsStarted()
+    assertFalse(service.isFgsRunning)
+    assertFalse(service.isCapsuleVisible)
+  }
+
+  @Test
+  fun fakeClockTimesOutAtBootstrapLimitAndDropsLateCallback() {
+    val now = longArrayOf(0L)
+    val service = service()
+    val activity = FgsBootstrapActivity(service) { now[0] }
+    assertTrue(activity.launchFromEntry(StartupEntry.A_3, PermissionCheckInput()))
+    now[0] = NativeConfig.FGS_BOOTSTRAP_TIMEOUT_MS - 1
+    activity.onHandshakeTick()
+    assertFalse(activity.isFinished)
+    assertFalse(activity.bootstrapTimedOut)
+    assertFalse(activity.fgsStartedReceived)
+    assertFalse(service.isCapsuleVisible)
+    assertFalse(service.isFgsRunning)
+    now[0] = NativeConfig.FGS_BOOTSTRAP_TIMEOUT_MS
+    activity.onHandshakeTick()
+    assertTrue(activity.bootstrapTimedOut)
+    assertEquals(FgsBootstrapActivity.FGS_BOOTSTRAP_TIMEOUT, activity.failureReason)
+    assertTrue(activity.isFinished)
+    service.reportFgsStarted()
+    assertFalse(activity.fgsStartedReceived)
+    assertFalse(service.isCapsuleVisible)
+    assertFalse(service.isFgsRunning)
+  }
+
+  @Test
   fun micReadyFailureDegradesWithoutStoppingFgsAndAudioFocusPausesMic() {
     val failed = service()
     failed.capabilityChecker.check(recordAudioGranted = true)
-    FgsBootstrapActivity(failed).launchFromEntry(StartupEntry.A_1, PermissionCheckInput(), emitFgsStartedImmediately = true)
+    FgsBootstrapActivity(failed).launchFromEntry(StartupEntry.A_1, PermissionCheckInput())
+    failed.reportFgsStarted()
     failed.reportMicReady(succeeded = false)
     assertTrue(failed.isFgsRunning)
     assertTrue(failed.isCapsuleVisible)
@@ -142,7 +162,8 @@ class FgsHandshakeTest {
 
     val live = service()
     live.capabilityChecker.check(recordAudioGranted = true)
-    FgsBootstrapActivity(live).launchFromEntry(StartupEntry.A_1, PermissionCheckInput(), emitFgsStartedImmediately = true)
+    FgsBootstrapActivity(live).launchFromEntry(StartupEntry.A_1, PermissionCheckInput())
+    live.reportFgsStarted()
     live.reportMicReady(succeeded = true)
     assertEquals(FloatingBubbleService.LISTENING, live.persistentNotificationText)
     assertEquals(VoiceCapabilityChecker.FGS_LOCATION_MIC, live.activeFgsType)
@@ -173,7 +194,7 @@ class FgsHandshakeTest {
     swap.delegate = HangProbe()
     val service = FloatingBubbleService(checker)
     val activity = FgsBootstrapActivity(service)
-    assertTrue(activity.launchFromEntry(StartupEntry.A_1, PermissionCheckInput(), emitFgsStartedImmediately = false))
+    assertTrue(activity.launchFromEntry(StartupEntry.A_1, PermissionCheckInput()))
     service.reportFgsStarted()
     assertTrue(activity.fgsStartedReceived)
     assertTrue(activity.isFinished)

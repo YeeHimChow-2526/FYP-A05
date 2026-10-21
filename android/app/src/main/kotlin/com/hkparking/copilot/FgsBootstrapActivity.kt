@@ -17,7 +17,6 @@ data class PermissionCheckInput(
 data class PermissionGateResult(
   val allowedToStartFgs: Boolean,
   val missingItems: List<String>,
-  val permissionDialogShown: Boolean = false,
   val activityFinished: Boolean = false,
   val repairNotificationText: String? = null,
   val redirectToPermissionBanner: Boolean = false,
@@ -56,16 +55,23 @@ object StartupPermissionChecker {
 
 class FgsBootstrapActivity : android.app.Activity {
   private val service: FloatingBubbleService?
+  private val clockMs: () -> Long
+  private var launchStartedAtMs: Long = 0L
   private var timeoutHandler: android.os.Handler? = null
   private var timeoutRunnable: Runnable? = null
   private var fgsStartedListener: ((FloatingBubbleService) -> Unit)? = null
 
   constructor() : super() {
     service = null
+    clockMs = { System.currentTimeMillis() }
   }
 
-  constructor(service: FloatingBubbleService) : super() {
+  constructor(
+    service: FloatingBubbleService,
+    clockMs: () -> Long = { System.currentTimeMillis() },
+  ) : super() {
     this.service = service
+    this.clockMs = clockMs
   }
 
   override fun onCreate(savedInstanceState: android.os.Bundle?) {
@@ -81,7 +87,8 @@ class FgsBootstrapActivity : android.app.Activity {
       finish()
       return
     }
-    val listener: (FloatingBubbleService) -> Unit = {
+    val listener: (FloatingBubbleService) -> Unit = listener@{
+      if (bootstrapTimedOut) return@listener
       timeoutRunnable?.let { runnable -> timeoutHandler?.removeCallbacks(runnable) }
       fgsStartedReceived = true
       isFinished = true
@@ -97,6 +104,7 @@ class FgsBootstrapActivity : android.app.Activity {
         bootstrapTimedOut = true
         failureReason = FGS_BOOTSTRAP_TIMEOUT
         isFinished = true
+        service?.onBootstrapTimedOut()
         clearHandshake()
         finish()
       }
@@ -123,16 +131,12 @@ class FgsBootstrapActivity : android.app.Activity {
     private set
   var lastPermissionGate: PermissionGateResult? = null
     private set
-  var usedFixedSleep: Boolean = false
-    private set
 
   fun launchFromEntry(
     entry: StartupEntry,
     permissions: PermissionCheckInput,
     hotwordEnabled: Boolean = true,
-    startedAtMs: Long = 0L,
     initialDistanceMeters: Int? = null,
-    emitFgsStartedImmediately: Boolean = false,
   ): Boolean {
     val gate = StartupPermissionChecker.checkBeforeStart(entry, permissions)
     lastPermissionGate = gate
@@ -143,26 +147,30 @@ class FgsBootstrapActivity : android.app.Activity {
     }
     isFinished = false
     val host = service ?: return false
+    launchStartedAtMs = clockMs()
     host.startInForeground(
       entry = entry,
       recordAudioGranted = permissions.recordAudioGranted,
       hotwordEnabled = hotwordEnabled,
       initialDistanceMeters = initialDistanceMeters,
-      emitFgsStartedImmediately = emitFgsStartedImmediately,
       onFgsStarted = {
-        fgsStartedReceived = true
-        isFinished = true
+        if (!bootstrapTimedOut) {
+          fgsStartedReceived = true
+          isFinished = true
+        }
       },
     )
     return true
   }
 
-  fun onHandshakeTick(startedAtMs: Long, nowMs: Long) {
+  fun onHandshakeTick() {
     if (fgsStartedReceived || lastPermissionGate?.allowedToStartFgs == false) return
-    if (nowMs - startedAtMs >= NativeConfig.FGS_BOOTSTRAP_TIMEOUT_MS) {
+    val elapsed = clockMs() - launchStartedAtMs
+    if (!fgsStartedReceived && elapsed >= NativeConfig.FGS_BOOTSTRAP_TIMEOUT_MS) {
       bootstrapTimedOut = true
       failureReason = FGS_BOOTSTRAP_TIMEOUT
       isFinished = true
+      service?.onBootstrapTimedOut()
     }
   }
 

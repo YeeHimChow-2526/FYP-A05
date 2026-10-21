@@ -338,7 +338,7 @@ class TripStateMachineTest {
     assertEquals(CapsuleLight.NONE, service.tripStateMachine.capsuleLight)
     assertFalse(service.isCapsuleVisible)
     assertFalse(service.isFgsRunning)
-    service.startInForeground(StartupEntry.A_2, recordAudioGranted = true, emitFgsStartedImmediately = false)
+    service.startInForeground(StartupEntry.A_2, recordAudioGranted = true)
     assertEquals(TripState.PRE_FGS, service.tripStateMachine.state)
     assertEquals(CapsuleLight.NONE, service.tripStateMachine.capsuleLight)
     assertNotEquals(TripState.GREY_BREATHING, service.tripStateMachine.state)
@@ -357,8 +357,6 @@ class TripStateMachineTest {
       activity.launchFromEntry(
         StartupEntry.A_1,
         PermissionCheckInput(),
-        startedAtMs = 0L,
-        emitFgsStartedImmediately = false,
       ),
     )
     assertFalse(service.isCapsuleVisible)
