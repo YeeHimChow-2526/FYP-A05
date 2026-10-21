@@ -34,7 +34,7 @@
 
 ### 19.2 Phase 1 — 垂直骨幹與端雲閉環（第 4–5 步）
 
-- [x] W-A.1 懸浮膠囊＋狀態機 — commit: 4ac4036, eaa4fc1, e8f00f7, a4b1944
+- [x] W-A.1 懸浮膠囊＋狀態機 — commit: 4ac4036, eaa4fc1, e8f00f7, a4b1944, 752de53
 - [ ] W-A.2 Maps 接盤與分享跳板 — commit: 
 - [ ] W-A.3 本機字典樹與常數檔 — 常數檔已落地（Step 1.1）；字典樹未做 — commit: 2fbf18b
 - [x] W-A.15 session_id 生命週期 — commit: 4ac4036, e8f00f7, a4b1944
@@ -56,7 +56,7 @@
 - [ ] W-A.14 麥克風 FGS 與權限 — commit: 
 - [x] W-A.19 語音能力檢查 — commit: a5da97e, 623c382
 - [ ] W-A.20 STT 開發前驗證 — commit: 
-- [x] W-A.21 指令碼與語言模板 — commit: a5da97e
+- [x] W-A.21 指令碼與語言模板 — commit: a5da97e, 752de53
 - [x] W-A.12 網絡分級重試 — commit: b73fff4, dfadd4f
 
 ### 19.4 Phase 3 — 商業激戰區強化、安全防禦與眾包反饋（第 11–13 步）
