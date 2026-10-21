@@ -72,6 +72,7 @@ class FgsHandshakeTest {
     val started = FgsBootstrapActivity(degraded).launchFromEntry(
       StartupEntry.A_2,
       PermissionCheckInput(recordAudioGranted = false),
+      emitFgsStartedImmediately = true,
     )
     assertTrue(started)
     assertTrue(degraded.isFgsRunning)
@@ -118,6 +119,7 @@ class FgsHandshakeTest {
         PermissionCheckInput(),
         startedAtMs = 0L,
         capabilityCheckElapsedMs = NativeConfig.VOICE_CAPABILITY_CHECK_TIMEOUT_MS,
+        emitFgsStartedImmediately = true,
       ),
     )
     assertTrue(slow.isFgsRunning)
@@ -128,7 +130,7 @@ class FgsHandshakeTest {
   @Test
   fun micReadyFailureDegradesWithoutStoppingFgsAndAudioFocusPausesMic() {
     val failed = service()
-    FgsBootstrapActivity(failed).launchFromEntry(StartupEntry.A_1, PermissionCheckInput())
+    FgsBootstrapActivity(failed).launchFromEntry(StartupEntry.A_1, PermissionCheckInput(), emitFgsStartedImmediately = true)
     failed.reportMicReady(succeeded = false)
     assertTrue(failed.isFgsRunning)
     assertTrue(failed.isCapsuleVisible)
@@ -137,7 +139,7 @@ class FgsHandshakeTest {
     assertEquals(MicSessionEvent(false, FloatingBubbleService.MIC_FAILED), failed.micSessionEvents.last())
 
     val live = service()
-    FgsBootstrapActivity(live).launchFromEntry(StartupEntry.A_1, PermissionCheckInput())
+    FgsBootstrapActivity(live).launchFromEntry(StartupEntry.A_1, PermissionCheckInput(), emitFgsStartedImmediately = true)
     live.reportMicReady(succeeded = true)
     assertEquals(FloatingBubbleService.LISTENING, live.persistentNotificationText)
     assertEquals(VoiceCapabilityChecker.FGS_LOCATION_MIC, live.activeFgsType)

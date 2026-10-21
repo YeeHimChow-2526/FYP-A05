@@ -75,7 +75,7 @@ class FgsBootstrapActivity(private val service: FloatingBubbleService) {
     startedAtMs: Long = 0L,
     capabilityCheckElapsedMs: Long = 0L,
     initialDistanceMeters: Int? = null,
-    emitFgsStartedImmediately: Boolean = true,
+    emitFgsStartedImmediately: Boolean = false,
   ): Boolean {
     val gate = StartupPermissionChecker.checkBeforeStart(entry, permissions)
     lastPermissionGate = gate
