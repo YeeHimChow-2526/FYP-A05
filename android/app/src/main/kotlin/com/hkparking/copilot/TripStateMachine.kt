@@ -1,5 +1,7 @@
 package com.hkparking.copilot
 
+import com.hkparking.copilot.voice.TripVoiceMode
+import com.hkparking.copilot.voice.VoiceCapabilityChecker
 import java.util.UUID
 
 enum class StartupEntry {
@@ -41,12 +43,6 @@ enum class StatusPip {
   RED,
 }
 
-enum class TripVoiceMode {
-  FULL_VOICE,
-  ANNOUNCE_MANUAL,
-  MANUAL,
-}
-
 enum class AlertCause {
   NO_DESTINATION,
   NAV_MID_CONFIDENCE,
@@ -84,9 +80,9 @@ class TripStateMachine(
     private set
   var jitRequested: Boolean = false
     private set
-  var voiceInputEnabled: Boolean = true
+  var voiceInputEnabled: Boolean = false
     private set
-  var tripVoiceMode: TripVoiceMode = TripVoiceMode.FULL_VOICE
+  var tripVoiceMode: TripVoiceMode = TripVoiceMode.MANUAL_ONLY
     private set
   var lastSpokenCue: String? = null
     private set
@@ -101,6 +97,11 @@ class TripStateMachine(
   private val spokenAlerts = mutableSetOf<AlertCause>()
   private var consecutiveHighSpeedS: Int = 0
   private var accumulatedDistanceM: Int = 0
+
+  fun applyVoiceCapability(checker: VoiceCapabilityChecker) {
+    tripVoiceMode = checker.tripVoiceMode
+    voiceInputEnabled = checker.voiceInputEnabled
+  }
 
   fun coldTapCapsule(): StartOutcome = rejected(null)
 
@@ -137,8 +138,7 @@ class TripStateMachine(
     alertSpeakCount = 0
     consecutiveHighSpeedS = 0
     accumulatedDistanceM = 0
-    voiceInputEnabled = true
-    tripVoiceMode = TripVoiceMode.FULL_VOICE
+    voiceInputEnabled = tripVoiceMode == TripVoiceMode.FULL_VOICE
     lastSpokenCue = null
     enter(TripState.PRE_FGS)
     return StartOutcome(
@@ -324,7 +324,7 @@ class TripStateMachine(
     tripVoiceMode = if (ttsAvailable) {
       TripVoiceMode.ANNOUNCE_MANUAL
     } else {
-      TripVoiceMode.MANUAL
+      TripVoiceMode.MANUAL_ONLY
     }
   }
 

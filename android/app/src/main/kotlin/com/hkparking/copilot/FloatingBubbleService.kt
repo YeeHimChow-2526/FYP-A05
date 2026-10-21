@@ -1,6 +1,6 @@
 package com.hkparking.copilot
 
-import com.hkparking.copilot.net.NetworkLightState
+import com.hkparking.copilot.voice.CapabilityStatus
 import com.hkparking.copilot.voice.LocaleProbe
 import com.hkparking.copilot.voice.SpeechCapabilityProbe
 import com.hkparking.copilot.voice.TripVoiceMode
@@ -8,24 +8,19 @@ import com.hkparking.copilot.voice.VoiceCapabilityChecker
 
 data class MicSessionEvent(val isActive: Boolean, val reason: String)
 
-enum class CapsuleRingLight { HIDDEN, GREY_STEADY, AMBER_STEADY, GREY_BREATHING, ALERT_BREATHING }
-
-enum class VacancyPip { NONE, GREEN, YELLOW, RED }
-
-enum class AlertTriggerReason {
-  SILENCE_DRIVE_NO_DEST,
-  MEDIUM_CONFIDENCE_NAV,
-  DESTINATION_NEEDS_CLARIFICATION,
-  USER_ACTION_NON_NETWORK_FAIL_NO_DEST,
-}
-
 class FloatingBubbleService : android.app.Service {
   val capabilityChecker: VoiceCapabilityChecker
+  val tripStateMachine: TripStateMachine
 
-  constructor() : this(VoiceCapabilityChecker(SilentSpeechProbe()))
+  constructor() : this(VoiceCapabilityChecker(SilentSpeechProbe()), TripStateMachine())
 
-  constructor(capabilityChecker: VoiceCapabilityChecker) : super() {
+  constructor(
+    capabilityChecker: VoiceCapabilityChecker,
+    tripStateMachine: TripStateMachine = TripStateMachine(),
+  ) : super() {
     this.capabilityChecker = capabilityChecker
+    this.tripStateMachine = tripStateMachine
+    tripStateMachine.applyVoiceCapability(capabilityChecker)
   }
 
   private var capsuleView: android.view.View? = null
@@ -83,10 +78,6 @@ class FloatingBubbleService : android.app.Service {
   var tripEndedReason: String? = null
     private set
   val micSessionEvents = mutableListOf<MicSessionEvent>()
-  var ringLight: CapsuleRingLight = CapsuleRingLight.HIDDEN
-    private set
-  var vacancyPip: VacancyPip = VacancyPip.NONE
-    private set
   val autoCardPopupShown: Boolean = false
   var manualCardVisible: Boolean = false
     private set
@@ -95,8 +86,6 @@ class FloatingBubbleService : android.app.Service {
   var abandonedBySystemKill: Boolean = false
     private set
   val autoRestartScheduled: Boolean = false
-  var hasLockedDestination: Boolean = false
-    private set
 
   private var pendingFgsStartedCallback: (() -> Unit)? = null
   private var pendingInitialDistanceMeters: Int? = null
@@ -128,6 +117,14 @@ class FloatingBubbleService : android.app.Service {
     } else {
       capabilityChecker.fgsType
     }
+    tripStateMachine.applyVoiceCapability(capabilityChecker)
+    if (!tripStateMachine.fgsStartAccepted) {
+      tripStateMachine.requestStart(
+        entry = entry,
+        destinationLocked = initialDistanceMeters != null,
+        distanceToDestinationM = initialDistanceMeters,
+      )
+    }
     pendingFgsStartedCallback = onFgsStarted
     pendingInitialDistanceMeters = initialDistanceMeters
     if (emitFgsStartedImmediately) reportFgsStarted(initialDistanceMeters, onFgsStarted)
@@ -137,8 +134,9 @@ class FloatingBubbleService : android.app.Service {
     val distance = initialDistanceMeters ?: pendingInitialDistanceMeters
     isFgsRunning = true
     isCapsuleVisible = true
-    if (ringLight == CapsuleRingLight.HIDDEN) ringLight = CapsuleRingLight.GREY_STEADY
     abandonedBySystemKill = false
+    tripStateMachine.applyVoiceCapability(capabilityChecker)
+    tripStateMachine.onFgsStarted()
     if (distance != null && distance <= NativeConfig.TRIGGER_DISTANCE_M) immediateJitTriggered = true
     val saved = pendingFgsStartedCallback
     pendingFgsStartedCallback = null
@@ -202,6 +200,7 @@ class FloatingBubbleService : android.app.Service {
       activeFgsType = VoiceCapabilityChecker.FGS_LOCATION_MIC
       persistentNotificationText = LISTENING
       micSessionEvents += MicSessionEvent(isActive = true, reason = reasonOnSuccess)
+      tripStateMachine.applyVoiceCapability(capabilityChecker)
       return
     }
     if (!succeeded) {
@@ -211,6 +210,8 @@ class FloatingBubbleService : android.app.Service {
       activeFgsType = VoiceCapabilityChecker.FGS_LOCATION
       micSessionEvents += MicSessionEvent(isActive = false, reason = MIC_FAILED)
     }
+    tripStateMachine.onRecordAudioRevoked(capabilityChecker.ttsStatus == CapabilityStatus.AVAILABLE)
+    tripStateMachine.applyVoiceCapability(capabilityChecker)
   }
 
   fun onAudioFocusChanged(focusLostToMapsOrCall: Boolean) {
@@ -236,51 +237,14 @@ class FloatingBubbleService : android.app.Service {
     isCapsuleVisible = false
     isMicActive = false
     isAudioRecordRunning = false
-    ringLight = CapsuleRingLight.HIDDEN
-    vacancyPip = VacancyPip.NONE
     manualCardVisible = false
     tripEndedReason = PERMISSION_REVOKED
-  }
-
-  fun onDestinationLocked(locked: Boolean = true) {
-    hasLockedDestination = locked
-    if (locked && ringLight == CapsuleRingLight.ALERT_BREATHING) ringLight = CapsuleRingLight.GREY_STEADY
-  }
-
-  fun applyNetworkState(networkState: NetworkLightState, topVacancies: Int? = null) {
-    if (!isFgsRunning || !isCapsuleVisible) {
-      ringLight = CapsuleRingLight.HIDDEN
-      vacancyPip = VacancyPip.NONE
-      return
-    }
-    when (networkState) {
-      NetworkLightState.AMBER_STEADY -> ringLight = CapsuleRingLight.AMBER_STEADY
-      NetworkLightState.GREY_BREATHING -> ringLight = CapsuleRingLight.GREY_BREATHING
-      NetworkLightState.NEARBY_READY -> {
-        ringLight = CapsuleRingLight.GREY_STEADY
-        vacancyPip = pipFor(topVacancies)
-      }
-      NetworkLightState.ALERT_BREATHING -> {
-        if (ringLight != CapsuleRingLight.GREY_BREATHING) ringLight = CapsuleRingLight.ALERT_BREATHING
-      }
-    }
-  }
-
-  fun requestAlertBreathing(reason: AlertTriggerReason): Boolean {
-    if (!isFgsRunning || !isCapsuleVisible) return false
-    if (ringLight == CapsuleRingLight.GREY_BREATHING) return false
-    if (reason == AlertTriggerReason.USER_ACTION_NON_NETWORK_FAIL_NO_DEST && hasLockedDestination) return false
-    ringLight = CapsuleRingLight.ALERT_BREATHING
-    return true
-  }
-
-  fun onFirstChoiceNoResponse() {
-    if (ringLight != CapsuleRingLight.GREY_BREATHING) ringLight = CapsuleRingLight.GREY_STEADY
+    tripStateMachine.onRequiredPermissionRevoked()
   }
 
   fun onActiveBubbleTap(): Boolean {
     if (!isFgsRunning || !isCapsuleVisible) return onColdBubbleTap()
-    if (ringLight == CapsuleRingLight.GREY_BREATHING) manualRetryRequested = true
+    if (tripStateMachine.state == TripState.GREY_BREATHING) manualRetryRequested = true
     if (capabilityChecker.tripVoiceMode == TripVoiceMode.FULL_VOICE) {
       if (!isMicActive) {
         activeFgsType = VoiceCapabilityChecker.FGS_LOCATION_MIC
@@ -306,18 +270,10 @@ class FloatingBubbleService : android.app.Service {
     isCapsuleVisible = false
     isMicActive = false
     isAudioRecordRunning = false
-    ringLight = CapsuleRingLight.HIDDEN
-    vacancyPip = VacancyPip.NONE
     manualCardVisible = false
     abandonedBySystemKill = true
     tripEndedReason = ABANDONED_OEM_KILL
-  }
-
-  private fun pipFor(topVacancies: Int?): VacancyPip {
-    if (topVacancies == null || topVacancies < 0) return VacancyPip.YELLOW
-    if (topVacancies <= PIP_RED_MAX) return VacancyPip.RED
-    if (topVacancies <= PIP_YELLOW_MAX) return VacancyPip.YELLOW
-    return VacancyPip.GREEN
+    tripStateMachine.onOemKilled()
   }
 
   companion object {
@@ -334,8 +290,6 @@ class FloatingBubbleService : android.app.Service {
     const val CHANNEL_NAME = "泊車副駕"
     const val CAPSULE_MARK = "P"
     const val NOTIFICATION_ID = 1
-    private const val PIP_RED_MAX = 3
-    private const val PIP_YELLOW_MAX = 10
     private val fgsStartedListeners = mutableListOf<(FloatingBubbleService) -> Unit>()
 
     fun addFgsStartedListener(listener: (FloatingBubbleService) -> Unit) {

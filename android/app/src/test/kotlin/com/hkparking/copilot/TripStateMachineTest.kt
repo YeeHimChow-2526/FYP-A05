@@ -1,5 +1,9 @@
 package com.hkparking.copilot
 
+import com.hkparking.copilot.voice.LocaleProbe
+import com.hkparking.copilot.voice.SpeechCapabilityProbe
+import com.hkparking.copilot.voice.TripVoiceMode
+import com.hkparking.copilot.voice.VoiceCapabilityChecker
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -277,6 +281,7 @@ class TripStateMachineTest {
 
     val micEnded = mutableListOf<String>()
     val mic = TripStateMachine(onTripEnded = { micEnded.add(it) })
+    mic.applyVoiceCapability(fullVoiceChecker())
     mic.requestStart(StartupEntry.A_2)
     mic.onFgsStarted()
     val micSession = mic.sessionId
@@ -289,7 +294,7 @@ class TripStateMachineTest {
 
     val manual = started(StartupEntry.A_2)
     manual.onRecordAudioRevoked(ttsAvailable = false)
-    assertEquals(TripVoiceMode.MANUAL, manual.tripVoiceMode)
+    assertEquals(TripVoiceMode.MANUAL_ONLY, manual.tripVoiceMode)
     assertFalse(manual.voiceInputEnabled)
     assertEquals(TripState.CRUISING, manual.state)
     assertTrue(manual.sessionId!!.startsWith("sess_"))
@@ -326,6 +331,72 @@ class TripStateMachineTest {
     assertEquals(CapsuleLight.NONE, oem.capsuleLight)
   }
 
+  @Test
+  fun preFgsServiceHasNoCapsuleLightUntilFgsStarted() {
+    val service = FloatingBubbleService(fullVoiceChecker())
+    assertEquals(TripState.PRE_FGS, service.tripStateMachine.state)
+    assertEquals(CapsuleLight.NONE, service.tripStateMachine.capsuleLight)
+    assertFalse(service.isCapsuleVisible)
+    assertFalse(service.isFgsRunning)
+    service.startInForeground(StartupEntry.A_2, recordAudioGranted = true, emitFgsStartedImmediately = false)
+    assertEquals(TripState.PRE_FGS, service.tripStateMachine.state)
+    assertEquals(CapsuleLight.NONE, service.tripStateMachine.capsuleLight)
+    assertNotEquals(TripState.GREY_BREATHING, service.tripStateMachine.state)
+    assertNotEquals(TripState.ALERT_BREATHING, service.tripStateMachine.state)
+    service.reportFgsStarted()
+    assertEquals(TripState.CRUISING, service.tripStateMachine.state)
+    assertEquals(CapsuleLight.GREY_STEADY, service.tripStateMachine.capsuleLight)
+  }
+
+  @Test
+  fun greyBreathingStaysAheadOfAlertEvenWithoutDestination() {
+    val machine = started(StartupEntry.A_2)
+    assertFalse(machine.destinationLocked)
+    machine.onNetworkFailure()
+    assertEquals(TripState.GREY_BREATHING, machine.state)
+    machine.onPlaceClarificationNeeded()
+    machine.onDriveSample(speedKmh = 40.0, deltaDistanceM = 500, deltaTimeS = 40)
+    assertEquals(TripState.GREY_BREATHING, machine.state)
+    assertEquals(CapsuleLight.GREY_BREATHING, machine.capsuleLight)
+    assertNotEquals(TripState.ALERT_BREATHING, machine.state)
+  }
+
+  @Test
+  fun voiceModeComesFromCheckerAndFailedStartHasNoSession() {
+    val announce = TripStateMachine()
+    val announceChecker = VoiceCapabilityChecker(TtsOnlyProbe())
+    announceChecker.check(recordAudioGranted = true)
+    announce.applyVoiceCapability(announceChecker)
+    announce.requestStart(StartupEntry.A_2)
+    assertEquals(TripVoiceMode.ANNOUNCE_MANUAL, announce.tripVoiceMode)
+    assertNotEquals(TripVoiceMode.FULL_VOICE, announce.tripVoiceMode)
+
+    val manual = TripStateMachine()
+    val manualChecker = VoiceCapabilityChecker(UnavailableProbe())
+    manualChecker.check(recordAudioGranted = false)
+    manual.applyVoiceCapability(manualChecker)
+    manual.requestStart(StartupEntry.A_2)
+    assertEquals(TripVoiceMode.MANUAL_ONLY, manual.tripVoiceMode)
+
+    val missed = TripStateMachine()
+    val missedStart = missed.requestStart(StartupEntry.B_1, utterance = "出發", hasDestinationName = false)
+    assertFalse(missedStart.accepted)
+    assertNull(missed.sessionId)
+    val gpsFail = TripStateMachine().requestStart(
+      StartupEntry.ON_SITE,
+      gpsAvailable = true,
+      horizontalAccuracyM = NativeConfig.ON_SITE_GPS_ACCURACY_MAX_M + 1.0,
+    )
+    assertFalse(gpsFail.accepted)
+    assertNull(gpsFail.sessionId)
+  }
+
+  private fun fullVoiceChecker(): VoiceCapabilityChecker {
+    val checker = VoiceCapabilityChecker(ReadyProbe())
+    checker.check(recordAudioGranted = true)
+    return checker
+  }
+
   private fun started(
     entry: StartupEntry,
     hasDestinationName: Boolean = false,
@@ -344,4 +415,30 @@ class TripStateMachineTest {
     machine.onFgsStarted()
     return machine
   }
+}
+
+private class ReadyProbe : SpeechCapabilityProbe {
+  override fun probeStt(locale: String): LocaleProbe = ready()
+  override fun probeTts(locale: String): LocaleProbe = ready()
+  private fun ready(): LocaleProbe = LocaleProbe(
+    setLanguageSucceeded = true,
+    offlineCantoneseVoiceInstalled = true,
+    canRecognizeOrSynthesize = true,
+    supported = true,
+  )
+}
+
+private class TtsOnlyProbe : SpeechCapabilityProbe {
+  override fun probeStt(locale: String): LocaleProbe = LocaleProbe(supported = false)
+  override fun probeTts(locale: String): LocaleProbe = LocaleProbe(
+    setLanguageSucceeded = true,
+    offlineCantoneseVoiceInstalled = true,
+    canRecognizeOrSynthesize = true,
+    supported = true,
+  )
+}
+
+private class UnavailableProbe : SpeechCapabilityProbe {
+  override fun probeStt(locale: String): LocaleProbe = LocaleProbe(supported = false)
+  override fun probeTts(locale: String): LocaleProbe = LocaleProbe(supported = false)
 }
