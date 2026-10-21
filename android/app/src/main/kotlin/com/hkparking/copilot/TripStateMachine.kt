@@ -1,8 +1,10 @@
 package com.hkparking.copilot
 
 import com.hkparking.copilot.voice.CapabilitySnapshot
+import com.hkparking.copilot.voice.CommandCode
 import com.hkparking.copilot.voice.TripVoiceMode
 import com.hkparking.copilot.voice.VoiceCapabilityChecker
+import com.hkparking.copilot.voice.ZhHkTemplates
 import java.util.UUID
 
 enum class StartupEntry {
@@ -79,7 +81,15 @@ class TripStateMachine(
     private set
   var recommend: Boolean = false
     private set
-  var jitRequested: Boolean = false
+  var jitTriggered: Boolean = false
+    private set
+  val jitRequested: Boolean
+    get() = jitTriggered
+  var hasDestination: Boolean = false
+    private set
+  var destinationName: String? = null
+    private set
+  var isMicFgsActive: Boolean = false
     private set
   var voiceInputEnabled: Boolean = false
     private set
@@ -115,33 +125,50 @@ class TripStateMachine(
 
   fun coldTapCapsule(): StartOutcome = rejected(null)
 
+  fun onMicFgsActive(active: Boolean) {
+    isMicFgsActive = active
+  }
+
   fun requestStart(
     entry: StartupEntry,
-    utterance: String? = null,
-    hasDestinationName: Boolean = false,
-    gpsAvailable: Boolean = false,
-    horizontalAccuracyM: Double? = null,
-    destinationLocked: Boolean = false,
+    commandCode: CommandCode? = null,
+    destinationName: String? = null,
+    gpsAvailable: Boolean = true,
+    gpsAccuracyM: Double? = null,
     distanceToDestinationM: Int? = null,
   ): StartOutcome {
-    val onSitePhrase = containsOnSitePhrase(utterance)
+    val namedDestination = !destinationName.isNullOrBlank()
     val onSite = entry == StartupEntry.ON_SITE ||
-      (entry == StartupEntry.B_1 && !hasDestinationName && onSitePhrase)
-    if (entry == StartupEntry.B_1 && !hasDestinationName && !onSitePhrase) {
-      return rejected(CUE_B1_DESTINATION_MISSED)
+      (entry == StartupEntry.B_1 && commandCode == CommandCode.ON_SITE)
+    if (entry == StartupEntry.B_1) {
+      val setDestination = commandCode == CommandCode.SET_DESTINATION && namedDestination
+      if (commandCode == CommandCode.ON_SITE) {
+        if (!onSiteGpsOk(gpsAvailable, gpsAccuracyM)) {
+          return rejected(ZhHkTemplates.ON_SITE_LOCATION_MISSED)
+        }
+      } else if (setDestination || namedDestination) {
+        // destination locked below
+      } else {
+        return rejected(ZhHkTemplates.B1_DESTINATION_MISSED)
+      }
     }
-    if (onSite && !onSiteGpsOk(gpsAvailable, horizontalAccuracyM)) {
-      return rejected(CUE_ON_SITE_LOCATION_MISSED)
+    if (entry == StartupEntry.ON_SITE && !onSiteGpsOk(gpsAvailable, gpsAccuracyM)) {
+      return rejected(ZhHkTemplates.ON_SITE_LOCATION_MISSED)
     }
     val id = sessionIdFactory()
     sessionId = id
-    this.destinationLocked = hasDestinationName || destinationLocked
+    val locked = namedDestination || distanceToDestinationM != null
+    this.destinationLocked = locked
+    this.hasDestination = locked
+    this.destinationName = if (namedDestination) destinationName else null
     this.distanceToDestinationM = distanceToDestinationM
     this.treatAsOnSite = onSite
     fgsStartAccepted = true
     fgsRunning = false
     recommend = false
-    jitRequested = false
+    jitTriggered = false
+    statusPip = StatusPip.NONE
+    isMicFgsActive = false
     networkDegraded = false
     deferredAlert = null
     spokenAlerts.clear()
@@ -160,6 +187,37 @@ class TripStateMachine(
     )
   }
 
+  fun onDestinationSet(distanceToDestinationM: Int? = null, destinationName: String? = null) {
+    hasDestination = true
+    destinationLocked = true
+    if (!destinationName.isNullOrBlank()) {
+      this.destinationName = destinationName
+    }
+    if (distanceToDestinationM != null) {
+      this.distanceToDestinationM = distanceToDestinationM
+    }
+    val withinTrigger = fgsRunning &&
+      distanceToDestinationM != null &&
+      distanceToDestinationM <= NativeConfig.TRIGGER_DISTANCE_M
+    if (state == TripState.ALERT_BREATHING && !networkDegraded) {
+      if (withinTrigger) {
+        jitTriggered = true
+        recommend = true
+        enter(TripState.AMBER_STEADY)
+      } else {
+        enter(TripState.CRUISING)
+      }
+      return
+    }
+    if (withinTrigger && !jitTriggered) {
+      jitTriggered = true
+      recommend = true
+      if (!networkDegraded && state != TripState.ALERT_BREATHING) {
+        enter(TripState.AMBER_STEADY)
+      }
+    }
+  }
+
   fun onFgsStarted() {
     if (!fgsStartAccepted || sessionId == null || fgsRunning) {
       return
@@ -170,11 +228,11 @@ class TripStateMachine(
       distance != null &&
       distance <= NativeConfig.TRIGGER_DISTANCE_M
     if (treatAsOnSite || withinTrigger) {
-      jitRequested = true
+      jitTriggered = true
       recommend = true
       enter(TripState.AMBER_STEADY)
     } else {
-      jitRequested = false
+      jitTriggered = false
       recommend = false
       enter(TripState.CRUISING)
     }
@@ -187,10 +245,10 @@ class TripStateMachine(
     distanceToDestinationM = distanceM
     if (
       destinationLocked &&
-      !jitRequested &&
+      !jitTriggered &&
       distanceM <= NativeConfig.TRIGGER_DISTANCE_M
     ) {
-      jitRequested = true
+      jitTriggered = true
       recommend = true
       if (!networkDegraded && state != TripState.ALERT_BREATHING) {
         enter(TripState.AMBER_STEADY)
@@ -280,6 +338,7 @@ class TripStateMachine(
     }
     if (confidence >= NativeConfig.NAV_CONFIDENCE_HIGH_THRESHOLD) {
       destinationLocked = true
+      hasDestination = true
       return
     }
     raiseAlert(AlertCause.NAV_MID_CONFIDENCE)
@@ -311,7 +370,7 @@ class TripStateMachine(
       return
     }
     statusPip = pip
-    jitRequested = false
+    jitTriggered = false
     recommend = false
     enter(TripState.NEARBY_READY)
   }
@@ -388,12 +447,13 @@ class TripStateMachine(
   }
 
   private fun cueFor(cause: AlertCause): String {
-    return when (cause) {
-      AlertCause.NO_DESTINATION -> CUE_NO_DESTINATION
-      AlertCause.NAV_MID_CONFIDENCE -> CUE_NAV_CLARIFY
-      AlertCause.PLACE_CLARIFICATION -> CUE_PLACE_CLARIFY
-      AlertCause.DRIVER_ACTION_FAILED -> CUE_DRIVER_ACTION_FAILED
+    val cue = when (cause) {
+      AlertCause.NO_DESTINATION -> ZhHkTemplates.SILENCE_DRIVE
+      AlertCause.NAV_MID_CONFIDENCE -> ZhHkTemplates.ASK_DESTINATION
+      AlertCause.PLACE_CLARIFICATION -> ZhHkTemplates.PLACE_CLARIFY
+      AlertCause.DRIVER_ACTION_FAILED -> ZhHkTemplates.ASK_DESTINATION
     }
+    return ZhHkTemplates.withVoiceReplyPrompt(cue, tripVoiceMode, isMicFgsActive)
   }
 
   private fun onSiteGpsOk(gpsAvailable: Boolean, horizontalAccuracyM: Double?): Boolean {
@@ -403,24 +463,21 @@ class TripStateMachine(
     return horizontalAccuracyM <= NativeConfig.ON_SITE_GPS_ACCURACY_MAX_M
   }
 
-  private fun containsOnSitePhrase(utterance: String?): Boolean {
-    if (utterance.isNullOrBlank()) {
-      return false
-    }
-    return ON_SITE_PHRASES.any { utterance.contains(it) }
-  }
-
   private fun inTrip(): Boolean {
     return sessionId != null || fgsStartAccepted || fgsRunning
   }
 
-  private fun clearSession() {
+  fun clearSession() {
     sessionId = null
     fgsRunning = false
     fgsStartAccepted = false
     recommend = false
-    jitRequested = false
+    jitTriggered = false
+    statusPip = StatusPip.NONE
     destinationLocked = false
+    hasDestination = false
+    destinationName = null
+    isMicFgsActive = false
     treatAsOnSite = false
     networkDegraded = false
     deferredAlert = null
@@ -455,13 +512,4 @@ class TripStateMachine(
     }
   }
 
-  companion object {
-    const val CUE_B1_DESTINATION_MISSED = "聽唔到目的地，請再講一次"
-    const val CUE_ON_SITE_LOCATION_MISSED = "暫時搵唔到你位置，請稍後再講一次"
-    const val CUE_NO_DESTINATION = "出發緊？去邊度等我睇定車位？"
-    const val CUE_NAV_CLARIFY = "去邊度？請拍一拍膠囊答我"
-    const val CUE_PLACE_CLARIFY = "邊一區？深水埗定旺角？"
-    const val CUE_DRIVER_ACTION_FAILED = "去邊度？請拍一拍膠囊答我"
-    val ON_SITE_PHRASES = listOf("附近", "呢度", "而家位置")
-  }
 }

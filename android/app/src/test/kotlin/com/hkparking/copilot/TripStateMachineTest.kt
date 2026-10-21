@@ -1,12 +1,16 @@
 package com.hkparking.copilot
 
+import com.hkparking.copilot.voice.CommandCode
+import com.hkparking.copilot.voice.CommandCodes
 import com.hkparking.copilot.voice.LocaleProbe
 import com.hkparking.copilot.voice.SpeechCapabilityProbe
 import com.hkparking.copilot.voice.TripVoiceMode
 import com.hkparking.copilot.voice.VoiceCapabilityChecker
+import com.hkparking.copilot.voice.ZhHkTemplates
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -48,11 +52,16 @@ class TripStateMachineTest {
     StartupEntry.entries.forEach { entry ->
       val machine = TripStateMachine()
       val outcome = when (entry) {
-        StartupEntry.B_1 -> machine.requestStart(entry, hasDestinationName = true)
+        StartupEntry.B_1 -> machine.requestStart(
+          entry,
+          commandCode = CommandCode.SET_DESTINATION,
+          destinationName = "朗豪坊",
+        )
         StartupEntry.ON_SITE -> machine.requestStart(
           entry,
+          commandCode = CommandCode.ON_SITE,
           gpsAvailable = true,
-          horizontalAccuracyM = NativeConfig.ON_SITE_GPS_ACCURACY_MAX_M.toDouble(),
+          gpsAccuracyM = NativeConfig.ON_SITE_GPS_ACCURACY_MAX_M.toDouble(),
         )
         else -> machine.requestStart(entry)
       }
@@ -76,59 +85,72 @@ class TripStateMachineTest {
   @Test
   fun b1MissAndOnSiteGpsFailureStayPreFgsWithoutSession() {
     val missed = TripStateMachine()
-    val miss = missed.requestStart(StartupEntry.B_1, utterance = "出發")
+    val missedParse = CommandCodes.parse("出發")
+    val miss = missed.requestStart(
+      StartupEntry.B_1,
+      commandCode = missedParse.code,
+      destinationName = missedParse.destinationName,
+    )
     assertFalse(miss.accepted)
     assertFalse(miss.startFgs)
     assertFalse(miss.recommend)
     assertNull(miss.sessionId)
     assertNull(missed.sessionId)
-    assertEquals(TripStateMachine.CUE_B1_DESTINATION_MISSED, miss.spokenCue)
+    assertEquals(ZhHkTemplates.B1_DESTINATION_MISSED, miss.spokenCue)
     assertEquals(TripState.PRE_FGS, missed.state)
     assertEquals(CapsuleLight.NONE, missed.capsuleLight)
     assertFalse(missed.fgsStartAccepted)
 
     val blank = TripStateMachine().requestStart(StartupEntry.B_1)
-    assertEquals(TripStateMachine.CUE_B1_DESTINATION_MISSED, blank.spokenCue)
+    assertEquals(ZhHkTemplates.B1_DESTINATION_MISSED, blank.spokenCue)
     assertNull(blank.sessionId)
 
     val badGps = TripStateMachine()
     val gpsFail = badGps.requestStart(
       StartupEntry.ON_SITE,
+      commandCode = CommandCode.ON_SITE,
       gpsAvailable = true,
-      horizontalAccuracyM = NativeConfig.ON_SITE_GPS_ACCURACY_MAX_M + 1.0,
+      gpsAccuracyM = NativeConfig.ON_SITE_GPS_ACCURACY_MAX_M + 1.0,
     )
     assertFalse(gpsFail.accepted)
     assertFalse(gpsFail.startFgs)
     assertFalse(gpsFail.recommend)
     assertNull(gpsFail.sessionId)
-    assertEquals(TripStateMachine.CUE_ON_SITE_LOCATION_MISSED, gpsFail.spokenCue)
+    assertEquals(ZhHkTemplates.ON_SITE_LOCATION_MISSED, gpsFail.spokenCue)
     assertEquals(TripState.PRE_FGS, badGps.state)
 
+    val nearby = CommandCodes.parse("附近有冇位")
     val unavailable = TripStateMachine().requestStart(
       StartupEntry.B_1,
-      utterance = "附近有冇位",
+      commandCode = nearby.code,
+      destinationName = nearby.destinationName,
       gpsAvailable = false,
-      horizontalAccuracyM = 10.0,
+      gpsAccuracyM = 10.0,
     )
-    assertEquals(TripStateMachine.CUE_ON_SITE_LOCATION_MISSED, unavailable.spokenCue)
+    assertEquals(CommandCode.ON_SITE, nearby.code)
+    assertEquals(ZhHkTemplates.ON_SITE_LOCATION_MISSED, unavailable.spokenCue)
     assertNull(unavailable.sessionId)
     assertFalse(unavailable.startFgs)
 
+    val hereParse = CommandCodes.parse("就喺呢度")
     val here = TripStateMachine().requestStart(
       StartupEntry.B_1,
-      utterance = "就喺呢度",
+      commandCode = hereParse.code,
+      destinationName = hereParse.destinationName,
       gpsAvailable = true,
-      horizontalAccuracyM = null,
+      gpsAccuracyM = null,
     )
     assertNull(here.sessionId)
-    assertEquals(TripStateMachine.CUE_ON_SITE_LOCATION_MISSED, here.spokenCue)
+    assertEquals(ZhHkTemplates.ON_SITE_LOCATION_MISSED, here.spokenCue)
 
     val now = TripStateMachine()
+    val nowParse = CommandCodes.parse("而家位置")
     val ok = now.requestStart(
       StartupEntry.B_1,
-      utterance = "而家位置",
+      commandCode = nowParse.code,
+      destinationName = nowParse.destinationName,
       gpsAvailable = true,
-      horizontalAccuracyM = NativeConfig.ON_SITE_GPS_ACCURACY_MAX_M.toDouble(),
+      gpsAccuracyM = NativeConfig.ON_SITE_GPS_ACCURACY_MAX_M.toDouble(),
     )
     assertTrue(ok.accepted)
     assertTrue(ok.sessionId!!.startsWith("sess_"))
@@ -145,7 +167,7 @@ class TripStateMachineTest {
     val near = TripStateMachine()
     near.requestStart(
       StartupEntry.A_3,
-      destinationLocked = true,
+      destinationName = "朗豪坊",
       distanceToDestinationM = NativeConfig.TRIGGER_DISTANCE_M,
     )
     near.onFgsStarted()
@@ -157,7 +179,7 @@ class TripStateMachineTest {
     val far = TripStateMachine()
     far.requestStart(
       StartupEntry.B_3,
-      destinationLocked = true,
+      destinationName = "朗豪坊",
       distanceToDestinationM = NativeConfig.TRIGGER_DISTANCE_M + 1,
     )
     far.onFgsStarted()
@@ -168,8 +190,9 @@ class TripStateMachineTest {
     val onSite = TripStateMachine()
     onSite.requestStart(
       StartupEntry.ON_SITE,
+      commandCode = CommandCode.ON_SITE,
       gpsAvailable = true,
-      horizontalAccuracyM = 20.0,
+      gpsAccuracyM = 20.0,
     )
     onSite.onFgsStarted()
     assertEquals(TripState.AMBER_STEADY, onSite.state)
@@ -213,7 +236,7 @@ class TripStateMachineTest {
     assertEquals(TripState.ALERT_BREATHING, byDuration.state)
     assertEquals(CapsuleLight.ALERT_BREATHING, byDuration.capsuleLight)
     assertEquals(1, byDuration.alertSpeakCount)
-    assertEquals(TripStateMachine.CUE_NO_DESTINATION, byDuration.lastSpokenCue)
+    assertEquals(ZhHkTemplates.SILENCE_DRIVE, byDuration.lastSpokenCue)
     byDuration.onDriveSample(speedKmh = 40.0, deltaDistanceM = 50, deltaTimeS = 10)
     assertEquals(1, byDuration.alertSpeakCount)
 
@@ -226,7 +249,7 @@ class TripStateMachineTest {
     assertEquals(TripState.ALERT_BREATHING, byDistance.state)
     assertEquals(1, byDistance.alertSpeakCount)
 
-    val nav = started(StartupEntry.A_3, destinationLocked = true, distanceToDestinationM = 5000)
+    val nav = started(StartupEntry.A_3, destinationName = "朗豪坊", distanceToDestinationM = 5000)
     nav.onNavigationConfidence(NativeConfig.NAV_CONFIDENCE_LOW_THRESHOLD - 0.01)
     assertTrue(nav.destinationLocked)
     assertEquals(TripState.CRUISING, nav.state)
@@ -243,10 +266,10 @@ class TripStateMachineTest {
     )
     assertEquals(1, freshNav.alertSpeakCount)
 
-    val clarify = started(StartupEntry.B_1, hasDestinationName = true)
+    val clarify = started(StartupEntry.B_1, destinationName = "朗豪坊")
     clarify.onPlaceClarificationNeeded()
     assertEquals(TripState.ALERT_BREATHING, clarify.state)
-    assertEquals(TripStateMachine.CUE_PLACE_CLARIFY, clarify.lastSpokenCue)
+    assertEquals(ZhHkTemplates.PLACE_CLARIFY, clarify.lastSpokenCue)
     clarify.onPlaceClarificationNeeded()
     assertEquals(1, clarify.alertSpeakCount)
     assertTrue(clarify.destinationLocked)
@@ -259,7 +282,7 @@ class TripStateMachineTest {
     assertEquals(TripState.ALERT_BREATHING, nonNetwork.state)
     nonNetwork.onDriverActionFailed(networkCause = false)
     assertEquals(1, nonNetwork.alertSpeakCount)
-    val lockedFail = started(StartupEntry.B_3, destinationLocked = true, distanceToDestinationM = 2000)
+    val lockedFail = started(StartupEntry.B_3, destinationName = "朗豪坊", distanceToDestinationM = 2000)
     lockedFail.onDriverActionFailed(networkCause = false)
     assertEquals(TripState.CRUISING, lockedFail.state)
   }
@@ -323,7 +346,12 @@ class TripStateMachineTest {
     assertEquals(TripState.ENDED, outside.state)
 
     val oem = TripStateMachine()
-    oem.requestStart(StartupEntry.ON_SITE, gpsAvailable = true, horizontalAccuracyM = 5.0)
+    oem.requestStart(
+      StartupEntry.ON_SITE,
+      commandCode = CommandCode.ON_SITE,
+      gpsAvailable = true,
+      gpsAccuracyM = 5.0,
+    )
     oem.onFgsStarted()
     oem.onOemKilled()
     assertNull(oem.sessionId)
@@ -427,13 +455,19 @@ class TripStateMachineTest {
     assertEquals(TripVoiceMode.MANUAL_ONLY, manual.tripVoiceMode)
 
     val missed = TripStateMachine()
-    val missedStart = missed.requestStart(StartupEntry.B_1, utterance = "出發", hasDestinationName = false)
+    val missedParse = CommandCodes.parse("出發")
+    val missedStart = missed.requestStart(
+      StartupEntry.B_1,
+      commandCode = missedParse.code,
+      destinationName = missedParse.destinationName,
+    )
     assertFalse(missedStart.accepted)
     assertNull(missed.sessionId)
     val gpsFail = TripStateMachine().requestStart(
       StartupEntry.ON_SITE,
+      commandCode = CommandCode.ON_SITE,
       gpsAvailable = true,
-      horizontalAccuracyM = NativeConfig.ON_SITE_GPS_ACCURACY_MAX_M + 1.0,
+      gpsAccuracyM = NativeConfig.ON_SITE_GPS_ACCURACY_MAX_M + 1.0,
     )
     assertFalse(gpsFail.accepted)
     assertNull(gpsFail.sessionId)
@@ -445,20 +479,151 @@ class TripStateMachineTest {
     return checker
   }
 
+  @Test
+  fun alertCueAppendsTapOnlyWhenFullVoiceMicNotUpgraded() {
+    val full = alertCue(TripVoiceMode.FULL_VOICE, micActive = false)
+    assertTrue(full.endsWith(ZhHkTemplates.TAP_CAPSULE))
+    assertEquals(ZhHkTemplates.SILENCE_DRIVE + ZhHkTemplates.TAP_CAPSULE, full)
+
+    val upgraded = alertCue(TripVoiceMode.FULL_VOICE, micActive = true)
+    assertFalse(upgraded.contains(ZhHkTemplates.TAP_CAPSULE))
+    assertEquals(ZhHkTemplates.SILENCE_DRIVE, upgraded)
+
+    val announce = alertCue(TripVoiceMode.ANNOUNCE_MANUAL, micActive = false)
+    assertFalse(announce.contains(ZhHkTemplates.TAP_CAPSULE))
+    assertEquals(ZhHkTemplates.SILENCE_DRIVE, announce)
+
+    val manual = alertCue(TripVoiceMode.MANUAL_ONLY, micActive = false)
+    assertFalse(manual.contains(ZhHkTemplates.TAP_CAPSULE))
+    assertEquals(ZhHkTemplates.SILENCE_DRIVE, manual)
+
+    val clarify = voiced(TripVoiceMode.FULL_VOICE, micActive = false)
+    clarify.onPlaceClarificationNeeded()
+    assertTrue(clarify.lastSpokenCue!!.endsWith(ZhHkTemplates.TAP_CAPSULE))
+    val nav = voiced(TripVoiceMode.ANNOUNCE_MANUAL, micActive = false)
+    nav.onNavigationConfidence(NativeConfig.NAV_CONFIDENCE_LOW_THRESHOLD)
+    assertFalse(nav.lastSpokenCue!!.contains(ZhHkTemplates.TAP_CAPSULE))
+    val failed = voiced(TripVoiceMode.MANUAL_ONLY, micActive = true)
+    failed.onDriverActionFailed(networkCause = false)
+    assertFalse(failed.lastSpokenCue!!.contains(ZhHkTemplates.TAP_CAPSULE))
+  }
+
+  @Test
+  fun onDestinationSetLeavesAlertAndJitWithinTrigger() {
+    val far = voiced(TripVoiceMode.MANUAL_ONLY, micActive = false)
+    far.onDriveSample(
+      speedKmh = NativeConfig.SILENCE_DRIVE_SPEED_KMH + 1.0,
+      deltaDistanceM = 0,
+      deltaTimeS = NativeConfig.SILENCE_DRIVE_DURATION_S,
+    )
+    assertEquals(TripState.ALERT_BREATHING, far.state)
+    far.onDestinationSet(distanceToDestinationM = NativeConfig.TRIGGER_DISTANCE_M + 500)
+    assertEquals(TripState.CRUISING, far.state)
+    assertEquals(CapsuleLight.GREY_STEADY, far.capsuleLight)
+    assertFalse(far.jitTriggered)
+    assertTrue(far.hasDestination)
+
+    val near = voiced(TripVoiceMode.MANUAL_ONLY, micActive = false)
+    near.onDriveSample(
+      speedKmh = NativeConfig.SILENCE_DRIVE_SPEED_KMH + 1.0,
+      deltaDistanceM = 0,
+      deltaTimeS = NativeConfig.SILENCE_DRIVE_DURATION_S,
+    )
+    near.onDestinationSet(distanceToDestinationM = NativeConfig.TRIGGER_DISTANCE_M, destinationName = "朗豪坊")
+    assertNotEquals(TripState.ALERT_BREATHING, near.state)
+    assertTrue(near.jitTriggered)
+    assertEquals("朗豪坊", near.destinationName)
+  }
+
+  @Test
+  fun requestStartAcceptsCommandCodeAndResetsStatusPip() {
+    val named = TripStateMachine().requestStart(
+      StartupEntry.B_1,
+      commandCode = CommandCode.SET_DESTINATION,
+      destinationName = "朗豪坊",
+    )
+    assertTrue(named.accepted)
+    assertTrue(named.sessionId!!.startsWith("sess_"))
+
+    val onSite = TripStateMachine().requestStart(
+      StartupEntry.B_1,
+      commandCode = CommandCode.ON_SITE,
+      gpsAvailable = true,
+      gpsAccuracyM = NativeConfig.ON_SITE_GPS_ACCURACY_MAX_M.toDouble(),
+    )
+    assertTrue(onSite.accepted)
+    assertNotNull(onSite.sessionId)
+
+    val unknown = TripStateMachine().requestStart(
+      StartupEntry.B_1,
+      commandCode = CommandCode.UNKNOWN,
+    )
+    assertFalse(unknown.accepted)
+    assertNull(unknown.sessionId)
+
+    val pip = started(StartupEntry.A_2)
+    pip.onJitSucceeded(StatusPip.YELLOW)
+    assertEquals(StatusPip.YELLOW, pip.statusPip)
+    pip.clearSession()
+    assertEquals(StatusPip.NONE, pip.statusPip)
+
+    val next = started(StartupEntry.A_1)
+    next.onJitSucceeded(StatusPip.RED)
+    assertEquals(StatusPip.RED, next.statusPip)
+    next.requestStart(StartupEntry.A_2)
+    assertEquals(StatusPip.NONE, next.statusPip)
+  }
+
+  private fun alertCue(mode: TripVoiceMode, micActive: Boolean): String {
+    return voiced(mode, micActive).lastSpokenCue!!
+  }
+
+  private fun voiced(mode: TripVoiceMode, micActive: Boolean): TripStateMachine {
+    val machine = TripStateMachine()
+    val checker = when (mode) {
+      TripVoiceMode.FULL_VOICE -> fullVoiceChecker()
+      TripVoiceMode.ANNOUNCE_MANUAL -> VoiceCapabilityChecker(TtsOnlyProbe()).also { it.check(recordAudioGranted = true) }
+      TripVoiceMode.MANUAL_ONLY -> VoiceCapabilityChecker(UnavailableProbe()).also { it.check(recordAudioGranted = false) }
+    }
+    machine.applyVoiceCapability(checker)
+    machine.requestStart(StartupEntry.A_2)
+    machine.onFgsStarted()
+    machine.onMicFgsActive(micActive)
+    if (mode == TripVoiceMode.FULL_VOICE && !micActive) {
+      machine.onDriveSample(
+        speedKmh = NativeConfig.SILENCE_DRIVE_SPEED_KMH + 1.0,
+        deltaDistanceM = 0,
+        deltaTimeS = NativeConfig.SILENCE_DRIVE_DURATION_S,
+      )
+    } else if (mode != TripVoiceMode.FULL_VOICE || micActive) {
+      machine.onDriveSample(
+        speedKmh = NativeConfig.SILENCE_DRIVE_SPEED_KMH + 1.0,
+        deltaDistanceM = 0,
+        deltaTimeS = NativeConfig.SILENCE_DRIVE_DURATION_S,
+      )
+    }
+    return machine
+  }
+
   private fun started(
     entry: StartupEntry,
-    hasDestinationName: Boolean = false,
-    destinationLocked: Boolean = false,
+    destinationName: String? = null,
     distanceToDestinationM: Int? = null,
+    commandCode: CommandCode? = null,
   ): TripStateMachine {
     val machine = TripStateMachine()
+    val code = commandCode ?: when {
+      entry == StartupEntry.B_1 && !destinationName.isNullOrBlank() -> CommandCode.SET_DESTINATION
+      entry == StartupEntry.ON_SITE -> CommandCode.ON_SITE
+      else -> null
+    }
     machine.requestStart(
       entry = entry,
-      hasDestinationName = hasDestinationName,
-      destinationLocked = destinationLocked,
+      commandCode = code,
+      destinationName = destinationName,
+      gpsAvailable = true,
+      gpsAccuracyM = if (entry == StartupEntry.ON_SITE || code == CommandCode.ON_SITE) 10.0 else null,
       distanceToDestinationM = distanceToDestinationM,
-      gpsAvailable = entry == StartupEntry.ON_SITE,
-      horizontalAccuracyM = if (entry == StartupEntry.ON_SITE) 10.0 else null,
     )
     machine.onFgsStarted()
     return machine

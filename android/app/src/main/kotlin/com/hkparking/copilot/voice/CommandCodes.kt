@@ -183,6 +183,7 @@ object ZhHkTemplates {
   const val METER_STALE_UI = "咪錶資料暫時未更新"
   const val LOW_CONFIDENCE = "太嘈聽唔清，稍後再試"
   const val FIRST_CHOICE_EXAMPLE = "前方首選朗豪坊停車場，一百八十米，剩十二個位，首小時三十二蚊。"
+  const val ASK_DESTINATION = "去邊度？"
   const val TAP_CAPSULE = "請拍一拍膠囊答我"
   const val NOTIFICATION_BODY = "🅿️ 需要搵車位就撳我"
   const val NOTIFICATION_ACTION = "開始泊車助手（啟用語音）"

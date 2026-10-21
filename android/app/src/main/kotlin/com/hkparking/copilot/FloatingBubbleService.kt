@@ -121,10 +121,10 @@ class FloatingBubbleService : android.app.Service {
     if (!tripStateMachine.fgsStartAccepted) {
       tripStateMachine.requestStart(
         entry = entry,
-        destinationLocked = initialDistanceMeters != null,
         distanceToDestinationM = initialDistanceMeters,
       )
     }
+    tripStateMachine.onMicFgsActive(activeFgsType == VoiceCapabilityChecker.FGS_LOCATION_MIC)
     hasPendingFgsStart = true
     pendingFgsStartedCallback = onFgsStarted
     pendingInitialDistanceMeters = initialDistanceMeters
@@ -209,6 +209,7 @@ class FloatingBubbleService : android.app.Service {
       activeFgsType = VoiceCapabilityChecker.FGS_LOCATION_MIC
       persistentNotificationText = LISTENING
       micSessionEvents += MicSessionEvent(isActive = true, reason = reasonOnSuccess)
+      tripStateMachine.onMicFgsActive(true)
       tripStateMachine.applyVoiceCapability(capabilityChecker)
       return
     }
@@ -217,6 +218,7 @@ class FloatingBubbleService : android.app.Service {
       isMicActive = false
       isAudioRecordRunning = false
       activeFgsType = VoiceCapabilityChecker.FGS_LOCATION
+      tripStateMachine.onMicFgsActive(false)
       micSessionEvents += MicSessionEvent(isActive = false, reason = MIC_FAILED)
     }
     tripStateMachine.onRecordAudioRevoked(capabilityChecker.ttsStatus == CapabilityStatus.AVAILABLE)
@@ -240,6 +242,7 @@ class FloatingBubbleService : android.app.Service {
       isMicActive = false
       isAudioRecordRunning = false
       activeFgsType = VoiceCapabilityChecker.FGS_LOCATION
+      tripStateMachine.onMicFgsActive(false)
       return
     }
     isFgsRunning = false
@@ -262,9 +265,11 @@ class FloatingBubbleService : android.app.Service {
         persistentNotificationText = LISTENING
         micSessionEvents += MicSessionEvent(isActive = true, reason = BUBBLE_TAP)
       }
+      tripStateMachine.onMicFgsActive(true)
     } else {
       activeFgsType = VoiceCapabilityChecker.FGS_LOCATION
       isMicActive = false
+      tripStateMachine.onMicFgsActive(false)
       manualCardVisible = true
     }
     return true
