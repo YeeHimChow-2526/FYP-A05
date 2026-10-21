@@ -46,3 +46,13 @@
 - 影響任務編號／常數名／檔案：W-A.15；`ON_SITE_GPS_ACCURACY_MAX_M`；`NativeConfig.kt`
 - 類別：規格缺漏
 - 狀態：待處理
+
+### SC-003
+- 日期：2026-10-21
+- 來源：真機測試（模擬器閘口 A）
+- 裝置（如適用）：Pixel 8 模擬器｜Android 15（API 35）｜不適用
+- 發現：P 膠囊冇底色，同桌面背景溶埋一齊，睇唔清楚。實作版只定義咗追問卡底色（`#121212`，約 80% 不透明 `0xCC121212`），原生 P 膠囊嘅尺寸、底色、外圈線寬、各狀態外圈色碼，同 Status Pip 嘅直徑同綠／黃／紅色碼都未定義。`app_colors.dart` 喺規格入面只有檔名，冇色碼，而且原生膠囊讀唔到 Dart 檔。
+- 建議改動：喺實作版 `NativeConfig` 區塊加入膠囊視覺常數：底色 `0xCC121212`（唔支援半透明時用實色 `#121212`）、膠囊 48dp × 48dp、外圈線寬 3dp、Status Pip 直徑 10dp；灰、琥珀、綠、黃、紅五個色碼交規格守護者定。`app_colors.dart` 用同一組色碼。
+- 影響任務編號／常數名／檔案：W-A.17；`NativeConfig.kt`、`FloatingBubbleService.kt`、`lib/core/constants/app_colors.dart`
+- 類別：規格缺漏
+- 狀態：待處理
