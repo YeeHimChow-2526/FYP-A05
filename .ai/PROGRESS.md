@@ -57,7 +57,7 @@
 - [x] W-A.19 語音能力檢查 — commit: a5da97e, 623c382
 - [ ] W-A.20 STT 開發前驗證 — commit: 
 - [x] W-A.21 指令碼與語言模板 — commit: a5da97e
-- [x] W-A.12 網絡分級重試 — commit: b73fff4
+- [x] W-A.12 網絡分級重試 — commit: b73fff4, dfadd4f
 
 ### 19.4 Phase 3 — 商業激戰區強化、安全防禦與眾包反饋（第 11–13 步）
 
