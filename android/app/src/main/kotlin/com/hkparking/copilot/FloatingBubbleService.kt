@@ -38,13 +38,10 @@ class FloatingBubbleService : android.app.Service {
     val hotwordEnabled = intent?.getBooleanExtra(EXTRA_HOTWORD, true) ?: true
     val recordAudioGranted = checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
       android.content.pm.PackageManager.PERMISSION_GRANTED
-    val now = android.os.SystemClock.elapsedRealtime()
     startInForeground(
       entry = entry,
       recordAudioGranted = recordAudioGranted,
       hotwordEnabled = hotwordEnabled,
-      startedAtMs = now,
-      capabilityRecheckNowMs = now,
       emitFgsStartedImmediately = false,
     )
     if (!enterForeground()) return START_NOT_STICKY
@@ -99,25 +96,28 @@ class FloatingBubbleService : android.app.Service {
     entry: StartupEntry,
     recordAudioGranted: Boolean,
     hotwordEnabled: Boolean = true,
-    startedAtMs: Long = 0L,
-    capabilityRecheckNowMs: Long = 0L,
     initialDistanceMeters: Int? = null,
     emitFgsStartedImmediately: Boolean = false,
     onFgsStarted: () -> Unit = {},
   ) {
-    val snapshot = capabilityChecker.recheckSilently(
-      recordAudioGranted = recordAudioGranted,
-      startedAtMs = startedAtMs,
-      nowMs = capabilityRecheckNowMs,
-      hotwordEnabled = hotwordEnabled,
-      entry = entry,
-    )
+    val initial = capabilityChecker.startupSnapshot(recordAudioGranted, hotwordEnabled, entry)
     activeFgsType = if (entry == StartupEntry.B_2) {
       VoiceCapabilityChecker.FGS_LOCATION
     } else {
       capabilityChecker.fgsType
     }
-    tripStateMachine.syncVoiceCapability(snapshot, capabilityChecker.hasConfirmed)
+    tripStateMachine.syncVoiceCapability(initial, capabilityChecker.hasConfirmed)
+    val worker = Thread {
+      val updated = capabilityChecker.recheckSilently(recordAudioGranted, hotwordEnabled, entry)
+      activeFgsType = if (entry == StartupEntry.B_2) {
+        VoiceCapabilityChecker.FGS_LOCATION
+      } else {
+        capabilityChecker.fgsType
+      }
+      tripStateMachine.syncVoiceCapability(updated, capabilityChecker.hasConfirmed)
+    }
+    worker.isDaemon = true
+    worker.start()
     if (!tripStateMachine.fgsStartAccepted) {
       tripStateMachine.requestStart(
         entry = entry,

@@ -7,6 +7,7 @@ import com.hkparking.copilot.voice.VoiceCapabilityChecker
 import com.hkparking.copilot.voice.ZhHkTemplates
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -69,6 +70,7 @@ class FgsHandshakeTest {
     assertFalse(internalService.isFgsRunning)
 
     val degraded = service()
+    degraded.capabilityChecker.check(recordAudioGranted = false)
     val started = FgsBootstrapActivity(degraded).launchFromEntry(
       StartupEntry.A_2,
       PermissionCheckInput(recordAudioGranted = false),
@@ -76,7 +78,7 @@ class FgsHandshakeTest {
     )
     assertTrue(started)
     assertTrue(degraded.isFgsRunning)
-    assertEquals(TripVoiceMode.ANNOUNCE_MANUAL, degradedChecker(degraded).tripVoiceMode)
+    assertEquals(TripVoiceMode.ANNOUNCE_MANUAL, degraded.capabilityChecker.tripVoiceMode)
     assertEquals(VoiceCapabilityChecker.FGS_LOCATION, degraded.activeFgsType)
   }
 
@@ -118,27 +120,28 @@ class FgsHandshakeTest {
         StartupEntry.B_1,
         PermissionCheckInput(),
         startedAtMs = 0L,
-        capabilityCheckElapsedMs = NativeConfig.VOICE_CAPABILITY_CHECK_TIMEOUT_MS,
         emitFgsStartedImmediately = true,
       ),
     )
     assertTrue(slow.isFgsRunning)
     assertTrue(slowActivity.fgsStartedReceived)
-    assertFalse(slow.capabilityChecker().downloadPromptRequested)
+    assertFalse(slow.capabilityChecker.downloadPromptRequested)
   }
 
   @Test
   fun micReadyFailureDegradesWithoutStoppingFgsAndAudioFocusPausesMic() {
     val failed = service()
+    failed.capabilityChecker.check(recordAudioGranted = true)
     FgsBootstrapActivity(failed).launchFromEntry(StartupEntry.A_1, PermissionCheckInput(), emitFgsStartedImmediately = true)
     failed.reportMicReady(succeeded = false)
     assertTrue(failed.isFgsRunning)
     assertTrue(failed.isCapsuleVisible)
     assertEquals(VoiceCapabilityChecker.FGS_LOCATION, failed.activeFgsType)
-    assertEquals(TripVoiceMode.ANNOUNCE_MANUAL, failed.capabilityChecker().tripVoiceMode)
+    assertEquals(TripVoiceMode.ANNOUNCE_MANUAL, failed.capabilityChecker.tripVoiceMode)
     assertEquals(MicSessionEvent(false, FloatingBubbleService.MIC_FAILED), failed.micSessionEvents.last())
 
     val live = service()
+    live.capabilityChecker.check(recordAudioGranted = true)
     FgsBootstrapActivity(live).launchFromEntry(StartupEntry.A_1, PermissionCheckInput(), emitFgsStartedImmediately = true)
     live.reportMicReady(succeeded = true)
     assertEquals(FloatingBubbleService.LISTENING, live.persistentNotificationText)
@@ -162,9 +165,43 @@ class FgsHandshakeTest {
     assertEquals(FloatingBubbleService.PERMISSION_REVOKED, live.tripEndedReason)
   }
 
-  private fun service(): FloatingBubbleService = FloatingBubbleService(VoiceCapabilityChecker(ReadyProbe()))
+  @Test
+  fun hangingProbeDoesNotBlockFgsStartedAndKeepsConfirmedMode() {
+    val swap = SwappableProbe(ReadyProbe())
+    val checker = VoiceCapabilityChecker(swap)
+    checker.check(recordAudioGranted = true)
+    swap.delegate = HangProbe()
+    val service = FloatingBubbleService(checker)
+    val activity = FgsBootstrapActivity(service)
+    assertTrue(activity.launchFromEntry(StartupEntry.A_1, PermissionCheckInput(), emitFgsStartedImmediately = false))
+    service.reportFgsStarted()
+    assertTrue(activity.fgsStartedReceived)
+    assertTrue(activity.isFinished)
+    assertEquals(TripVoiceMode.FULL_VOICE, service.tripStateMachine.tripVoiceMode)
+    assertFalse(checker.blocksFgsStarted)
+  }
 
-  private fun degradedChecker(service: FloatingBubbleService): VoiceCapabilityChecker = service.capabilityChecker()
+  @Test
+  fun timeoutRecheckWithoutRecordAudioIsNotFullVoice() {
+    val swap = SwappableProbe(ReadyProbe())
+    val checker = VoiceCapabilityChecker(swap)
+    checker.check(recordAudioGranted = true)
+    swap.delegate = HangProbe()
+    val snapshot = checker.recheckSilently(
+      recordAudioGranted = false,
+      hotwordEnabled = true,
+      entry = StartupEntry.A_1,
+    )
+    assertTrue(snapshot.timedOut)
+    assertEquals(com.hkparking.copilot.voice.CapabilityStatus.AVAILABLE, snapshot.stt)
+    assertEquals(com.hkparking.copilot.voice.CapabilityStatus.AVAILABLE, snapshot.tts)
+    assertEquals(TripVoiceMode.ANNOUNCE_MANUAL, snapshot.mode)
+    assertNotEquals(TripVoiceMode.FULL_VOICE, snapshot.mode)
+    assertEquals(VoiceCapabilityChecker.FGS_LOCATION, snapshot.fgsType)
+    assertFalse(snapshot.voiceInputEnabled)
+  }
+
+  private fun service(): FloatingBubbleService = FloatingBubbleService(VoiceCapabilityChecker(ReadyProbe()))
 
   private class ReadyProbe : SpeechCapabilityProbe {
     override fun probeStt(locale: String): LocaleProbe = ready()
@@ -179,8 +216,21 @@ class FgsHandshakeTest {
   }
 }
 
-private fun FloatingBubbleService.capabilityChecker(): VoiceCapabilityChecker {
-  val field = FloatingBubbleService::class.java.getDeclaredField("capabilityChecker")
-  field.isAccessible = true
-  return field.get(this) as VoiceCapabilityChecker
+private class SwappableProbe(var delegate: SpeechCapabilityProbe) : SpeechCapabilityProbe {
+  override fun probeStt(locale: String): LocaleProbe = delegate.probeStt(locale)
+  override fun probeTts(locale: String): LocaleProbe = delegate.probeTts(locale)
+}
+
+private class HangProbe : SpeechCapabilityProbe {
+  override fun probeStt(locale: String): LocaleProbe = hang()
+  override fun probeTts(locale: String): LocaleProbe = hang()
+
+  private fun hang(): LocaleProbe {
+    try {
+      java.util.concurrent.CountDownLatch(1).await()
+    } catch (_: InterruptedException) {
+      Thread.currentThread().interrupt()
+    }
+    return LocaleProbe()
+  }
 }

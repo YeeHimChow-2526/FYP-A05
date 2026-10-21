@@ -131,7 +131,6 @@ class FgsBootstrapActivity : android.app.Activity {
     permissions: PermissionCheckInput,
     hotwordEnabled: Boolean = true,
     startedAtMs: Long = 0L,
-    capabilityCheckElapsedMs: Long = 0L,
     initialDistanceMeters: Int? = null,
     emitFgsStartedImmediately: Boolean = false,
   ): Boolean {
@@ -148,8 +147,6 @@ class FgsBootstrapActivity : android.app.Activity {
       entry = entry,
       recordAudioGranted = permissions.recordAudioGranted,
       hotwordEnabled = hotwordEnabled,
-      startedAtMs = startedAtMs,
-      capabilityRecheckNowMs = startedAtMs + capabilityCheckElapsedMs,
       initialDistanceMeters = initialDistanceMeters,
       emitFgsStartedImmediately = emitFgsStartedImmediately,
       onFgsStarted = {

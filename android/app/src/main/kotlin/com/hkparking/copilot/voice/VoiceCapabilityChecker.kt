@@ -120,41 +120,95 @@ class VoiceCapabilityChecker(
 
   fun recheckSilently(
     recordAudioGranted: Boolean,
-    startedAtMs: Long,
-    nowMs: Long,
     hotwordEnabled: Boolean = true,
     entry: StartupEntry = StartupEntry.A_2,
   ): CapabilitySnapshot {
-    val elapsed = nowMs - startedAtMs
-    if (elapsed >= NativeConfig.VOICE_CAPABILITY_CHECK_TIMEOUT_MS) {
-      val reused = confirmed
-      if (reused == null) {
-        sttStatus = CapabilityStatus.UNKNOWN
-        ttsStatus = CapabilityStatus.UNKNOWN
-        val unavailable = compose(
-          stt = CapabilityStatus.UNKNOWN,
-          tts = CapabilityStatus.UNKNOWN,
-          recordAudioGranted = recordAudioGranted,
-          hotwordEnabled = false,
-          entry = entry,
-          allowDownloadPrompt = false,
-          timedOut = true,
-        )
-        apply(unavailable)
-        return currentSnapshot(timedOut = true)
-      }
-      sttStatus = reused.stt
-      ttsStatus = reused.tts
-      this.recordAudioGranted = recordAudioGranted
-      apply(reused.copy(downloadPrompt = false, blocksFgsStarted = false, timedOut = true))
-      return currentSnapshot(timedOut = true)
+    val locale = NativeConfig.SPEECH_LOCALE_DEFAULT
+    val sttProbe = withTimeoutOrNull(NativeConfig.VOICE_CAPABILITY_CHECK_TIMEOUT_MS) {
+      probe.probeStt(locale)
     }
-    return check(
+    if (sttProbe == null) {
+      return timeoutSnapshot(recordAudioGranted, hotwordEnabled, entry)
+    }
+    val ttsProbe = withTimeoutOrNull(NativeConfig.VOICE_CAPABILITY_CHECK_TIMEOUT_MS) {
+      probe.probeTts(locale)
+    }
+    if (ttsProbe == null) {
+      return timeoutSnapshot(recordAudioGranted, hotwordEnabled, entry)
+    }
+    sttStatus = resolve(sttProbe)
+    ttsStatus = resolve(ttsProbe)
+    this.recordAudioGranted = recordAudioGranted
+    val snapshot = compose(
+      stt = sttStatus,
+      tts = ttsStatus,
       recordAudioGranted = recordAudioGranted,
       hotwordEnabled = hotwordEnabled,
       entry = entry,
       allowDownloadPrompt = false,
+      timedOut = false,
     )
+    confirmed = snapshot.copy(downloadPrompt = false, blocksFgsStarted = false, timedOut = false)
+    hasConfirmed = true
+    apply(snapshot)
+    return currentSnapshot(timedOut = false)
+  }
+
+  fun startupSnapshot(
+    recordAudioGranted: Boolean,
+    hotwordEnabled: Boolean = true,
+    entry: StartupEntry = StartupEntry.A_2,
+  ): CapabilitySnapshot {
+    val stt = if (hasConfirmed) sttStatus else CapabilityStatus.UNKNOWN
+    val tts = if (hasConfirmed) ttsStatus else CapabilityStatus.UNKNOWN
+    val snapshot = compose(
+      stt = stt,
+      tts = tts,
+      recordAudioGranted = recordAudioGranted,
+      hotwordEnabled = hotwordEnabled,
+      entry = entry,
+      allowDownloadPrompt = false,
+      timedOut = false,
+    )
+    apply(snapshot)
+    return currentSnapshot(timedOut = false)
+  }
+
+  private fun timeoutSnapshot(
+    recordAudioGranted: Boolean,
+    hotwordEnabled: Boolean,
+    entry: StartupEntry,
+  ): CapabilitySnapshot {
+    val reused = confirmed
+    if (reused == null) {
+      sttStatus = CapabilityStatus.UNKNOWN
+      ttsStatus = CapabilityStatus.UNKNOWN
+      val unavailable = compose(
+        stt = CapabilityStatus.UNKNOWN,
+        tts = CapabilityStatus.UNKNOWN,
+        recordAudioGranted = recordAudioGranted,
+        hotwordEnabled = false,
+        entry = entry,
+        allowDownloadPrompt = false,
+        timedOut = true,
+      )
+      apply(unavailable)
+      return currentSnapshot(timedOut = true)
+    }
+    sttStatus = reused.stt
+    ttsStatus = reused.tts
+    this.recordAudioGranted = recordAudioGranted
+    val recomputed = compose(
+      stt = reused.stt,
+      tts = reused.tts,
+      recordAudioGranted = recordAudioGranted,
+      hotwordEnabled = hotwordEnabled,
+      entry = entry,
+      allowDownloadPrompt = false,
+      timedOut = true,
+    )
+    apply(recomputed)
+    return currentSnapshot(timedOut = true)
   }
 
   fun onMicReadyFailed() {
@@ -264,4 +318,27 @@ class VoiceCapabilityChecker(
     const val FGS_LOCATION = "location"
     const val FGS_LOCATION_MIC = "location|microphone"
   }
+}
+
+fun <T> withTimeoutOrNull(timeoutMs: Long, block: () -> T): T? {
+  val done = java.util.concurrent.CountDownLatch(1)
+  val holder = arrayOfNulls<Any>(1)
+  val worker = Thread {
+    try {
+      holder[0] = block()
+    } catch (_: InterruptedException) {
+      Thread.currentThread().interrupt()
+    } finally {
+      done.countDown()
+    }
+  }
+  worker.isDaemon = true
+  worker.start()
+  val finished = done.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+  if (!finished) {
+    worker.interrupt()
+    return null
+  }
+  @Suppress("UNCHECKED_CAST")
+  return holder[0] as T?
 }

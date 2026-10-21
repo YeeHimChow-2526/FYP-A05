@@ -105,39 +105,28 @@ class VoiceAndTtsTest {
   fun silentRecheckTimeoutReusesConfirmedOrTreatsUnknownAsUnavailable() {
     val probe = usableProbe()
     val checker = VoiceCapabilityChecker(probe)
-    val startedAt = 0L
-    val within = checker.recheckSilently(
-      recordAudioGranted = true,
-      startedAtMs = startedAt,
-      nowMs = NativeConfig.VOICE_CAPABILITY_CHECK_TIMEOUT_MS - 1,
-    )
+    val within = checker.recheckSilently(recordAudioGranted = true)
     assertEquals(VoiceMode.FULL_VOICE, within.mode)
     assertFalse(within.timedOut)
     assertFalse(within.blocksFgsStarted)
     assertFalse(within.downloadPrompt)
     assertEquals(1, probe.calls)
 
-    probe.stt = LocaleProbe(supported = false)
-    probe.tts = LocaleProbe(supported = false)
-    val timedOut = checker.recheckSilently(
-      recordAudioGranted = true,
-      startedAtMs = startedAt,
-      nowMs = startedAt + NativeConfig.VOICE_CAPABILITY_CHECK_TIMEOUT_MS,
-    )
+    val hanging = HangAfterFirstProbe(usable(), usable())
+    val confirmed = VoiceCapabilityChecker(hanging)
+    val first = confirmed.recheckSilently(recordAudioGranted = true)
+    assertFalse(first.timedOut)
+    hanging.hang = true
+    val timedOut = confirmed.recheckSilently(recordAudioGranted = true)
     assertTrue(timedOut.timedOut)
     assertEquals(VoiceMode.FULL_VOICE, timedOut.mode)
     assertEquals(CapabilityStatus.AVAILABLE, timedOut.stt)
     assertEquals(CapabilityStatus.AVAILABLE, timedOut.tts)
     assertFalse(timedOut.blocksFgsStarted)
     assertFalse(timedOut.downloadPrompt)
-    assertEquals(1, probe.calls)
 
-    val never = VoiceCapabilityChecker(FakeProbe(usable(), usable()))
-    val unavailable = never.recheckSilently(
-      recordAudioGranted = true,
-      startedAtMs = 10L,
-      nowMs = 10L + NativeConfig.VOICE_CAPABILITY_CHECK_TIMEOUT_MS + 1,
-    )
+    val never = VoiceCapabilityChecker(HangAfterFirstProbe(usable(), usable(), hangImmediately = true))
+    val unavailable = never.recheckSilently(recordAudioGranted = true)
     assertTrue(unavailable.timedOut)
     assertEquals(VoiceMode.MANUAL_ONLY, unavailable.mode)
     assertNotEquals(CapabilityStatus.AVAILABLE, unavailable.stt)
@@ -381,6 +370,28 @@ class VoiceAndTtsTest {
       isStale = isStale,
     )
   }
+}
+
+private class HangAfterFirstProbe(
+  private val stt: LocaleProbe,
+  private val tts: LocaleProbe,
+  hangImmediately: Boolean = false,
+) : SpeechCapabilityProbe {
+  var hang: Boolean = hangImmediately
+
+  override fun probeStt(locale: String): LocaleProbe {
+    if (hang) {
+      try {
+        java.util.concurrent.CountDownLatch(1).await()
+      } catch (_: InterruptedException) {
+        Thread.currentThread().interrupt()
+      }
+      return LocaleProbe()
+    }
+    return stt
+  }
+
+  override fun probeTts(locale: String): LocaleProbe = tts
 }
 
 private class FakeProbe(

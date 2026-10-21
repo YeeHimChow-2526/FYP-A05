@@ -350,7 +350,7 @@ class TripStateMachineTest {
 
   @Test
   fun capabilityTimeoutDoesNotBlockFgsStarted() {
-    val checker = VoiceCapabilityChecker(ReadyProbe())
+    val checker = VoiceCapabilityChecker(HangAfterProbe(ReadyProbe(), hangImmediately = true))
     val service = FloatingBubbleService(checker)
     val activity = FgsBootstrapActivity(service)
     assertTrue(
@@ -358,7 +358,6 @@ class TripStateMachineTest {
         StartupEntry.A_1,
         PermissionCheckInput(),
         startedAtMs = 0L,
-        capabilityCheckElapsedMs = NativeConfig.VOICE_CAPABILITY_CHECK_TIMEOUT_MS,
         emitFgsStartedImmediately = false,
       ),
     )
@@ -378,26 +377,20 @@ class TripStateMachineTest {
 
   @Test
   fun silentRecheckTimeoutReusesConfirmedModeOrFallsBackWhenNeverConfirmed() {
-    val confirmed = VoiceCapabilityChecker(ReadyProbe())
+    val confirmedProbe = HangAfterProbe(ReadyProbe())
+    val confirmed = VoiceCapabilityChecker(confirmedProbe)
     confirmed.check(recordAudioGranted = true)
-    val reused = confirmed.recheckSilently(
-      recordAudioGranted = true,
-      startedAtMs = 0L,
-      nowMs = NativeConfig.VOICE_CAPABILITY_CHECK_TIMEOUT_MS,
-    )
+    confirmedProbe.hang = true
+    val reused = confirmed.recheckSilently(recordAudioGranted = true)
     val kept = TripStateMachine()
     kept.syncVoiceCapability(reused, confirmed.hasConfirmed)
     assertTrue(reused.timedOut)
     assertFalse(reused.blocksFgsStarted)
     assertEquals(TripVoiceMode.FULL_VOICE, kept.tripVoiceMode)
 
-    val fresh = VoiceCapabilityChecker(ReadyProbe())
+    val fresh = VoiceCapabilityChecker(HangAfterProbe(ReadyProbe(), hangImmediately = true))
     assertFalse(fresh.hasConfirmed)
-    val timedOut = fresh.recheckSilently(
-      recordAudioGranted = true,
-      startedAtMs = 0L,
-      nowMs = NativeConfig.VOICE_CAPABILITY_CHECK_TIMEOUT_MS,
-    )
+    val timedOut = fresh.recheckSilently(recordAudioGranted = true)
     val unavailable = TripStateMachine()
     unavailable.syncVoiceCapability(timedOut, fresh.hasConfirmed)
     assertTrue(timedOut.timedOut)
@@ -498,4 +491,25 @@ private class TtsOnlyProbe : SpeechCapabilityProbe {
 private class UnavailableProbe : SpeechCapabilityProbe {
   override fun probeStt(locale: String): LocaleProbe = LocaleProbe(supported = false)
   override fun probeTts(locale: String): LocaleProbe = LocaleProbe(supported = false)
+}
+
+private class HangAfterProbe(
+  private val delegate: SpeechCapabilityProbe,
+  hangImmediately: Boolean = false,
+) : SpeechCapabilityProbe {
+  var hang: Boolean = hangImmediately
+
+  override fun probeStt(locale: String): LocaleProbe {
+    if (hang) {
+      try {
+        java.util.concurrent.CountDownLatch(1).await()
+      } catch (_: InterruptedException) {
+        Thread.currentThread().interrupt()
+      }
+      return LocaleProbe()
+    }
+    return delegate.probeStt(locale)
+  }
+
+  override fun probeTts(locale: String): LocaleProbe = delegate.probeTts(locale)
 }
