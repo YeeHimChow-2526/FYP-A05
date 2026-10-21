@@ -38,7 +38,7 @@
 - [ ] W-A.2 Maps 接盤與分享跳板 — commit: 
 - [ ] W-A.3 本機字典樹與常數檔 — 常數檔已落地（Step 1.1）；字典樹未做 — commit: 2fbf18b
 - [x] W-A.15 session_id 生命週期 — commit: 4ac4036, e8f00f7, a4b1944
-- [x] W-A.16 FGS 啟動握手 — commit: a2017f5
+- [x] W-A.16 FGS 啟動握手 — commit: a2017f5, 623c382
 - [ ] W-A.4 軟件距離追蹤 — commit: 
 - [ ] W-A.5 在線即送 release — commit: 
 - [ ] W-A.17 到場雙態與今日確認 — commit: 
@@ -54,7 +54,7 @@
 - [ ] W-A.10 無終點主動喚起 — commit: 
 - [ ] W-A.13 單一 AudioRecord — commit: 
 - [ ] W-A.14 麥克風 FGS 與權限 — commit: 
-- [x] W-A.19 語音能力檢查 — commit: a5da97e
+- [x] W-A.19 語音能力檢查 — commit: a5da97e, 623c382
 - [ ] W-A.20 STT 開發前驗證 — commit: 
 - [x] W-A.21 指令碼與語言模板 — commit: a5da97e
 - [x] W-A.12 網絡分級重試 — commit: b73fff4
