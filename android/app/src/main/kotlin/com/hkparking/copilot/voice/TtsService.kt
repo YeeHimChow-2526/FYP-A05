@@ -15,27 +15,22 @@ data class RecommendationCard(
 
 interface TtsEngine {
   fun bindLocale(locale: String): Boolean
-  fun speak(text: String)
+  fun speak(text: String, onDone: () -> Unit = {}, onError: () -> Unit = {})
   fun stop()
 }
 
 class TtsService(
   private val engine: TtsEngine,
+  private val capabilityChecker: VoiceCapabilityChecker? = null,
 ) {
   var isSpeaking: Boolean = false
     private set
-  var cantoneseAvailable: Boolean = false
-    private set
-  var mandarinFallbackRefused: Boolean = false
-    private set
 
   private val queue = ArrayDeque<String>()
+  private var playbackEpoch: Int = 0
 
   init {
-    cantoneseAvailable = engine.bindLocale(NativeConfig.SPEECH_LOCALE_DEFAULT)
-    if (!cantoneseAvailable) {
-      mandarinFallbackRefused = true
-    }
+    engine.bindLocale(NativeConfig.SPEECH_LOCALE_DEFAULT)
   }
 
   fun pendingCount(): Int = queue.size
@@ -47,7 +42,10 @@ class TtsService(
     isApproachMuted: Boolean,
     driverAsked: Boolean = false,
   ): String? {
-    if (!cantoneseAvailable || voiceMode == TripVoiceMode.MANUAL_ONLY) {
+    if (voiceMode == TripVoiceMode.MANUAL_ONLY) {
+      return null
+    }
+    if (capabilityChecker != null && capabilityChecker.ttsStatus != CapabilityStatus.AVAILABLE) {
       return null
     }
     if (isApproachMuted && !driverAsked) {
@@ -63,15 +61,49 @@ class TtsService(
       first.spokenCue
     }
     queue.addLast(text)
-    isSpeaking = true
-    engine.speak(text)
+    if (!isSpeaking) {
+      playHead()
+    }
     return text
   }
 
   fun interrupt() {
+    playbackEpoch += 1
     queue.clear()
     isSpeaking = false
     engine.stop()
+  }
+
+  private fun playHead() {
+    val headText = queue.firstOrNull() ?: return
+    playbackEpoch += 1
+    val epoch = playbackEpoch
+    isSpeaking = true
+    engine.speak(
+      headText,
+      onDone = { if (epoch == playbackEpoch) onCurrentUtteranceFinished() },
+      onError = { if (epoch == playbackEpoch) onCurrentUtteranceFailed() },
+    )
+  }
+
+  private fun onCurrentUtteranceFinished() {
+    advanceQueue()
+  }
+
+  private fun onCurrentUtteranceFailed() {
+    advanceQueue()
+  }
+
+  private fun advanceQueue() {
+    if (queue.isNotEmpty()) {
+      queue.removeFirst()
+    }
+    if (queue.isNotEmpty()) {
+      isSpeaking = true
+      playHead()
+    } else {
+      isSpeaking = false
+    }
   }
 
   companion object {

@@ -263,7 +263,6 @@ class VoiceAndTtsTest {
     val engine = FakeEngine()
     val tts = TtsService(engine)
     assertEquals(NativeConfig.SPEECH_LOCALE_DEFAULT, engine.boundLocale)
-    assertTrue(tts.cantoneseAvailable)
     val first = card("a", "前方首選甲場，剩十二個位", vacancies = 12)
     val second = card("b", "第二個乙場，剩三個位", vacancies = 3)
     val spoken = tts.speakFirstChoice(
@@ -326,19 +325,120 @@ class VoiceAndTtsTest {
       ),
     )
 
-    val refused = FakeEngine(bindResult = false)
-    val noCantonese = TtsService(refused)
-    assertFalse(noCantonese.cantoneseAvailable)
-    assertTrue(noCantonese.mandarinFallbackRefused)
-    assertNull(
-      noCantonese.speakFirstChoice(
-        cards = listOf(first),
+    tts.interrupt()
+    engine.finish()
+    assertFalse(tts.isSpeaking)
+    assertEquals(0, tts.pendingCount())
+  }
+
+  @Test
+  fun utteranceCallbacksBlockSelfHearingUntilDoneOrError() {
+    val doneEngine = FakeEngine()
+    val doneTts = TtsService(doneEngine)
+    val cue = card("a", "前方首選甲場")
+    assertEquals(
+      cue.spokenCue,
+      doneTts.speakFirstChoice(
+        cards = listOf(cue),
         sourceStatus = "ok",
         voiceMode = VoiceMode.FULL_VOICE,
         isApproachMuted = false,
       ),
     )
-    assertTrue(refused.spoken.isEmpty())
+    assertTrue(doneTts.isSpeaking)
+    assertEquals(1, doneTts.pendingCount())
+    val blocked = CommandCodes.parse(
+      "好",
+      ParseContext(
+        pendingQuestion = PendingQuestion.RECOMMENDATION_CONFIRM,
+        isTtsSpeaking = doneTts.isSpeaking,
+      ),
+    )
+    assertFalse(blocked.confirmed)
+    assertTrue(blocked.blockedAsSelfHearing)
+    doneEngine.finish()
+    assertEquals(0, doneTts.pendingCount())
+    assertFalse(doneTts.isSpeaking)
+    val confirmed = CommandCodes.parse(
+      "好",
+      ParseContext(
+        pendingQuestion = PendingQuestion.RECOMMENDATION_CONFIRM,
+        isTtsSpeaking = doneTts.isSpeaking,
+      ),
+    )
+    assertTrue(confirmed.confirmed)
+
+    val errorEngine = FakeEngine()
+    val errorTts = TtsService(errorEngine)
+    errorTts.speakFirstChoice(
+      cards = listOf(cue),
+      sourceStatus = "ok",
+      voiceMode = VoiceMode.ANNOUNCE_MANUAL,
+      isApproachMuted = false,
+    )
+    assertTrue(errorTts.isSpeaking)
+    assertEquals(1, errorTts.pendingCount())
+    assertTrue(
+      CommandCodes.parse(
+        "好",
+        ParseContext(
+          pendingQuestion = PendingQuestion.RECOMMENDATION_CONFIRM,
+          isTtsSpeaking = errorTts.isSpeaking,
+        ),
+      ).blockedAsSelfHearing,
+    )
+    errorEngine.fail()
+    assertEquals(0, errorTts.pendingCount())
+    assertFalse(errorTts.isSpeaking)
+    assertTrue(
+      CommandCodes.parse(
+        "好",
+        ParseContext(
+          pendingQuestion = PendingQuestion.RECOMMENDATION_CONFIRM,
+          isTtsSpeaking = errorTts.isSpeaking,
+        ),
+      ).confirmed,
+    )
+  }
+
+  @Test
+  fun speakRequiresCapabilityCheckerNotBindLocale() {
+    val notInstalledProbe = LocaleProbe(
+      setLanguageSucceeded = true,
+      offlineCantoneseVoiceInstalled = false,
+    )
+    val blockedChecker = VoiceCapabilityChecker(FakeProbe(notInstalledProbe, notInstalledProbe))
+    val blockedSnapshot = blockedChecker.check(recordAudioGranted = true)
+    assertEquals(CapabilityStatus.SUPPORTED_NOT_INSTALLED, blockedChecker.ttsStatus)
+    assertEquals(CapabilityStatus.SUPPORTED_NOT_INSTALLED, blockedSnapshot.tts)
+    assertEquals(VoiceMode.MANUAL_ONLY, blockedChecker.tripVoiceMode)
+    val blockedEngine = FakeEngine(bindResult = true)
+    val blocked = TtsService(blockedEngine, blockedChecker)
+    assertEquals(NativeConfig.SPEECH_LOCALE_DEFAULT, blockedEngine.boundLocale)
+    assertNull(
+      blocked.speakFirstChoice(
+        cards = listOf(card("a", "前方首選甲場")),
+        sourceStatus = "ok",
+        voiceMode = VoiceMode.FULL_VOICE,
+        isApproachMuted = false,
+      ),
+    )
+    assertTrue(blockedEngine.spoken.isEmpty())
+    assertFalse(blocked.isSpeaking)
+
+    val readyChecker = VoiceCapabilityChecker(usableProbe())
+    readyChecker.check(recordAudioGranted = true)
+    assertEquals(CapabilityStatus.AVAILABLE, readyChecker.ttsStatus)
+    val readyEngine = FakeEngine(bindResult = true)
+    val ready = TtsService(readyEngine, readyChecker)
+    val spoken = ready.speakFirstChoice(
+      cards = listOf(card("a", "前方首選甲場")),
+      sourceStatus = "ok",
+      voiceMode = VoiceMode.FULL_VOICE,
+      isApproachMuted = false,
+    )
+    assertEquals("前方首選甲場", spoken)
+    assertEquals(listOf("前方首選甲場"), readyEngine.spoken)
   }
 
   private fun usable(): LocaleProbe {
@@ -425,11 +525,24 @@ private class FakeEngine(
     return bindResult
   }
 
-  override fun speak(text: String) {
+  private var onDone: () -> Unit = {}
+  private var onError: () -> Unit = {}
+
+  override fun speak(text: String, onDone: () -> Unit, onError: () -> Unit) {
     spoken.add(text)
+    this.onDone = onDone
+    this.onError = onError
   }
 
   override fun stop() {
     stopCount += 1
+  }
+
+  fun finish() {
+    onDone()
+  }
+
+  fun fail() {
+    onError()
   }
 }
