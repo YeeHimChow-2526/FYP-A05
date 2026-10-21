@@ -21,7 +21,7 @@ interface TtsEngine {
 
 class TtsService(
   private val engine: TtsEngine,
-  private val capabilityChecker: VoiceCapabilityChecker? = null,
+  private val capabilityChecker: VoiceCapabilityChecker,
 ) {
   var isSpeaking: Boolean = false
     private set
@@ -42,10 +42,7 @@ class TtsService(
     isApproachMuted: Boolean,
     driverAsked: Boolean = false,
   ): String? {
-    if (voiceMode == TripVoiceMode.MANUAL_ONLY) {
-      return null
-    }
-    if (capabilityChecker != null && capabilityChecker.ttsStatus != CapabilityStatus.AVAILABLE) {
+    if (voiceMode == TripVoiceMode.MANUAL_ONLY || capabilityChecker.ttsStatus != CapabilityStatus.AVAILABLE) {
       return null
     }
     if (isApproachMuted && !driverAsked) {

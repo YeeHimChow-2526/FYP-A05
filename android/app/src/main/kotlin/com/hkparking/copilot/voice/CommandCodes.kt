@@ -100,7 +100,8 @@ object CommandCodes {
         preferenceOverride = PreferenceOverride.METERS_FOCUS,
       )
     }
-    if (CANCEL_TOKENS.any { text.contains(it) }) {
+    val normalized = text.trim().trim('。', '！', '!', '？', '?', '，', ',')
+    if (normalized in CANCEL_TOKENS) {
       return ParseResult(code = CommandCode.CANCEL)
     }
     if (text.contains("詳細啲")) {
@@ -151,7 +152,7 @@ object CommandCodes {
     return text == "好" || text.startsWith("好，") || text.startsWith("好,") || text.startsWith("好 ")
   }
 
-  private val CANCEL_TOKENS = listOf("唔使", "取消", "收埋", "等等")
+  private val CANCEL_TOKENS = listOf("唔使", "取消", "收埋", "唔好", "等等")
   private val NEXT_TOKENS = listOf("有冇第二個", "下一個", "轉場")
   private val ON_SITE_TOKENS = listOf("附近", "呢度", "而家位置")
   private val FIND_TOKENS = listOf("我要泊車", "泊車", "搵位", "出發")

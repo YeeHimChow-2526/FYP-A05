@@ -147,14 +147,23 @@ class VoiceAndTtsTest {
     assertEquals(CommandCode.NEXT_OPTION, CommandCodes.parse("有冇第二個").code)
     assertEquals(CommandCode.NEXT_OPTION, CommandCodes.parse("下一個").code)
     assertEquals(CommandCode.NEXT_OPTION, CommandCodes.parse("轉場").code)
-    listOf("唔使", "取消", "收埋", "等等").forEach { token ->
+    listOf("唔使", "取消", "收埋", "唔好", "等等", "唔好！").forEach { token ->
       val cancel = CommandCodes.parse(token)
       assertEquals(CommandCode.CANCEL, cancel.code)
       assertTrue(cancel.accepted)
     }
-    val notCancel = CommandCodes.parse("唔好")
-    assertEquals(CommandCode.UNKNOWN, notCancel.code)
-    assertFalse(notCancel.accepted)
+    val embedded = CommandCodes.parse("好唔好")
+    assertEquals(CommandCode.UNKNOWN, embedded.code)
+    assertFalse(embedded.accepted)
+    assertFalse(embedded.confirmed)
+    val embeddedBound = CommandCodes.parse(
+      "好唔好",
+      ParseContext(pendingQuestion = PendingQuestion.RECOMMENDATION_CONFIRM),
+    )
+    assertEquals(CommandCode.UNKNOWN, embeddedBound.code)
+    assertFalse(embeddedBound.accepted)
+    assertFalse(embeddedBound.confirmed)
+    assertNotEquals(CommandCode.CANCEL, embeddedBound.code)
     assertEquals(CommandCode.ON_SITE, CommandCodes.parse("附近").code)
     assertEquals(CommandCode.ON_SITE, CommandCodes.parse("呢度").code)
     assertEquals(CommandCode.ON_SITE, CommandCodes.parse("而家位置").code)
@@ -277,7 +286,7 @@ class VoiceAndTtsTest {
   @Test
   fun ttsSpeaksOnlyFirstChoiceAndInterrupts() {
     val engine = FakeEngine()
-    val tts = TtsService(engine)
+    val tts = TtsService(engine, availableChecker())
     assertEquals(NativeConfig.SPEECH_LOCALE_DEFAULT, engine.boundLocale)
     val first = card("a", "前方首選甲場，剩十二個位", vacancies = 12)
     val second = card("b", "第二個乙場，剩三個位", vacancies = 3)
@@ -299,7 +308,7 @@ class VoiceAndTtsTest {
     assertEquals(1, engine.stopCount)
 
     val staleEngine = FakeEngine()
-    val staleTts = TtsService(staleEngine)
+    val staleTts = TtsService(staleEngine, availableChecker())
     val meter = card("m", "咪錶剩8個位", type = "METER", vacancies = 8, isStale = true)
     val staleSpoken = staleTts.speakFirstChoice(
       cards = listOf(meter, second),
@@ -312,7 +321,7 @@ class VoiceAndTtsTest {
     assertFalse(staleSpoken.contains(meter.vacancies.toString()))
     assertEquals(listOf(ZhHkTemplates.METER_STALE_SPOKEN), staleEngine.spoken)
 
-    val degraded = TtsService(FakeEngine())
+    val degraded = TtsService(FakeEngine(), availableChecker())
     val freshMeter = card("m2", "咪錶剩9個位", type = "METER", vacancies = 9, isStale = false)
     val degradedSpoken = degraded.speakFirstChoice(
       cards = listOf(freshMeter),
@@ -323,7 +332,7 @@ class VoiceAndTtsTest {
     assertEquals(ZhHkTemplates.METER_STALE_SPOKEN, degradedSpoken)
     assertFalse(degradedSpoken!!.contains("9"))
 
-    val muted = TtsService(FakeEngine())
+    val muted = TtsService(FakeEngine(), availableChecker())
     assertNull(
       muted.speakFirstChoice(
         cards = listOf(first),
@@ -333,7 +342,7 @@ class VoiceAndTtsTest {
       ),
     )
     assertNull(
-      TtsService(FakeEngine()).speakFirstChoice(
+      TtsService(FakeEngine(), availableChecker()).speakFirstChoice(
         cards = listOf(first),
         sourceStatus = "ok",
         voiceMode = VoiceMode.MANUAL_ONLY,
@@ -350,7 +359,7 @@ class VoiceAndTtsTest {
   @Test
   fun utteranceCallbacksBlockSelfHearingUntilDoneOrError() {
     val doneEngine = FakeEngine()
-    val doneTts = TtsService(doneEngine)
+    val doneTts = TtsService(doneEngine, availableChecker())
     val cue = card("a", "前方首選甲場")
     assertEquals(
       cue.spokenCue,
@@ -385,7 +394,7 @@ class VoiceAndTtsTest {
     assertTrue(confirmed.confirmed)
 
     val errorEngine = FakeEngine()
-    val errorTts = TtsService(errorEngine)
+    val errorTts = TtsService(errorEngine, availableChecker())
     errorTts.speakFirstChoice(
       cards = listOf(cue),
       sourceStatus = "ok",
@@ -455,6 +464,10 @@ class VoiceAndTtsTest {
     )
     assertEquals("前方首選甲場", spoken)
     assertEquals(listOf("前方首選甲場"), readyEngine.spoken)
+  }
+
+  private fun availableChecker(): VoiceCapabilityChecker {
+    return VoiceCapabilityChecker(usableProbe()).also { it.check(recordAudioGranted = true) }
   }
 
   private fun startedForClarify(mode: VoiceMode): TripStateMachine {
