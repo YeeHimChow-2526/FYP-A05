@@ -34,7 +34,7 @@
 
 ### 19.2 Phase 1 — 垂直骨幹與端雲閉環（第 4–5 步）
 
-- [ ] W-A.1 懸浮膠囊＋狀態機 — 狀態機已落地（Step 1.2）；膠囊 UI 未做 — commit: 4ac4036
+- [x] W-A.1 懸浮膠囊＋狀態機 — commit: 4ac4036, eaa4fc1
 - [ ] W-A.2 Maps 接盤與分享跳板 — commit: 
 - [ ] W-A.3 本機字典樹與常數檔 — 常數檔已落地（Step 1.1）；字典樹未做 — commit: 2fbf18b
 - [x] W-A.15 session_id 生命週期 — commit: 4ac4036
@@ -85,7 +85,7 @@
 
 | MVP 步驟 | 範圍（摘自 `.ai/HANDOFF.md`） | 任務編號 |
 |---|---|---|
-| Step 1 | 雙層骨架＋FGS 握手＋P 膠囊燈號＋`sim/` 殼與 fixtures＋`ApiClient` 分級重試＋三種行程語音模式與能力檢查＋粵語 TTS 口播首選 | Step 1.1：W-A.6；W-A.3 常數檔。Step 1.2：W-A.15；W-A.1 狀態機。Step 1.3：W-A.19、W-A.21；W-A.7 首選口播。Step 1.4：W-A.12。Step 1.5：W-A.16 |
+| Step 1 | 雙層骨架＋FGS 握手＋P 膠囊燈號＋`sim/` 殼與 fixtures＋`ApiClient` 分級重試＋三種行程語音模式與能力檢查＋粵語 TTS 口播首選 | Step 1.1：W-A.6；W-A.3 常數檔。Step 1.2：W-A.15；W-A.1 狀態機。Step 1.3：W-A.19、W-A.21；W-A.7 首選口播。Step 1.4：W-A.12。Step 1.5：W-A.16。Step 1.6：W-A.1 |
 | Step 2 | 語音追問閉環＋`FloatingCardView` 追問出卡＋手動模式卡片按鈕＋Intent 喚醒 Google Maps 導航 | 由 Gemini 指定 |
 | Step 3 | `LocalPoiTrie.kt` 本地字典樹＋Google Maps 分享接盤＋`DistanceTracker.kt` 到場雙態＋Flutter 今日行程 | 由 Gemini 指定 |
 
