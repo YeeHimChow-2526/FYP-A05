@@ -17,6 +17,8 @@ class _IgnitionScreenState extends State<IgnitionScreen> {
   final PreferenceManager _preferences = PreferenceManager();
   String _nativeState = '';
   String _nativeDataJson = '';
+  String? _permissionBanner;
+  bool _tripStarted = false;
 
   @override
   void initState() {
@@ -41,25 +43,68 @@ class _IgnitionScreenState extends State<IgnitionScreen> {
   Future<void> _startFromGesture() async {
     try {
       await OverlayChannel.startBubbleService();
+      if (!mounted) return;
+      setState(() {
+        _tripStarted = true;
+        _permissionBanner = null;
+      });
     } on MissingPluginException {
       return;
-    } on PlatformException {
-      return;
+    } on PlatformException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _tripStarted = false;
+      });
+      await _showPermissionGap(error);
     }
   }
 
   Future<void> _selectPreference(DriverPreference value) async {
-    await _preferences.setPreference(value);
+    try {
+      await _preferences.setPreference(value);
+    } on PlatformException catch (error) {
+      await _showPermissionGap(error);
+    } on MissingPluginException {
+      _preferences.preference = value;
+    }
     if (mounted) {
       setState(() {});
     }
   }
 
   Future<void> _toggleHotword(bool enabled) async {
-    await _preferences.setHotwordEnabled(enabled);
+    try {
+      await _preferences.setHotwordEnabled(enabled);
+    } on PlatformException catch (error) {
+      await _showPermissionGap(error);
+    } on MissingPluginException {
+      _preferences.hotwordEnabled = enabled;
+    }
     if (mounted) {
       setState(() {});
     }
+  }
+
+  Future<void> _showPermissionGap(PlatformException error) async {
+    Object? status;
+    try {
+      status = await OverlayChannel.getPermissionStatus();
+    } on PlatformException catch (statusError) {
+      status = statusError.message;
+    } on MissingPluginException {
+      status = null;
+    }
+    if (!mounted) return;
+    final missing = error.details is Map ? (error.details as Map)['missingItems'] : null;
+    final banner = missing == null
+        ? '請查看主畫面頂部權限狀態橫額。請泊好車後再處理。'
+        : '權限未齊：$missing。請查看主畫面頂部權限狀態橫額。請泊好車後再處理。';
+    setState(() {
+      _permissionBanner = status == null ? banner : '$banner $status';
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('請查看主畫面頂部權限狀態橫額。請泊好車後再處理。')),
+    );
   }
 
   @override
@@ -79,6 +124,19 @@ class _IgnitionScreenState extends State<IgnitionScreen> {
               ),
             ),
             const SizedBox(height: 24),
+            if (_permissionBanner != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: Text(
+                  _permissionBanner!,
+                  style: TextStyle(color: AppColors.amberSteady, fontSize: 16),
+                ),
+              ),
+            Text(
+              _tripStarted ? '已開程' : '未開程',
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
+            ),
+            const SizedBox(height: 12),
             Text(
               '三段偏好',
               style: TextStyle(color: AppColors.textSecondary, fontSize: 16),
