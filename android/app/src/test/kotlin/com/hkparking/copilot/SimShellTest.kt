@@ -1,11 +1,13 @@
 package com.hkparking.copilot
 
 import com.hkparking.copilot.di.Bindings
+import com.hkparking.copilot.di.FixtureApiTransport
 import com.hkparking.copilot.di.LocationSource
 import com.hkparking.copilot.di.VoiceInput
 import com.hkparking.copilot.net.ApiClient
 import com.hkparking.copilot.net.ApiTransport
 import com.hkparking.copilot.net.RecommendRequest
+import com.hkparking.copilot.sim.SimEventReceiver
 import com.hkparking.copilot.voice.CommandCode
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.EmptyCoroutineContext
@@ -96,6 +98,54 @@ class SimShellTest {
     assertEquals(CommandCode.CANCEL, voice.lastParseResult?.code)
     assertTrue(voice.lastParseResult?.accepted == true)
     voice.stopListening()
+  }
+
+  @Test
+  fun simEventsDriveDistanceNetworkAndRateLimit() {
+    val machine = startedMachine(destinationName = "朗豪坊")
+    val logs = mutableListOf<String>()
+    val receiver = SimEventReceiver(stateMachineProvider = { machine }, logger = { logs += it })
+    Bindings.locationSource.reset()
+    Bindings.apiTransport.reset()
+    assertTrue(receiver.dispatchEvent("SET_DISTANCE_M", intValue = NativeConfig.TRIGGER_DISTANCE_M))
+    assertEquals(NativeConfig.TRIGGER_DISTANCE_M, Bindings.locationSource.distanceMeters)
+    assertTrue(machine.jitTriggered)
+    assertEquals(TripState.AMBER_STEADY, machine.state)
+
+    assertTrue(receiver.dispatchEvent("NETWORK_FAIL"))
+    assertEquals(TripState.GREY_BREATHING, machine.state)
+    assertEquals(CapsuleLight.GREY_BREATHING, machine.capsuleLight)
+
+    assertTrue(receiver.dispatchEvent("NETWORK_OK"))
+    assertFalse(machine.networkDegraded)
+
+    assertTrue(receiver.dispatchEvent("FORCE_RATE_LIMIT", intValue = 2))
+    assertEquals(FixtureApiTransport.RATE_LIMIT_FIXTURE, Bindings.apiTransport.fixtureName)
+    val limited = runSuspend {
+      ApiClient(Bindings.apiTransport, machine) { }.recommendAndRoute(sampleRequest())
+    }
+    assertEquals(429, limited.httpStatus)
+    Bindings.apiTransport.reset()
+    Bindings.locationSource.reset()
+    assertTrue(logs.isEmpty())
+  }
+
+  @Test
+  fun unknownOrInvalidSimEventsAreLoggedAndIgnored() {
+    val machine = startedMachine(destinationName = "朗豪坊")
+    val logs = mutableListOf<String>()
+    val receiver = SimEventReceiver(stateMachineProvider = { machine }, logger = { logs += it })
+    Bindings.locationSource.reset()
+    val beforeDistance = Bindings.locationSource.distanceMeters
+    val beforeState = machine.state
+    assertFalse(receiver.dispatchEvent("NO_SUCH_EVENT", intValue = 100))
+    assertFalse(receiver.dispatchEvent("SET_DISTANCE_M", intValue = null, stringValue = "abc"))
+    assertFalse(receiver.dispatchEvent("INJECT_UTTERANCE", stringValue = "   "))
+    assertEquals(3, logs.size)
+    assertTrue(logs.all { it.startsWith("Ignored unknown or invalid sim event:") })
+    assertEquals(beforeDistance, Bindings.locationSource.distanceMeters)
+    assertEquals(beforeState, machine.state)
+    Bindings.locationSource.reset()
   }
 
   private fun startedMachine(destinationName: String? = null): TripStateMachine {
