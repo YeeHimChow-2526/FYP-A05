@@ -47,7 +47,7 @@
 
 ### 19.3 Phase 2 — 行車交互精細化與香港特色場景（第 6–10 步）
 
-- [x] W-A.6 偏好三段開關 — commit: 2fbf18b
+- [x] W-A.6 偏好三段開關 — commit: 2fbf18b, adee71a
 - [ ] W-A.7 語音優先口播出卡 — 首選口播已落地（Step 1.3）；追問出卡未做 — commit: a5da97e
 - [ ] W-A.8 倒車雷達避讓 — commit: 
 - [ ] W-A.9 熄匙無痕銷毀 — commit: 
