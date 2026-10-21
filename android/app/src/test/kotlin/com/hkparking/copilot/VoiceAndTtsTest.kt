@@ -147,11 +147,14 @@ class VoiceAndTtsTest {
     assertEquals(CommandCode.NEXT_OPTION, CommandCodes.parse("有冇第二個").code)
     assertEquals(CommandCode.NEXT_OPTION, CommandCodes.parse("下一個").code)
     assertEquals(CommandCode.NEXT_OPTION, CommandCodes.parse("轉場").code)
-    assertEquals(CommandCode.CANCEL, CommandCodes.parse("唔使").code)
-    assertEquals(CommandCode.CANCEL, CommandCodes.parse("取消").code)
-    assertEquals(CommandCode.CANCEL, CommandCodes.parse("收埋").code)
-    assertEquals(CommandCode.CANCEL, CommandCodes.parse("唔好").code)
-    assertEquals(CommandCode.CANCEL, CommandCodes.parse("等等").code)
+    listOf("唔使", "取消", "收埋", "等等").forEach { token ->
+      val cancel = CommandCodes.parse(token)
+      assertEquals(CommandCode.CANCEL, cancel.code)
+      assertTrue(cancel.accepted)
+    }
+    val notCancel = CommandCodes.parse("唔好")
+    assertEquals(CommandCode.UNKNOWN, notCancel.code)
+    assertFalse(notCancel.accepted)
     assertEquals(CommandCode.ON_SITE, CommandCodes.parse("附近").code)
     assertEquals(CommandCode.ON_SITE, CommandCodes.parse("呢度").code)
     assertEquals(CommandCode.ON_SITE, CommandCodes.parse("而家位置").code)
@@ -241,6 +244,9 @@ class VoiceAndTtsTest {
 
   @Test
   fun voiceReplyPromptOnlyWhenFullVoiceMicNotUpgraded() {
+    assertEquals("邊一區？", ZhHkTemplates.PLACE_CLARIFY)
+    assertFalse(ZhHkTemplates.PLACE_CLARIFY.contains("深水埗"))
+    assertFalse(ZhHkTemplates.PLACE_CLARIFY.contains("旺角"))
     val cue = ZhHkTemplates.PLACE_CLARIFY
     val prompted = ZhHkTemplates.withVoiceReplyPrompt(cue, VoiceMode.FULL_VOICE, isMicFgsActive = false)
     assertTrue(prompted.endsWith("請拍一拍膠囊答我"))
@@ -256,6 +262,16 @@ class VoiceAndTtsTest {
     assertEquals("網絡有啲慢，我再試吓", ZhHkTemplates.NETWORK_SLOW)
     assertEquals("網絡唔順，遲啲再試", ZhHkTemplates.NETWORK_FAILED)
     assertEquals("暫時冇其他選擇", ZhHkTemplates.NO_MORE_OPTIONS)
+
+    val full = startedForClarify(VoiceMode.FULL_VOICE)
+    full.onMicFgsActive(false)
+    full.onPlaceClarificationNeeded()
+    assertEquals(ZhHkTemplates.PLACE_CLARIFY + ZhHkTemplates.TAP_CAPSULE, full.lastSpokenCue)
+
+    val announce = startedForClarify(VoiceMode.ANNOUNCE_MANUAL)
+    announce.onPlaceClarificationNeeded()
+    assertEquals(VoiceMode.ANNOUNCE_MANUAL, announce.tripVoiceMode)
+    assertEquals(ZhHkTemplates.PLACE_CLARIFY, announce.lastSpokenCue)
   }
 
   @Test
@@ -439,6 +455,22 @@ class VoiceAndTtsTest {
     )
     assertEquals("前方首選甲場", spoken)
     assertEquals(listOf("前方首選甲場"), readyEngine.spoken)
+  }
+
+  private fun startedForClarify(mode: VoiceMode): TripStateMachine {
+    val checker = when (mode) {
+      VoiceMode.FULL_VOICE -> VoiceCapabilityChecker(usableProbe())
+      VoiceMode.ANNOUNCE_MANUAL -> VoiceCapabilityChecker(
+        FakeProbe(LocaleProbe(supported = false), usable()),
+      )
+      VoiceMode.MANUAL_ONLY -> VoiceCapabilityChecker(FakeProbe(LocaleProbe(), LocaleProbe()))
+    }
+    checker.check(recordAudioGranted = mode == VoiceMode.FULL_VOICE)
+    val machine = TripStateMachine()
+    machine.applyVoiceCapability(checker)
+    machine.requestStart(StartupEntry.A_2)
+    machine.onFgsStarted()
+    return machine
   }
 
   private fun usable(): LocaleProbe {
