@@ -1,6 +1,6 @@
 package com.hkparking.copilot
 
-// android/app/src/main/kotlin/com/hkparking/copilot/NativeConfig.kt（行程期間全部行車常數；Kotlin 單一事實來源）
+// 來源：實作版 Doc v2.9.1 PART 2 §二.1（行程期間全部行車常數；Kotlin 單一事實來源）
 object NativeConfig {
   // --- 車載卡片尺寸（原生 FloatingCardView）---
   const val OVERLAY_MAX_CARD_HEIGHT_DP = 175            // 卡片高度上限 (dp)
