@@ -105,7 +105,7 @@ class FloatingBubbleService : android.app.Service {
     emitFgsStartedImmediately: Boolean = false,
     onFgsStarted: () -> Unit = {},
   ) {
-    capabilityChecker.recheckSilently(
+    val snapshot = capabilityChecker.recheckSilently(
       recordAudioGranted = recordAudioGranted,
       startedAtMs = startedAtMs,
       nowMs = capabilityRecheckNowMs,
@@ -117,7 +117,7 @@ class FloatingBubbleService : android.app.Service {
     } else {
       capabilityChecker.fgsType
     }
-    tripStateMachine.applyVoiceCapability(capabilityChecker)
+    tripStateMachine.syncVoiceCapability(snapshot, capabilityChecker.hasConfirmed)
     if (!tripStateMachine.fgsStartAccepted) {
       tripStateMachine.requestStart(
         entry = entry,

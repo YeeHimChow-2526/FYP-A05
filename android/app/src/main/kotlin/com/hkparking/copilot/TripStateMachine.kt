@@ -1,5 +1,6 @@
 package com.hkparking.copilot
 
+import com.hkparking.copilot.voice.CapabilitySnapshot
 import com.hkparking.copilot.voice.TripVoiceMode
 import com.hkparking.copilot.voice.VoiceCapabilityChecker
 import java.util.UUID
@@ -99,8 +100,17 @@ class TripStateMachine(
   private var accumulatedDistanceM: Int = 0
 
   fun applyVoiceCapability(checker: VoiceCapabilityChecker) {
-    tripVoiceMode = checker.tripVoiceMode
-    voiceInputEnabled = checker.voiceInputEnabled
+    syncVoiceCapability(checker.currentSnapshot(timedOut = false), checker.hasConfirmed)
+  }
+
+  fun syncVoiceCapability(snapshot: CapabilitySnapshot, hasConfirmed: Boolean) {
+    val mode = if (snapshot.timedOut && !hasConfirmed) {
+      TripVoiceMode.MANUAL_ONLY
+    } else {
+      snapshot.mode
+    }
+    tripVoiceMode = mode
+    voiceInputEnabled = snapshot.voiceInputEnabled && mode == TripVoiceMode.FULL_VOICE
   }
 
   fun coldTapCapsule(): StartOutcome = rejected(null)

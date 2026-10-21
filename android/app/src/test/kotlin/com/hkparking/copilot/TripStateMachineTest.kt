@@ -349,6 +349,63 @@ class TripStateMachineTest {
   }
 
   @Test
+  fun capabilityTimeoutDoesNotBlockFgsStarted() {
+    val checker = VoiceCapabilityChecker(ReadyProbe())
+    val service = FloatingBubbleService(checker)
+    val activity = FgsBootstrapActivity(service)
+    assertTrue(
+      activity.launchFromEntry(
+        StartupEntry.A_1,
+        PermissionCheckInput(),
+        startedAtMs = 0L,
+        capabilityCheckElapsedMs = NativeConfig.VOICE_CAPABILITY_CHECK_TIMEOUT_MS,
+        emitFgsStartedImmediately = false,
+      ),
+    )
+    assertFalse(service.isCapsuleVisible)
+    assertEquals(TripState.PRE_FGS, service.tripStateMachine.state)
+    assertEquals(CapsuleLight.NONE, service.tripStateMachine.capsuleLight)
+    assertNotEquals(TripState.CRUISING, service.tripStateMachine.state)
+    assertNotEquals(TripState.GREY_BREATHING, service.tripStateMachine.state)
+    assertNotEquals(TripState.ALERT_BREATHING, service.tripStateMachine.state)
+    service.reportFgsStarted()
+    assertTrue(activity.fgsStartedReceived)
+    assertTrue(activity.isFinished)
+    assertFalse(service.capabilityChecker.blocksFgsStarted)
+    assertFalse(service.capabilityChecker.downloadPromptRequested)
+    assertEquals(TripVoiceMode.MANUAL_ONLY, service.tripStateMachine.tripVoiceMode)
+  }
+
+  @Test
+  fun silentRecheckTimeoutReusesConfirmedModeOrFallsBackWhenNeverConfirmed() {
+    val confirmed = VoiceCapabilityChecker(ReadyProbe())
+    confirmed.check(recordAudioGranted = true)
+    val reused = confirmed.recheckSilently(
+      recordAudioGranted = true,
+      startedAtMs = 0L,
+      nowMs = NativeConfig.VOICE_CAPABILITY_CHECK_TIMEOUT_MS,
+    )
+    val kept = TripStateMachine()
+    kept.syncVoiceCapability(reused, confirmed.hasConfirmed)
+    assertTrue(reused.timedOut)
+    assertFalse(reused.blocksFgsStarted)
+    assertEquals(TripVoiceMode.FULL_VOICE, kept.tripVoiceMode)
+
+    val fresh = VoiceCapabilityChecker(ReadyProbe())
+    assertFalse(fresh.hasConfirmed)
+    val timedOut = fresh.recheckSilently(
+      recordAudioGranted = true,
+      startedAtMs = 0L,
+      nowMs = NativeConfig.VOICE_CAPABILITY_CHECK_TIMEOUT_MS,
+    )
+    val unavailable = TripStateMachine()
+    unavailable.syncVoiceCapability(timedOut, fresh.hasConfirmed)
+    assertTrue(timedOut.timedOut)
+    assertEquals(TripVoiceMode.MANUAL_ONLY, unavailable.tripVoiceMode)
+    assertNotEquals(TripVoiceMode.FULL_VOICE, unavailable.tripVoiceMode)
+  }
+
+  @Test
   fun greyBreathingStaysAheadOfAlertEvenWithoutDestination() {
     val machine = started(StartupEntry.A_2)
     assertFalse(machine.destinationLocked)
