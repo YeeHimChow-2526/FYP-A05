@@ -7,13 +7,14 @@ import com.hkparking.copilot.di.Bindings
 class SimEventReceiver(
   private val stateMachineProvider: () -> TripStateMachine? = { null },
   private val logger: (String) -> Unit = {},
+  private val onEventHandled: () -> Unit = {},
 ) : android.content.BroadcastReceiver() {
   fun dispatchEvent(
     event: String?,
     intValue: Int? = null,
     stringValue: String? = null,
   ): Boolean {
-    return when (event) {
+    val handled = when (event) {
       START_TRIP -> startTrip()
       PAUSE -> {
         Bindings.locationSource.pause()
@@ -44,6 +45,8 @@ class SimEventReceiver(
       INJECT_UTTERANCE -> injectUtterance(event, stringValue)
       else -> ignore(event)
     }
+    if (handled) onEventHandled()
+    return handled
   }
 
   override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {

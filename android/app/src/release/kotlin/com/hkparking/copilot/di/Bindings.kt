@@ -6,4 +6,8 @@ object Bindings {
   val voiceInput: VoiceInput = SttVoiceInput()
   val locationSource: LocationSource = FusedLocationSource()
   val apiTransport: ApiTransport = HttpApiTransport()
+
+  fun attachService(service: com.hkparking.copilot.FloatingBubbleService) {}
+
+  fun detachService(service: com.hkparking.copilot.FloatingBubbleService) {}
 }

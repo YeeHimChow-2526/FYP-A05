@@ -43,16 +43,19 @@ class FloatingBubbleService : android.app.Service {
       recordAudioGranted = recordAudioGranted,
       hotwordEnabled = hotwordEnabled,
     )
+    com.hkparking.copilot.di.Bindings.attachService(this)
     if (!enterForeground()) {
       onBootstrapTimedOut()
       return START_NOT_STICKY
     }
     reportFgsStarted()
     attachCapsuleWindow()
+    updateCapsuleVisual()
     return START_NOT_STICKY
   }
 
   override fun onDestroy() {
+    com.hkparking.copilot.di.Bindings.detachService(this)
     detachCapsuleWindow()
     isFgsRunning = false
     isCapsuleVisible = false
@@ -61,6 +64,8 @@ class FloatingBubbleService : android.app.Service {
   var isFgsRunning: Boolean = false
     private set
   var isCapsuleVisible: Boolean = false
+    private set
+  var capsuleVisualLabel: String = ""
     private set
   var activeFgsType: String = VoiceCapabilityChecker.FGS_LOCATION
     private set
@@ -152,6 +157,7 @@ class FloatingBubbleService : android.app.Service {
     if (saved != null && saved !== onFgsStarted) saved.invoke()
     onFgsStarted()
     dispatchFgsStarted(this)
+    updateCapsuleVisual()
   }
 
   private fun enterForeground(): Boolean {
@@ -178,6 +184,28 @@ class FloatingBubbleService : android.app.Service {
       startForeground(NOTIFICATION_ID, notification, fgType)
     }
     return posted.isSuccess
+  }
+
+  fun updateCapsuleVisual() {
+    val light = tripStateMachine.capsuleLight
+    val pip = tripStateMachine.statusPip
+    capsuleVisualLabel = "P [${light.name}]"
+    runCatching {
+      android.util.Log.i(
+        "FloatingBubbleService",
+        "Capsule visual updated: light=$light, pip=$pip, state=${tripStateMachine.state}",
+      )
+    }
+    val view = capsuleView ?: return
+    runCatching {
+      if (view is android.widget.TextView) {
+        view.text = "P · ${light.name}"
+        view.setBackgroundColor(0xCC121212.toInt())
+        view.setTextColor(android.graphics.Color.WHITE)
+        view.setPadding(24, 16, 24, 16)
+      }
+      view.invalidate()
+    }
   }
 
   private fun attachCapsuleWindow() {

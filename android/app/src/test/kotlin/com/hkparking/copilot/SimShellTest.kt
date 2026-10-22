@@ -209,6 +209,28 @@ class SimShellTest {
     return candidates.firstOrNull { it.isFile } ?: relative
   }
 
+  @Test
+  fun attachServiceRefreshesCapsuleVisualOnFgsAndNetworkEvents() {
+    val service = FloatingBubbleService()
+    Bindings.attachService(service)
+    service.reportFgsStarted()
+    assertEquals("P [GREY_STEADY]", service.capsuleVisualLabel)
+    assertEquals(CapsuleLight.GREY_STEADY, service.tripStateMachine.capsuleLight)
+
+    val receiver = Bindings.activeReceiver
+    assertTrue(receiver != null)
+    assertTrue(receiver!!.dispatchEvent("NETWORK_FAIL"))
+    assertEquals(CapsuleLight.GREY_BREATHING, service.tripStateMachine.capsuleLight)
+    assertEquals("P [GREY_BREATHING]", service.capsuleVisualLabel)
+
+    assertTrue(receiver.dispatchEvent("NETWORK_OK"))
+    assertFalse(service.tripStateMachine.networkDegraded)
+    assertEquals(CapsuleLight.GREY_STEADY, service.tripStateMachine.capsuleLight)
+    assertEquals("P [GREY_STEADY]", service.capsuleVisualLabel)
+    Bindings.detachService(service)
+    Bindings.apiTransport.reset()
+  }
+
   private fun startedMachine(destinationName: String? = null): TripStateMachine {
     val machine = TripStateMachine()
     machine.requestStart(StartupEntry.A_2, destinationName = destinationName)

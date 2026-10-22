@@ -1,8 +1,10 @@
 package com.hkparking.copilot.di
 
+import com.hkparking.copilot.StartupEntry
 import com.hkparking.copilot.net.ApiTransport
 import com.hkparking.copilot.net.HttpResult
 import com.hkparking.copilot.net.RecommendResponse
+import com.hkparking.copilot.sim.SimEventReceiver
 import com.hkparking.copilot.voice.CommandCodes
 import com.hkparking.copilot.voice.ParseContext
 import com.hkparking.copilot.voice.ParseResult
@@ -95,8 +97,9 @@ class SimLocationSource : LocationSource {
 
 // SIM: debug source set only
 class FixtureApiTransport(
-  private val fixtureLoader: (String) -> String? = { null },
+  fixtureLoader: (String) -> String? = { null },
 ) : ApiTransport {
+  private var fixtureLoader: (String) -> String? = fixtureLoader
   var fixtureName: String = DEFAULT_FIXTURE
     private set
   private var networkFail = false
@@ -105,6 +108,11 @@ class FixtureApiTransport(
 
   fun setFixtureName(name: String) {
     fixtureName = name
+  }
+
+  fun setFixtureLoader(loader: (String) -> String?) {
+    val fallback = fixtureLoader
+    fixtureLoader = { name -> loader(name) ?: fallback(name) }
   }
 
   fun setNetworkFail(failed: Boolean) {
@@ -176,4 +184,31 @@ object Bindings {
   val voiceInput: SimVoiceInput = SimVoiceInput()
   val locationSource: SimLocationSource = SimLocationSource()
   val apiTransport: FixtureApiTransport = FixtureApiTransport()
+  var activeReceiver: SimEventReceiver? = null
+
+  fun attachService(service: com.hkparking.copilot.FloatingBubbleService) {
+    apiTransport.setFixtureLoader { name ->
+      runCatching {
+        service.assets.open("mock/$name").bufferedReader().use { it.readText() }
+      }.getOrNull()
+    }
+    if (!service.tripStateMachine.fgsStartAccepted) {
+      service.startInForeground(StartupEntry.A_2, recordAudioGranted = false)
+    }
+    val receiver = SimEventReceiver(
+      stateMachineProvider = { service.tripStateMachine },
+      onEventHandled = { service.updateCapsuleVisual() },
+    )
+    activeReceiver = receiver
+    if (runCatching { service.applicationContext }.isSuccess) {
+      runCatching { SimEventReceiver.register(service, receiver) }
+    }
+    service.updateCapsuleVisual()
+  }
+
+  fun detachService(service: com.hkparking.copilot.FloatingBubbleService) {
+    val receiver = activeReceiver ?: return
+    runCatching { service.unregisterReceiver(receiver) }
+    activeReceiver = null
+  }
 }
