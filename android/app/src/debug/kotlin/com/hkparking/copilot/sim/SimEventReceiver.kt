@@ -11,6 +11,12 @@ class SimEventReceiver(
     intValue: Int? = null,
     stringValue: String? = null,
   ): Boolean {
+    runCatching {
+      android.util.Log.i(
+        "SimEventReceiver",
+        "SimEvent received: event=$event, intValue=$intValue, stringValue=$stringValue",
+      )
+    }
     val handled = when (event) {
       START_TRIP -> startTrip(stringValue)
       PAUSE -> {

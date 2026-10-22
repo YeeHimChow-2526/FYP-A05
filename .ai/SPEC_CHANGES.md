@@ -56,3 +56,13 @@
 - 影響任務編號／常數名／檔案：W-A.17；`NativeConfig.kt`、`FloatingBubbleService.kt`、`lib/core/constants/app_colors.dart`
 - 類別：規格缺漏
 - 狀態：待處理
+
+### SC-004
+- 日期：2026-10-21
+- 來源：Pi
+- 裝置（如適用）：不適用
+- 發現：`NEARBY_READY` 之 `StatusPip` 未定義應讀 `/v1/recommend-and-route` 邊個欄位（例如首選卡 `cards[0].vacancies`）、以咩空位數字門檻判定 `GREEN`／`YELLOW`／`RED`，以及 `vacancies == -1`（未知／咪錶過期或 `source_status=degraded`）時應顯示邊種 Pip。現行程式維持 `pip = StatusPip.NONE`，未自行發明門檻。
+- 建議改動：於實作版真理表／`NativeConfig` 定義 `NEARBY_READY` StatusPip 之來源欄位、`GREEN`／`YELLOW`／`RED` 空位門檻，以及 `vacancies == -1` 之 Pip 狀態。
+- 影響任務編號／常數名／檔案：W-A.1、W-A.17；`StatusPip`；`TripStateMachine.kt`、`ApiClient.kt`、`FloatingBubbleService.kt`
+- 類別：規格缺漏
+- 狀態：待定

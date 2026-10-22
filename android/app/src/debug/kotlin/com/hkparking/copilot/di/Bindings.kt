@@ -142,7 +142,8 @@ class FixtureApiTransport(
     if (remaining429Count > 0) {
       remaining429Count -= 1
       val raw = fixtureLoader(RATE_LIMIT_FIXTURE)
-      return HttpResult(statusCode = 429, bodyJson = raw ?: RATE_LIMIT_BODY, retryAfterSeconds = null)
+      val body = raw ?: RATE_LIMIT_BODY
+      return HttpResult(statusCode = 429, bodyJson = body, retryAfterSeconds = parseRetryAfterSeconds(body))
     }
     val raw = fixtureLoader(fixtureName)
     return HttpResult(
@@ -158,6 +159,11 @@ class FixtureApiTransport(
     private const val RATE_LIMIT_BODY = "{\"status\":\"RATE_LIMITED\"}"
     private const val LANGHAM_BODY =
       "{\"status\":\"SUCCESS\",\"cards\":[{\"carpark_id\":\"langham\",\"name\":\"朗豪坊\",\"spoken_cue\":\"前方首選朗豪坊停車場\"}]}"
+    private val RETRY_AFTER_PATTERN = Regex("\"retry_after_seconds\"\\s*:\\s*(\\d+)")
+
+    fun parseRetryAfterSeconds(body: String): Long? {
+      return RETRY_AFTER_PATTERN.find(body)?.groupValues?.get(1)?.toLongOrNull()
+    }
 
     fun langhamResponse(): RecommendResponse = RecommendResponse(
       status = "SUCCESS",
@@ -184,10 +190,10 @@ object Bindings {
   var activeReceiver: SimEventReceiver? = null
 
   fun attachService(service: com.hkparking.copilot.FloatingBubbleService) {
-    apiTransport.delayMs = { ms ->
-      service.delayMs(ms)
-      service.updateCapsuleVisual()
+    if (activeReceiver != null) {
+      detachService(service)
     }
+    apiTransport.delayMs = service.delayMs
     apiTransport.setFixtureLoader { name ->
       runCatching {
         service.assets.open("mock/$name").bufferedReader().use { it.readText() }

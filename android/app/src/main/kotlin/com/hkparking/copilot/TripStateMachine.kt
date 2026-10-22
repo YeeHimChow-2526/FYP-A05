@@ -65,6 +65,7 @@ class TripStateMachine(
   private val onTripEnded: (String) -> Unit = {},
   private val sessionIdFactory: () -> String = { "sess_${UUID.randomUUID().toString().replace("-", "")}" },
 ) {
+  var onStateChanged: (() -> Unit)? = null
   var state: TripState = TripState.PRE_FGS
     private set
   var capsuleLight: CapsuleLight = CapsuleLight.NONE
@@ -167,7 +168,7 @@ class TripStateMachine(
     fgsRunning = false
     recommend = false
     jitTriggered = false
-    statusPip = StatusPip.NONE
+    assignStatusPip(StatusPip.NONE)
     isMicFgsActive = false
     networkDegraded = false
     deferredAlert = null
@@ -369,7 +370,7 @@ class TripStateMachine(
     if (!fgsRunning || networkDegraded) {
       return
     }
-    statusPip = pip
+    assignStatusPip(pip)
     jitTriggered = false
     recommend = false
     enter(TripState.NEARBY_READY)
@@ -380,7 +381,7 @@ class TripStateMachine(
       return
     }
     enter(TripState.ENDED)
-    capsuleLight = CapsuleLight.NONE
+    assignCapsuleLight(CapsuleLight.NONE)
     onTripEnded("PERMISSION_REVOKED")
     clearSession()
   }
@@ -405,7 +406,7 @@ class TripStateMachine(
       onParkedConfirmed()
     } else {
       enter(TripState.ENDED)
-      capsuleLight = CapsuleLight.NONE
+      assignCapsuleLight(CapsuleLight.NONE)
       onTripEnded("ENGINE_SHUTDOWN")
       clearSession()
     }
@@ -416,7 +417,7 @@ class TripStateMachine(
       return
     }
     enter(TripState.PARKED_CONFIRMED)
-    capsuleLight = CapsuleLight.NONE
+    assignCapsuleLight(CapsuleLight.NONE)
     onTripEnded("PARKED_CONFIRMED")
     clearSession()
   }
@@ -426,7 +427,7 @@ class TripStateMachine(
       return
     }
     enter(TripState.ENDED)
-    capsuleLight = CapsuleLight.NONE
+    assignCapsuleLight(CapsuleLight.NONE)
     clearSession()
   }
 
@@ -473,7 +474,7 @@ class TripStateMachine(
     fgsStartAccepted = false
     recommend = false
     jitTriggered = false
-    statusPip = StatusPip.NONE
+    assignStatusPip(StatusPip.NONE)
     destinationLocked = false
     hasDestination = false
     destinationName = null
@@ -496,9 +497,20 @@ class TripStateMachine(
     )
   }
 
+  private fun assignCapsuleLight(next: CapsuleLight) {
+    if (capsuleLight == next) return
+    capsuleLight = next
+    onStateChanged?.invoke()
+  }
+
+  private fun assignStatusPip(next: StatusPip) {
+    if (statusPip == next) return
+    statusPip = next
+    onStateChanged?.invoke()
+  }
+
   private fun enter(next: TripState) {
-    state = next
-    capsuleLight = when (next) {
+    val nextLight = when (next) {
       TripState.PRE_FGS, TripState.ENDED, TripState.PARKED_CONFIRMED -> CapsuleLight.NONE
       TripState.CRUISING,
       TripState.NEARBY_READY,
@@ -510,6 +522,10 @@ class TripStateMachine(
       TripState.GREY_BREATHING -> CapsuleLight.GREY_BREATHING
       TripState.ALERT_BREATHING -> CapsuleLight.ALERT_BREATHING
     }
+    val changed = state != next || capsuleLight != nextLight
+    state = next
+    capsuleLight = nextLight
+    if (changed) onStateChanged?.invoke()
   }
 
 }

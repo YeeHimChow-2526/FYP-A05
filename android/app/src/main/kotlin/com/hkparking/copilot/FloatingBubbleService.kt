@@ -39,16 +39,13 @@ class FloatingBubbleService : android.app.Service {
   ) : super() {
     this.capabilityChecker = capabilityChecker
     this.tripStateMachine = tripStateMachine
-    this.delayMs = { ms ->
-      updateCapsuleVisual()
-      clockDelay(ms)
-      updateCapsuleVisual()
-    }
+    this.delayMs = clockDelay
     this.apiClient = com.hkparking.copilot.net.ApiClient(
       com.hkparking.copilot.di.Bindings.apiTransport,
       tripStateMachine,
       this.delayMs,
     )
+    tripStateMachine.onStateChanged = { updateCapsuleVisual() }
     tripStateMachine.applyVoiceCapability(capabilityChecker)
   }
 
@@ -120,6 +117,8 @@ class FloatingBubbleService : android.app.Service {
   private var hasPendingFgsStart: Boolean = false
   private var pendingFgsStartedCallback: (() -> Unit)? = null
   private var pendingInitialDistanceMeters: Int? = null
+  private var lastLoggedSnapshot: String? = null
+  private var portsWired: Boolean = false
 
   fun onColdBubbleTap(): Boolean {
     if (!isFgsRunning) return false
@@ -218,6 +217,8 @@ class FloatingBubbleService : android.app.Service {
 
   private fun wirePorts() {
     com.hkparking.copilot.di.Bindings.attachService(this)
+    if (portsWired) return
+    portsWired = true
     com.hkparking.copilot.di.Bindings.locationSource.setLocationListener { distanceMeters, _, _ ->
       onLocationFix(distanceMeters)
     }
@@ -278,11 +279,15 @@ class FloatingBubbleService : android.app.Service {
     val light = tripStateMachine.capsuleLight
     val pip = tripStateMachine.statusPip
     capsuleVisualLabel = "P [${light.name}]"
-    runCatching {
-      android.util.Log.i(
-        "FloatingBubbleService",
-        "Capsule visual updated: light=$light, pip=$pip, state=${tripStateMachine.state}",
-      )
+    val snapshot = "light=$light, pip=$pip, state=${tripStateMachine.state}"
+    if (snapshot != lastLoggedSnapshot) {
+      lastLoggedSnapshot = snapshot
+      runCatching {
+        android.util.Log.i(
+          "FloatingBubbleService",
+          "Capsule visual updated: $snapshot",
+        )
+      }
     }
     val view = capsuleView ?: return
     runCatching {

@@ -191,6 +191,16 @@ class SimShellTest {
     Bindings.apiTransport.reset()
   }
 
+  private fun expectedRateLimitWaitMs(): Long {
+    val text = mockFixture(FixtureApiTransport.RATE_LIMIT_FIXTURE).readText()
+    val seconds = FixtureApiTransport.parseRetryAfterSeconds(text)
+    return if (seconds != null) {
+      minOf(seconds * 1000L, NativeConfig.RATE_LIMIT_MAX_WAIT_MS)
+    } else {
+      NativeConfig.RATE_LIMIT_RETRY_DELAY_MS
+    }
+  }
+
   private fun fileTransport(): FixtureApiTransport {
     return FixtureApiTransport { name ->
       val file = mockFixture(name)
@@ -281,6 +291,57 @@ class SimShellTest {
     assertTrue(receiver.dispatchEvent("INJECT_UTTERANCE", stringValue = "搵位"))
     assertEquals(TripState.NEARBY_READY, service.tripStateMachine.state)
     assertTrue(Bindings.apiTransport.postCount > before)
+    Bindings.detachService(service)
+  }
+
+  @Test
+  fun backgroundJitTimeoutAndNearbyRateLimitTurnGreyImmediately() {
+    val jitClock = FakeClock()
+    val jitService = openService(jitClock)
+    val jitReceiver = Bindings.activeReceiver!!
+    assertTrue(jitReceiver.dispatchEvent("START_TRIP"))
+    assertTrue(jitReceiver.dispatchEvent("NETWORK_FAIL"))
+    assertTrue(jitReceiver.dispatchEvent("SET_DISTANCE_M", intValue = 500))
+    assertEquals("P [AMBER_STEADY]", jitService.capsuleVisualLabel)
+    jitClock.advance(NativeConfig.API_TIMEOUT_MS)
+    assertEquals(TripState.GREY_BREATHING, jitService.tripStateMachine.state)
+    assertEquals("P [GREY_BREATHING]", jitService.capsuleVisualLabel)
+    Bindings.detachService(jitService)
+
+    val limitedClock = FakeClock()
+    val limited = openService(limitedClock)
+    val limitedReceiver = Bindings.activeReceiver!!
+    assertTrue(limitedReceiver.dispatchEvent("START_TRIP"))
+    assertTrue(limitedReceiver.dispatchEvent("SET_DISTANCE_M", intValue = 500))
+    assertEquals(TripState.NEARBY_READY, limited.tripStateMachine.state)
+    val beforeCount = Bindings.apiTransport.postCount
+    assertTrue(limitedReceiver.dispatchEvent("FORCE_RATE_LIMIT", intValue = 2))
+    assertTrue(limitedReceiver.dispatchEvent("INJECT_UTTERANCE", stringValue = "搵位"))
+    assertEquals(1, Bindings.apiTransport.postCount - beforeCount)
+    val expectedWaitMs = expectedRateLimitWaitMs()
+    limitedClock.advance(expectedWaitMs - 1)
+    assertEquals(1, Bindings.apiTransport.postCount - beforeCount)
+    limitedClock.advance(1)
+    assertEquals(2, Bindings.apiTransport.postCount - beforeCount)
+    assertEquals(TripState.GREY_BREATHING, limited.tripStateMachine.state)
+    assertEquals("P [GREY_BREATHING]", limited.capsuleVisualLabel)
+    Bindings.detachService(limited)
+  }
+
+  @Test
+  fun repeatedAttachStillPostsOneUtterance() {
+    val service = openService(FakeClock())
+    service.startInForeground(StartupEntry.A_2, recordAudioGranted = false)
+    service.reportFgsStarted()
+    Bindings.attachService(service)
+    Bindings.attachService(service)
+    service.startInForeground(StartupEntry.B_3, recordAudioGranted = false)
+    service.reportFgsStarted()
+    val receiver = Bindings.activeReceiver!!
+    val before = Bindings.apiTransport.postCount
+    assertTrue(receiver.dispatchEvent("START_TRIP"))
+    assertTrue(receiver.dispatchEvent("INJECT_UTTERANCE", stringValue = "搵位"))
+    assertEquals(1, Bindings.apiTransport.postCount - before)
     Bindings.detachService(service)
   }
 
