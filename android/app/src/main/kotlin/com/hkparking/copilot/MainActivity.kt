@@ -1,8 +1,7 @@
 package com.hkparking.copilot
 
 import android.content.Intent
-import com.hkparking.copilot.voice.LocaleProbe
-import com.hkparking.copilot.voice.SpeechCapabilityProbe
+import com.hkparking.copilot.voice.AndroidSpeechProbe
 import com.hkparking.copilot.voice.TripVoiceMode
 import com.hkparking.copilot.voice.VoiceCapabilityChecker
 import com.hkparking.copilot.voice.ZhHkTemplates
@@ -189,7 +188,7 @@ private class AndroidOverlayHost(private val activity: MainActivity) : OverlayHo
     private set
   override var channelMounted: Boolean = false
   var emitter: (String, Map<String, Any?>) -> Unit = { _, _ -> }
-  override val capabilityChecker: VoiceCapabilityChecker = VoiceCapabilityChecker(AndroidSpeechProbe())
+  override val capabilityChecker: VoiceCapabilityChecker = VoiceCapabilityChecker(AndroidSpeechProbe(activity))
   override val tripStateMachine: TripStateMachine = TripStateMachine()
   private val confirmed = mutableListOf<String>()
   private val reports = mutableListOf<String>()
@@ -261,7 +260,4 @@ private class AndroidOverlayHost(private val activity: MainActivity) : OverlayHo
   }
 }
 
-private class AndroidSpeechProbe : SpeechCapabilityProbe {
-  override fun probeStt(locale: String): LocaleProbe = LocaleProbe()
-  override fun probeTts(locale: String): LocaleProbe = LocaleProbe()
-}
+

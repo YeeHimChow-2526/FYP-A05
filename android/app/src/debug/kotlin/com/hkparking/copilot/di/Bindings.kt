@@ -333,10 +333,16 @@ class FixtureApiTransport(
   }
 }
 
+class FixtureNetworkStatus : com.hkparking.copilot.di.NetworkStatusProvider {
+  var online: Boolean = true
+  override fun isOnline(): Boolean = online
+}
+
 object Bindings {
   val voiceInput: SimVoiceInput = SimVoiceInput()
   val locationSource: SimLocationSource = SimLocationSource()
   val apiTransport: FixtureApiTransport = FixtureApiTransport()
+  val networkStatus: FixtureNetworkStatus = FixtureNetworkStatus()
   var activeReceiver: SimEventReceiver? = null
   var capabilityCheckTimedOut: Boolean = false
     private set
@@ -362,7 +368,7 @@ object Bindings {
     onSiteRejectedCue = null
     pendingConfirmSessionId = null
     networkFailed = false
-    service.networkOnline = true
+    networkStatus.online = true
     voiceInput.setSimControlListener { event, intValue, stringValue ->
       dispatchSim(service, event, intValue, stringValue)
     }
@@ -410,11 +416,11 @@ object Bindings {
       "DRIVER_CONFIRM" -> flushDriverConfirm(service)
       "NETWORK_FAIL" -> {
         networkFailed = true
-        service.networkOnline = false
+        networkStatus.online = false
       }
       "NETWORK_OK" -> {
         networkFailed = false
-        service.networkOnline = true
+        networkStatus.online = true
         flushDriverConfirm(service)
       }
       "CLOCK_HKT_MIDNIGHT" -> {

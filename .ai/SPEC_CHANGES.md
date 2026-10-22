@@ -66,3 +66,23 @@
 - 影響任務編號／常數名／檔案：W-A.1、W-A.17；`StatusPip`；`TripStateMachine.kt`、`ApiClient.kt`、`FloatingBubbleService.kt`
 - 類別：規格缺漏
 - 狀態：待定
+
+### SC-005
+- 日期：2026-10-22
+- 來源：Pi
+- 裝置（如適用）：不適用
+- 發現：審計 E1、E2、E3、E4、E6 屬 Step 2／Step 3 範圍，本步不改對應生產碼。包括 B-2 分享解析、LocalPoiTrie、DistanceTracker、熄匙 receiver 註冊、TodayTripStore、release 的 Fused／STT 實作、HTTP header 與逾時、真實座標傳遞、activeService。
+- 建議改動：待後續 Step（Step 2／Step 3）處理。
+- 影響任務編號／常數名／檔案：W-A.2、W-A.4、W-A.9、W-A.11、W-A.16；`ShareIntentReceiverActivity`、`LocalPoiTrie.kt`、`DistanceTracker.kt`、`EngineShutdownReceiver.kt`、`TodayTripStore.kt`、`CorePorts.kt`、`ApiClient.kt`、`MainActivity.kt`
+- 類別：其他
+- 狀態：待後續 Step（Step 2／Step 3）處理
+
+### SC-006
+- 日期：2026-10-22
+- 來源：Pi
+- 裝置（如適用）：不適用
+- 發現：行程中更改目的地（Destination 變更）時，應否重置 `jitTriggered` 以允許新目的地觸發預備區 JIT？目前規格未明文定義，暫維持每程唯一一次之單向鎖。
+- 建議改動：待決規格項。規格守護者需明文定義改目的地是否重設 1km JIT 鎖。
+- 影響任務編號／常數名／檔案：W-A.1；`jitTriggered`；`TripStateMachine.kt`；`NativeConfig.TRIGGER_DISTANCE_M`
+- 類別：規格缺漏
+- 狀態：待決

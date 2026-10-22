@@ -25,7 +25,7 @@ class TtsService(
 ) {
   var isSpeaking: Boolean = false
     private set
-  val spokenCues = mutableListOf<String>()
+  val spokenCues = ArrayDeque<String>()
 
   private val queue = ArrayDeque<String>()
   private var playbackEpoch: Int = 0
@@ -43,17 +43,21 @@ class TtsService(
     isApproachMuted: Boolean,
     driverAsked: Boolean = false,
   ): String? {
-    if (voiceMode == TripVoiceMode.MANUAL_ONLY || capabilityChecker.ttsStatus != CapabilityStatus.AVAILABLE) {
-      val reason = if (voiceMode == TripVoiceMode.MANUAL_ONLY) "degraded" else "tts_unavailable"
-      logSkip(voiceMode, reason)
+    if (voiceMode == TripVoiceMode.MANUAL_ONLY) {
+      logManualSkip()
+      return null
+    }
+    logSpeak(firstCueOf(cards, sourceStatus) ?: "", voiceMode)
+    if (capabilityChecker.ttsStatus != CapabilityStatus.AVAILABLE) {
+      logEngineFailure("tts_unavailable")
       return null
     }
     if (isApproachMuted && !driverAsked) {
-      logSkip(voiceMode, "approach_muted")
+      logEngineFailure("approach_muted")
       return null
     }
     if (cards.isEmpty()) {
-      logSkip(voiceMode, "empty")
+      logEngineFailure("empty")
       return null
     }
     val first = cards.first()
@@ -63,35 +67,48 @@ class TtsService(
       first.spokenCue
     }
     queue.addLast(text)
-    spokenCues += text
-    logSpeak(text)
+    rememberCue(text)
     if (!isSpeaking) {
       playHead()
     }
     return text
   }
 
-  fun speak(text: String, voiceMode: TripVoiceMode, isApproachMuted: Boolean): String? {
-    if (voiceMode == TripVoiceMode.MANUAL_ONLY || capabilityChecker.ttsStatus != CapabilityStatus.AVAILABLE) {
-      val reason = if (voiceMode == TripVoiceMode.MANUAL_ONLY) "degraded" else "tts_unavailable"
-      logSkip(voiceMode, reason)
+  fun speak(
+    text: String,
+    voiceMode: TripVoiceMode,
+    isApproachMuted: Boolean,
+    driverAsked: Boolean = false,
+  ): String? {
+    if (voiceMode == TripVoiceMode.MANUAL_ONLY) {
+      logManualSkip()
       return null
     }
-    if (isApproachMuted) {
-      logSkip(voiceMode, "approach_muted")
+    logSpeak(text, voiceMode)
+    if (capabilityChecker.ttsStatus != CapabilityStatus.AVAILABLE) {
+      logEngineFailure("tts_unavailable")
+      return null
+    }
+    if (isApproachMuted && !driverAsked) {
+      logEngineFailure("approach_muted")
       return null
     }
     if (text.isEmpty()) {
-      logSkip(voiceMode, "empty")
+      logEngineFailure("empty")
       return null
     }
     queue.addLast(text)
-    spokenCues += text
-    logSpeak(text)
+    rememberCue(text)
     if (!isSpeaking) {
       playHead()
     }
     return text
+  }
+
+  fun bindLocale(setLanguageCode: Int): Boolean {
+    val ok = ttsLanguageBindSucceeded(setLanguageCode)
+    if (!ok) logEngineFailure("bind_locale_$setLanguageCode")
+    return ok
   }
 
   fun interrupt() {
@@ -101,18 +118,38 @@ class TtsService(
     engine.stop()
   }
 
-  private fun logSpeak(text: String) {
-    runCatching {
-      android.util.Log.i("TtsService", "speak cue=\"$text\"")
+  private fun firstCueOf(cards: List<RecommendationCard>, sourceStatus: String): String? {
+    if (cards.isEmpty()) return null
+    val first = cards.first()
+    return if (first.type == METER_TYPE && (first.isStale || sourceStatus == SOURCE_DEGRADED)) {
+      ZhHkTemplates.METER_STALE_SPOKEN
+    } else {
+      first.spokenCue
     }
   }
 
-  private fun logSkip(voiceMode: TripVoiceMode, reason: String) {
+  private fun rememberCue(text: String) {
+    spokenCues.addLast(text)
+    while (spokenCues.size > SPOKEN_CUE_HISTORY_LIMIT) {
+      spokenCues.removeFirst()
+    }
+  }
+
+  private fun logSpeak(text: String, voiceMode: TripVoiceMode) {
     runCatching {
-      android.util.Log.i(
-        "TtsService",
-        "speak skipped: mode=$voiceMode ttsStatus=${capabilityChecker.ttsStatus} reason=$reason",
-      )
+      android.util.Log.i("TtsService", "speak cue=$text mode=$voiceMode")
+    }
+  }
+
+  private fun logManualSkip() {
+    runCatching {
+      android.util.Log.i("TtsService", "skip speak mode=MANUAL_ONLY")
+    }
+  }
+
+  private fun logEngineFailure(reason: String) {
+    runCatching {
+      android.util.Log.i("TtsService", "speak failed reason=$reason")
     }
   }
 
@@ -121,11 +158,22 @@ class TtsService(
     playbackEpoch += 1
     val epoch = playbackEpoch
     isSpeaking = true
-    engine.speak(
-      headText,
-      onDone = { if (epoch == playbackEpoch) onCurrentUtteranceFinished() },
-      onError = { if (epoch == playbackEpoch) onCurrentUtteranceFailed() },
-    )
+    val played = runCatching {
+      engine.speak(
+        headText,
+        onDone = { if (epoch == playbackEpoch) onCurrentUtteranceFinished() },
+        onError = {
+          if (epoch == playbackEpoch) {
+            logEngineFailure("engine_error")
+            onCurrentUtteranceFailed()
+          }
+        },
+      )
+    }
+    if (played.isFailure) {
+      logEngineFailure("engine_throw")
+      onCurrentUtteranceFailed()
+    }
   }
 
   private fun onCurrentUtteranceFinished() {
@@ -151,7 +199,16 @@ class TtsService(
   companion object {
     const val METER_TYPE = "METER"
     const val SOURCE_DEGRADED = "degraded"
+    const val SPOKEN_CUE_HISTORY_LIMIT = 32
   }
+}
+
+const val TTS_LANG_AVAILABLE = 0
+const val TTS_LANG_MISSING_DATA = -1
+const val TTS_LANG_NOT_SUPPORTED = -2
+
+fun ttsLanguageBindSucceeded(setLanguageCode: Int): Boolean {
+  return setLanguageCode >= TTS_LANG_AVAILABLE
 }
 
 fun createTtsEngine(context: android.content.Context): TtsEngine {
@@ -187,10 +244,8 @@ class AndroidTextToSpeechEngine(
   }
 
   override fun bindLocale(locale: String): Boolean {
-    return runCatching {
-      tts.setLanguage(java.util.Locale.forLanguageTag(locale))
-      true
-    }.getOrDefault(false)
+    val code = runCatching { tts.setLanguage(java.util.Locale.forLanguageTag(locale)) }.getOrNull()
+    return code != null && ttsLanguageBindSucceeded(code)
   }
 
   override fun speak(text: String, onDone: () -> Unit, onError: () -> Unit) {

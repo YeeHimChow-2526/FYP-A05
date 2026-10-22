@@ -245,6 +245,19 @@ class VoiceCapabilityChecker(
     onMicReadyFailed()
   }
 
+  fun applyExternalSnapshot(snapshot: CapabilitySnapshot) {
+    sttStatus = snapshot.stt
+    ttsStatus = snapshot.tts
+    confirmed = snapshot.copy(downloadPrompt = false, blocksFgsStarted = false, timedOut = false)
+    hasConfirmed = true
+    apply(snapshot)
+    logSnapshot("applied")
+  }
+
+  fun attachContext(context: android.content.Context) {
+    (probe as? ContextAwareProbe)?.attach(context)
+  }
+
   fun currentSnapshot(timedOut: Boolean): CapabilitySnapshot {
     return CapabilitySnapshot(
       stt = sttStatus,
@@ -356,4 +369,174 @@ fun <T> withTimeoutOrNull(timeoutMs: Long, block: () -> T): T? {
   }
   @Suppress("UNCHECKED_CAST")
   return holder[0] as T?
+}
+
+interface ContextAwareProbe {
+  fun attach(context: android.content.Context)
+}
+
+data class VoiceSnapshot(
+  val localeTag: String,
+  val networkRequired: Boolean,
+  val notInstalled: Boolean,
+)
+
+fun isAcceptedSpeechLocale(tag: String): Boolean {
+  val normalized = tag.trim().replace('_', '-').lowercase()
+  return normalized == "zh-hk" || normalized == "yue-hk"
+}
+
+fun classifyTtsAvailability(languageCode: Int?, voices: List<VoiceSnapshot>): CapabilityStatus {
+  if (languageCode == null) return CapabilityStatus.UNKNOWN
+  if (languageCode == TTS_LANG_NOT_SUPPORTED) return CapabilityStatus.UNSUPPORTED
+  if (languageCode == TTS_LANG_MISSING_DATA) return CapabilityStatus.SUPPORTED_NOT_INSTALLED
+  if (languageCode < TTS_LANG_AVAILABLE) return CapabilityStatus.UNKNOWN
+  val offlineReady = voices.any { voice ->
+    isAcceptedSpeechLocale(voice.localeTag) && !voice.networkRequired && !voice.notInstalled
+  }
+  return if (offlineReady) CapabilityStatus.AVAILABLE else CapabilityStatus.SUPPORTED_NOT_INSTALLED
+}
+
+fun classifySttAvailability(
+  sdkInt: Int,
+  onDeviceAvailable: Boolean?,
+  installedLocales: List<String>,
+  supportedLocales: List<String>,
+  queryFailed: Boolean,
+): CapabilityStatus {
+  if (queryFailed || sdkInt < STT_SUPPORT_API || onDeviceAvailable == null) return CapabilityStatus.UNKNOWN
+  if (!onDeviceAvailable) return CapabilityStatus.UNSUPPORTED
+  if (installedLocales.any(::isAcceptedSpeechLocale)) return CapabilityStatus.AVAILABLE
+  if (supportedLocales.any(::isAcceptedSpeechLocale)) return CapabilityStatus.SUPPORTED_NOT_INSTALLED
+  if (installedLocales.isEmpty() && supportedLocales.isEmpty()) return CapabilityStatus.UNKNOWN
+  return CapabilityStatus.UNSUPPORTED
+}
+
+fun localeProbeFor(status: CapabilityStatus): LocaleProbe {
+  return when (status) {
+    CapabilityStatus.AVAILABLE -> LocaleProbe(
+      setLanguageSucceeded = true,
+      offlineCantoneseVoiceInstalled = true,
+      canRecognizeOrSynthesize = true,
+      supported = true,
+    )
+    CapabilityStatus.SUPPORTED_NOT_INSTALLED -> LocaleProbe(
+      setLanguageSucceeded = true,
+      supported = true,
+    )
+    CapabilityStatus.UNSUPPORTED -> LocaleProbe(supported = false)
+    CapabilityStatus.UNKNOWN -> LocaleProbe()
+  }
+}
+
+private const val STT_ON_DEVICE_API = 31
+private const val STT_SUPPORT_API = 33
+
+class AndroidSpeechProbe(
+  context: android.content.Context? = null,
+) : SpeechCapabilityProbe, ContextAwareProbe {
+  private var context: android.content.Context? = context
+
+  override fun attach(context: android.content.Context) {
+    this.context = context
+  }
+
+  override fun probeStt(locale: String): LocaleProbe {
+    if (onMainThread()) return LocaleProbe()
+    val ctx = context ?: return LocaleProbe()
+    return runCatching { localeProbeFor(queryStt(ctx)) }.getOrDefault(LocaleProbe())
+  }
+
+  override fun probeTts(locale: String): LocaleProbe {
+    if (onMainThread()) return LocaleProbe()
+    val ctx = context ?: return LocaleProbe()
+    return runCatching { localeProbeFor(queryTts(ctx, locale)) }.getOrDefault(LocaleProbe())
+  }
+
+  private fun queryTts(ctx: android.content.Context, locale: String): CapabilityStatus {
+    val latch = java.util.concurrent.CountDownLatch(1)
+    var initStatus = android.speech.tts.TextToSpeech.ERROR
+    val tts = android.speech.tts.TextToSpeech(ctx) { status ->
+      initStatus = status
+      latch.countDown()
+    }
+    val ready = latch.await(NativeConfig.VOICE_CAPABILITY_CHECK_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+    try {
+      if (!ready || initStatus != android.speech.tts.TextToSpeech.SUCCESS) return CapabilityStatus.UNKNOWN
+      val javaLocale = java.util.Locale.forLanguageTag(locale)
+      val availableCode = tts.isLanguageAvailable(javaLocale)
+      val setCode = tts.setLanguage(javaLocale)
+      val voices = runCatching { tts.voices }.getOrNull().orEmpty().map { voice ->
+        VoiceSnapshot(
+          localeTag = voice.locale?.toLanguageTag().orEmpty(),
+          networkRequired = voice.isNetworkConnectionRequired,
+          notInstalled = voice.features?.contains(android.speech.tts.TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) == true,
+        )
+      }
+      val fromAvailable = classifyTtsAvailability(availableCode, voices)
+      val fromSet = classifyTtsAvailability(setCode, voices)
+      return moreSevere(fromAvailable, fromSet)
+    } finally {
+      runCatching { tts.shutdown() }
+    }
+  }
+
+  private fun queryStt(ctx: android.content.Context): CapabilityStatus {
+    val sdk = android.os.Build.VERSION.SDK_INT
+    if (sdk < STT_SUPPORT_API) return CapabilityStatus.UNKNOWN
+    val onDevice = if (sdk >= STT_ON_DEVICE_API) {
+      runCatching { android.speech.SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx) }.getOrNull()
+    } else {
+      null
+    }
+    if (onDevice != true) return classifySttAvailability(sdk, onDevice, emptyList(), emptyList(), queryFailed = onDevice == null)
+    val latch = java.util.concurrent.CountDownLatch(1)
+    val installed = mutableListOf<String>()
+    val supported = mutableListOf<String>()
+    var failed = false
+    val recognizer = android.speech.SpeechRecognizer.createOnDeviceSpeechRecognizer(ctx)
+    val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
+    try {
+      val intent = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+      intent.putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, NativeConfig.SPEECH_LOCALE_DEFAULT)
+      recognizer.checkRecognitionSupport(
+        intent,
+        executor,
+        object : android.speech.RecognitionSupportCallback {
+          override fun onSupportResult(support: android.speech.RecognitionSupport) {
+            installed += support.installedOnDeviceLanguages
+            supported += support.supportedOnDeviceLanguages
+            supported += support.pendingOnDeviceLanguages
+            latch.countDown()
+          }
+
+          override fun onError(error: Int) {
+            failed = true
+            latch.countDown()
+          }
+        },
+      )
+      val finished = latch.await(NativeConfig.VOICE_CAPABILITY_CHECK_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+      if (!finished) return CapabilityStatus.UNKNOWN
+      return classifySttAvailability(sdk, true, installed, supported, failed)
+    } finally {
+      runCatching { recognizer.destroy() }
+      executor.shutdown()
+    }
+  }
+
+  private fun onMainThread(): Boolean {
+    val main = runCatching { android.os.Looper.getMainLooper() }.getOrNull() ?: return false
+    return android.os.Looper.myLooper() == main
+  }
+
+  private fun moreSevere(left: CapabilityStatus, right: CapabilityStatus): CapabilityStatus {
+    fun rank(status: CapabilityStatus): Int = when (status) {
+      CapabilityStatus.UNSUPPORTED -> 3
+      CapabilityStatus.SUPPORTED_NOT_INSTALLED -> 2
+      CapabilityStatus.UNKNOWN -> 1
+      CapabilityStatus.AVAILABLE -> 0
+    }
+    return if (rank(left) >= rank(right)) left else right
+  }
 }

@@ -1,19 +1,20 @@
 package com.hkparking.copilot
 
+import com.hkparking.copilot.di.NetworkStatusProvider
 import com.hkparking.copilot.net.QueryTriggerMode
 import com.hkparking.copilot.net.RecommendRequest
 import com.hkparking.copilot.voice.CapabilitySnapshot
 import com.hkparking.copilot.voice.CapabilityStatus
 import com.hkparking.copilot.voice.CommandCode
 import com.hkparking.copilot.voice.CommandCodes
-import com.hkparking.copilot.voice.LocaleProbe
 import com.hkparking.copilot.voice.ParseContext
 import com.hkparking.copilot.voice.RecommendationCard
-import com.hkparking.copilot.voice.SpeechCapabilityProbe
 import com.hkparking.copilot.voice.TripVoiceMode
 import com.hkparking.copilot.voice.TtsService
 import com.hkparking.copilot.voice.VoiceCapabilityChecker
+import com.hkparking.copilot.voice.ZhHkTemplates
 import com.hkparking.copilot.voice.createTtsEngine
+import com.hkparking.copilot.voice.AndroidSpeechProbe
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.resume
@@ -26,14 +27,15 @@ class FloatingBubbleService : android.app.Service {
   val capabilityChecker: VoiceCapabilityChecker
   val tripStateMachine: TripStateMachine
   val delayMs: suspend (Long) -> Unit
+  private val rawDelay: suspend (Long) -> Unit
   val ttsService: TtsService
-  var networkOnline: Boolean = true
+  private val networkStatus: NetworkStatusProvider
   private val apiClient: com.hkparking.copilot.net.ApiClient
 
-  constructor() : this(VoiceCapabilityChecker(SilentSpeechProbe()), TripStateMachine(), defaultDelayMs())
+  constructor() : this(defaultDelayMs())
 
   constructor(delayMs: suspend (Long) -> Unit) : this(
-    VoiceCapabilityChecker(SilentSpeechProbe()),
+    VoiceCapabilityChecker(AndroidSpeechProbe()),
     TripStateMachine(),
     delayMs,
   )
@@ -42,16 +44,20 @@ class FloatingBubbleService : android.app.Service {
     capabilityChecker: VoiceCapabilityChecker,
     tripStateMachine: TripStateMachine = TripStateMachine(),
     clockDelay: suspend (Long) -> Unit = defaultDelayMs(),
+    networkStatus: NetworkStatusProvider = com.hkparking.copilot.di.Bindings.networkStatus,
   ) : super() {
     this.capabilityChecker = capabilityChecker
     this.tripStateMachine = tripStateMachine
-    this.delayMs = clockDelay
+    this.rawDelay = clockDelay
+    this.delayMs = { ms -> onApiDelay(ms) }
+    this.networkStatus = networkStatus
     this.ttsService = TtsService(createTtsEngine(this), capabilityChecker)
     this.apiClient = com.hkparking.copilot.net.ApiClient(
       com.hkparking.copilot.di.Bindings.apiTransport,
       tripStateMachine,
-      this.delayMs,
+      delayMs,
     )
+    capabilityChecker.attachContext(this)
     tripStateMachine.onStateChanged = { updateCapsuleVisual() }
     tripStateMachine.applyVoiceCapability(capabilityChecker)
   }
@@ -134,6 +140,10 @@ class FloatingBubbleService : android.app.Service {
   private var pendingInitialDistanceMeters: Int? = null
   private var lastLoggedSnapshot: String? = null
   private var portsWired: Boolean = false
+  private var voiceApplyEpoch: Int = 0
+  private var driverFailureSpeak: Boolean = false
+  private var driverTimeouts: Int = 0
+  private val spokenDriverCues = mutableSetOf<String>()
   private var cachedCards: List<RecommendationCard> = emptyList()
   private var cachedSourceStatus: String = "ok"
   private var cachedSpokenCue: String? = null
@@ -161,8 +171,10 @@ class FloatingBubbleService : android.app.Service {
       capabilityChecker.fgsType
     }
     tripStateMachine.syncVoiceCapability(initial, capabilityChecker.hasConfirmed)
+    val epochAtStart = voiceApplyEpoch
     val worker = Thread {
       val updated = capabilityChecker.recheckSilently(recordAudioGranted, hotwordEnabled, entry)
+      if (epochAtStart != voiceApplyEpoch) return@Thread
       activeFgsType = if (entry == StartupEntry.B_2) {
         VoiceCapabilityChecker.FGS_LOCATION
       } else {
@@ -173,9 +185,6 @@ class FloatingBubbleService : android.app.Service {
     }
     worker.isDaemon = true
     worker.start()
-    if (runCatching { android.os.Looper.getMainLooper() }.getOrNull() == null) {
-      runCatching { worker.join(NativeConfig.VOICE_CAPABILITY_CHECK_TIMEOUT_MS) }
-    }
     if (!tripStateMachine.fgsStartAccepted) {
       tripStateMachine.requestStart(
         entry = entry,
@@ -243,9 +252,9 @@ class FloatingBubbleService : android.app.Service {
   }
 
   private fun wirePorts() {
-    com.hkparking.copilot.di.Bindings.attachService(this)
     if (portsWired) return
     portsWired = true
+    com.hkparking.copilot.di.Bindings.attachService(this)
     com.hkparking.copilot.di.Bindings.locationSource.setLocationListener { distanceMeters, _, _ ->
       onLocationFix(distanceMeters)
     }
@@ -289,7 +298,7 @@ class FloatingBubbleService : android.app.Service {
       runCatching {
         android.util.Log.i("FloatingBubbleService", "Parked candidate written: sessionId=$sessionId")
       }
-      if (networkOnline) {
+      if (networkStatus.isOnline()) {
         launchApi { apiClient.releaseSession(sessionId, targetCarparkId, isOnline = true) }
         runCatching {
           android.util.Log.i("FloatingBubbleService", "Release session sent: sessionId=$sessionId")
@@ -312,7 +321,9 @@ class FloatingBubbleService : android.app.Service {
   }
 
   fun onVoiceCapabilityApplied(snapshot: CapabilitySnapshot, micFgsActive: Boolean) {
+    voiceApplyEpoch += 1
     val previous = tripStateMachine.tripVoiceMode
+    capabilityChecker.applyExternalSnapshot(snapshot)
     tripStateMachine.syncVoiceCapability(snapshot, hasConfirmed = true)
     tripStateMachine.onMicFgsActive(micFgsActive)
     val fullVoice = snapshot.mode == TripVoiceMode.FULL_VOICE
@@ -389,6 +400,9 @@ class FloatingBubbleService : android.app.Service {
   }
 
   private fun launchRecommend(mode: QueryTriggerMode) {
+    driverFailureSpeak = mode == QueryTriggerMode.DRIVER_ACTIVE
+    driverTimeouts = 0
+    spokenDriverCues.clear()
     launchApi {
       val outcome = apiClient.recommendAndRoute(buildRecommendRequest(), mode)
       if (outcome.succeeded) {
@@ -404,10 +418,36 @@ class FloatingBubbleService : android.app.Service {
             cachedSourceStatus,
             tripStateMachine.tripVoiceMode,
             tripStateMachine.state == TripState.APPROACH_MUTED,
+            driverAsked = true,
           )
         }
+      } else if (mode == QueryTriggerMode.DRIVER_ACTIVE) {
+        speakDriverFailureCues(outcome.spokenCues)
       }
+      driverFailureSpeak = false
       updateCapsuleVisual()
+    }
+  }
+
+  private fun speakDriverFailureCues(cues: List<String>) {
+    val mode = tripStateMachine.tripVoiceMode
+    cues.forEach { cue ->
+      if (spokenDriverCues.add(cue)) {
+        ttsService.speak(cue, mode, isApproachMuted = false, driverAsked = true)
+      }
+    }
+  }
+
+  private suspend fun onApiDelay(ms: Long) {
+    rawDelay(ms)
+    if (!driverFailureSpeak || ms != NativeConfig.API_TIMEOUT_MS) return
+    driverTimeouts += 1
+    val mode = tripStateMachine.tripVoiceMode
+    if (driverTimeouts == 1) {
+      speakDriverFailureCues(listOf(ZhHkTemplates.NETWORK_SLOW))
+    }
+    if (driverTimeouts >= NativeConfig.API_MAX_ATTEMPTS) {
+      speakDriverFailureCues(listOf(ZhHkTemplates.NETWORK_FAILED))
     }
   }
 
@@ -636,14 +676,4 @@ private fun defaultDelayMs(): suspend (Long) -> Unit = { ms ->
   }
 }
 
-private class SilentSpeechProbe : SpeechCapabilityProbe {
-  override fun probeStt(locale: String): LocaleProbe = readyProbe()
-  override fun probeTts(locale: String): LocaleProbe = readyProbe()
 
-  private fun readyProbe(): LocaleProbe = LocaleProbe(
-    setLanguageSucceeded = true,
-    offlineCantoneseVoiceInstalled = true,
-    canRecognizeOrSynthesize = true,
-    supported = true,
-  )
-}

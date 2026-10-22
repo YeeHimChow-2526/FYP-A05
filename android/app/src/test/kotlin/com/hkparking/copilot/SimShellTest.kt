@@ -482,7 +482,7 @@ class SimShellTest {
     assertTrue(receiver.dispatchEvent("START_TRIP"))
     assertEquals(TripState.CRUISING, service.tripStateMachine.state)
     assertFalse(receiver.dispatchEvent("SET_VOICE_MODE", stringValue = "NOPE"))
-    assertEquals(TripVoiceMode.ANNOUNCE_MANUAL, service.tripStateMachine.tripVoiceMode)
+    assertEquals(TripVoiceMode.MANUAL_ONLY, service.tripStateMachine.tripVoiceMode)
     assertTrue(receiver.dispatchEvent("SET_VOICE_MODE", stringValue = "FULL_VOICE"))
     assertEquals(TripState.CRUISING, service.tripStateMachine.state)
     assertEquals(TripVoiceMode.FULL_VOICE, service.tripStateMachine.tripVoiceMode)
@@ -725,6 +725,7 @@ class SimShellTest {
     assertTrue(receiver.dispatchEvent("SET_DISTANCE_M", intValue = 500))
     assertEquals(TripState.NEARBY_READY, service.tripStateMachine.state)
     assertTrue(service.ttsService.spokenCues.isEmpty())
+    assertTrue(receiver.dispatchEvent("SET_VOICE_MODE", stringValue = "ANNOUNCE_MANUAL"))
     assertTrue(receiver.dispatchEvent("INJECT_UTTERANCE", stringValue = "搵位"))
     assertEquals(
       listOf("前方首選朗豪坊停車場，一百八十米，剩十二個位，首小時三十二蚊。"),

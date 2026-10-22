@@ -39,11 +39,13 @@ class SimEventReceiver(
       DRIVER_CONFIRM -> emit(event, intValue, stringValue)
       NETWORK_FAIL -> {
         Bindings.apiTransport.setNetworkFail(true)
+        Bindings.networkStatus.online = false
         emit(event, intValue, stringValue)
       }
       NETWORK_OK -> {
         Bindings.apiTransport.setNetworkFail(false)
         Bindings.apiTransport.forceRateLimit(0)
+        Bindings.networkStatus.online = true
         emit(event, intValue, stringValue)
       }
       CLOCK_HKT_MIDNIGHT -> emit(event, intValue, stringValue)

@@ -3,6 +3,10 @@ package com.hkparking.copilot.di
 import com.hkparking.copilot.net.ApiTransport
 import com.hkparking.copilot.net.HttpResult
 
+fun interface NetworkStatusProvider {
+  fun isOnline(): Boolean
+}
+
 interface VoiceInput {
   fun setUtteranceListener(listener: ((String, Double?) -> Unit)?)
   fun startListening(hotword: Boolean = false)
