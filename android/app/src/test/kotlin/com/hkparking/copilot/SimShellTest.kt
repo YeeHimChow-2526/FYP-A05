@@ -415,7 +415,8 @@ class SimShellTest {
 
   @Test
   fun engineShutdownConfirmAndMidnightUseServicePort() {
-    val outside = openService(FakeClock())
+    val outsideClock = FakeClock()
+    val outside = openService(outsideClock)
     val outsideReceiver = Bindings.activeReceiver!!
     assertTrue(outsideReceiver.dispatchEvent("START_TRIP"))
     assertEquals(TripState.CRUISING, outside.tripStateMachine.state)
@@ -425,6 +426,8 @@ class SimShellTest {
     assertTrue(outsideReceiver.dispatchEvent("ENGINE_SHUTDOWN", intValue = 0))
     assertEquals(TripState.ENDED, outside.tripStateMachine.state)
     assertEquals("ENGINE_SHUTDOWN", outside.tripEndedReason)
+    assertTrue(outside.isFgsRunning)
+    outsideClock.advance(NativeConfig.TEARDOWN_FADE_MS.toLong())
     assertFalse(outside.isFgsRunning)
     Bindings.detachService(outside)
 
@@ -435,10 +438,11 @@ class SimShellTest {
     assertTrue(parkedReceiver.dispatchEvent("ENGINE_SHUTDOWN", intValue = 1))
     assertEquals(TripState.PARKED_CONFIRMED, parked.tripStateMachine.state)
     assertTrue(Bindings.pendingDriverConfirm)
-    assertEquals(before, Bindings.apiTransport.postCount)
+    assertEquals(before + 1, Bindings.apiTransport.postCount)
+    assertTrue(Bindings.apiTransport.lastPath.contains("release"))
     assertTrue(parkedReceiver.dispatchEvent("DRIVER_CONFIRM"))
     assertTrue(Bindings.driverConfirmSent)
-    assertEquals(before + 1, Bindings.apiTransport.postCount)
+    assertEquals(before + 2, Bindings.apiTransport.postCount)
     assertTrue(Bindings.apiTransport.lastPath.contains("sync"))
     Bindings.detachService(parked)
 
@@ -446,7 +450,9 @@ class SimShellTest {
     val offlineReceiver = Bindings.activeReceiver!!
     assertTrue(offlineReceiver.dispatchEvent("START_TRIP"))
     assertTrue(offlineReceiver.dispatchEvent("NETWORK_FAIL"))
+    val offlineShutdownBefore = Bindings.apiTransport.postCount
     assertTrue(offlineReceiver.dispatchEvent("ENGINE_SHUTDOWN", intValue = 1))
+    assertEquals(offlineShutdownBefore, Bindings.apiTransport.postCount)
     val offlineBefore = Bindings.apiTransport.postCount
     assertTrue(offlineReceiver.dispatchEvent("DRIVER_CONFIRM"))
     assertEquals(offlineBefore, Bindings.apiTransport.postCount)
@@ -476,7 +482,7 @@ class SimShellTest {
     assertTrue(receiver.dispatchEvent("START_TRIP"))
     assertEquals(TripState.CRUISING, service.tripStateMachine.state)
     assertFalse(receiver.dispatchEvent("SET_VOICE_MODE", stringValue = "NOPE"))
-    assertEquals(TripVoiceMode.MANUAL_ONLY, service.tripStateMachine.tripVoiceMode)
+    assertEquals(TripVoiceMode.ANNOUNCE_MANUAL, service.tripStateMachine.tripVoiceMode)
     assertTrue(receiver.dispatchEvent("SET_VOICE_MODE", stringValue = "FULL_VOICE"))
     assertEquals(TripState.CRUISING, service.tripStateMachine.state)
     assertEquals(TripVoiceMode.FULL_VOICE, service.tripStateMachine.tripVoiceMode)
@@ -667,6 +673,117 @@ class SimShellTest {
     val locked = runSuspend { Bindings.apiTransport.post(ApiClient.COMMIT, "{}") }
     assertEquals(409, locked.statusCode)
     assertFalse(locked.spokenCue.isNullOrBlank())
+    Bindings.detachService(service)
+  }
+
+  @Test
+  fun singleDistanceInjectionPostsOnce() {
+    val service = openService(FakeClock())
+    val receiver = Bindings.activeReceiver!!
+    assertTrue(receiver.dispatchEvent("START_TRIP"))
+    val before = Bindings.apiTransport.postCount
+    assertTrue(receiver.dispatchEvent("SET_DISTANCE_M", intValue = 500))
+    assertEquals(1, Bindings.apiTransport.postCount - before)
+    Bindings.detachService(service)
+  }
+
+  @Test
+  fun jitLatchStaysSingleAcrossArriveAndLeave() {
+    val service = openService(FakeClock())
+    val receiver = Bindings.activeReceiver!!
+    assertTrue(receiver.dispatchEvent("START_TRIP"))
+    val before = Bindings.apiTransport.postCount
+    assertTrue(receiver.dispatchEvent("SET_DISTANCE_M", intValue = 500))
+    val seen = mutableListOf<String>()
+    val prior = service.tripStateMachine.onStateChanged
+    service.tripStateMachine.onStateChanged = {
+      prior?.invoke()
+      seen += "${service.tripStateMachine.state}/${service.tripStateMachine.capsuleLight}"
+    }
+    assertTrue(receiver.dispatchEvent("ARRIVE_CORE"))
+    assertEquals(TripState.APPROACH_MUTED, service.tripStateMachine.state)
+    assertEquals(CapsuleLight.GREY_STEADY, service.tripStateMachine.capsuleLight)
+    assertTrue(receiver.dispatchEvent("ARRIVE_CORE"))
+    assertEquals(TripState.APPROACH_MUTED, service.tripStateMachine.state)
+    assertEquals(CapsuleLight.GREY_STEADY, service.tripStateMachine.capsuleLight)
+    assertTrue(receiver.dispatchEvent("LEAVE_TARGET", intValue = NativeConfig.APPROACH_EXIT_HOLD_S))
+    assertEquals(TripState.CRUISING, service.tripStateMachine.state)
+    assertTrue(receiver.dispatchEvent("ARRIVE_CORE"))
+    assertEquals(TripState.APPROACH_MUTED, service.tripStateMachine.state)
+    assertEquals(CapsuleLight.GREY_STEADY, service.tripStateMachine.capsuleLight)
+    assertEquals(1, Bindings.apiTransport.postCount - before)
+    assertTrue(seen.none { it.contains("AMBER_STEADY") || it.contains("NEARBY_READY") })
+    assertTrue(service.tripStateMachine.jitTriggered)
+    Bindings.detachService(service)
+  }
+
+  @Test
+  fun backgroundPrefetchSilentButFindParkingSpeaksCue() {
+    val service = openService(FakeClock())
+    val receiver = Bindings.activeReceiver!!
+    assertTrue(receiver.dispatchEvent("START_TRIP"))
+    assertTrue(receiver.dispatchEvent("SET_DISTANCE_M", intValue = 500))
+    assertEquals(TripState.NEARBY_READY, service.tripStateMachine.state)
+    assertTrue(service.ttsService.spokenCues.isEmpty())
+    assertTrue(receiver.dispatchEvent("INJECT_UTTERANCE", stringValue = "搵位"))
+    assertEquals(
+      listOf("前方首選朗豪坊停車場，一百八十米，剩十二個位，首小時三十二蚊。"),
+      service.ttsService.spokenCues.toList(),
+    )
+    Bindings.detachService(service)
+  }
+
+  @Test
+  fun engineShutdownWritesCandidateReleasesAndFades() {
+    val insideClock = FakeClock()
+    val inside = openService(insideClock)
+    val insideReceiver = Bindings.activeReceiver!!
+    assertTrue(insideReceiver.dispatchEvent("START_TRIP"))
+    val before = Bindings.apiTransport.postCount
+    assertTrue(insideReceiver.dispatchEvent("ENGINE_SHUTDOWN", intValue = 1))
+    assertEquals(TripState.PARKED_CONFIRMED, inside.tripStateMachine.state)
+    assertTrue(Bindings.pendingDriverConfirm)
+    assertEquals(before + 1, Bindings.apiTransport.postCount)
+    assertTrue(Bindings.apiTransport.lastPath.contains("/v1/session/release"))
+    assertTrue(inside.isFgsRunning)
+    assertTrue(inside.isCapsuleVisible)
+    insideClock.advance(NativeConfig.TEARDOWN_FADE_MS.toLong() - 1)
+    assertTrue(inside.isFgsRunning)
+    insideClock.advance(1)
+    assertFalse(inside.isFgsRunning)
+    assertFalse(inside.isCapsuleVisible)
+    Bindings.detachService(inside)
+
+    val outsideClock = FakeClock()
+    val outside = openService(outsideClock)
+    val outsideReceiver = Bindings.activeReceiver!!
+    assertTrue(outsideReceiver.dispatchEvent("START_TRIP"))
+    val outsideBefore = Bindings.apiTransport.postCount
+    assertTrue(outsideReceiver.dispatchEvent("ENGINE_SHUTDOWN", intValue = 0))
+    assertFalse(Bindings.pendingDriverConfirm)
+    assertEquals(outsideBefore, Bindings.apiTransport.postCount)
+    assertTrue(outside.isFgsRunning)
+    outsideClock.advance(NativeConfig.TEARDOWN_FADE_MS.toLong())
+    assertFalse(outside.isFgsRunning)
+    Bindings.detachService(outside)
+  }
+
+  @Test
+  fun leaveTargetHoldKeepsApproachUntilThreshold() {
+    val service = openService(FakeClock())
+    val receiver = Bindings.activeReceiver!!
+    assertTrue(receiver.dispatchEvent("START_TRIP"))
+    assertTrue(receiver.dispatchEvent("ARRIVE_CORE"))
+    assertEquals(TripState.APPROACH_MUTED, service.tripStateMachine.state)
+    assertTrue(
+      receiver.dispatchEvent(
+        "LEAVE_TARGET",
+        intValue = (NativeConfig.APPROACH_EXIT_HOLD_S - 1).toInt(),
+      ),
+    )
+    assertEquals(TripState.APPROACH_MUTED, service.tripStateMachine.state)
+    assertTrue(receiver.dispatchEvent("LEAVE_TARGET", intValue = NativeConfig.APPROACH_EXIT_HOLD_S))
+    assertEquals(TripState.CRUISING, service.tripStateMachine.state)
     Bindings.detachService(service)
   }
 

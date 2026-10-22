@@ -115,6 +115,7 @@ class VoiceCapabilityChecker(
     confirmed = snapshot.copy(downloadPrompt = false, blocksFgsStarted = false, timedOut = false)
     hasConfirmed = true
     apply(snapshot)
+    logSnapshot("check")
     return currentSnapshot(timedOut = false)
   }
 
@@ -151,6 +152,7 @@ class VoiceCapabilityChecker(
     confirmed = snapshot.copy(downloadPrompt = false, blocksFgsStarted = false, timedOut = false)
     hasConfirmed = true
     apply(snapshot)
+    logSnapshot("recheck")
     return currentSnapshot(timedOut = false)
   }
 
@@ -193,6 +195,7 @@ class VoiceCapabilityChecker(
         timedOut = true,
       )
       apply(unavailable)
+      logSnapshot("timeout")
       return currentSnapshot(timedOut = true)
     }
     sttStatus = reused.stt
@@ -208,6 +211,7 @@ class VoiceCapabilityChecker(
       timedOut = true,
     )
     apply(recomputed)
+    logSnapshot("timeout")
     return currentSnapshot(timedOut = true)
   }
 
@@ -223,6 +227,17 @@ class VoiceCapabilityChecker(
     }
     blocksFgsStarted = false
     downloadPromptRequested = false
+    logSnapshot("mode_changed")
+  }
+
+  private fun logSnapshot(reason: String) {
+    val usable = ttsStatus == CapabilityStatus.AVAILABLE && tripVoiceMode != TripVoiceMode.MANUAL_ONLY
+    runCatching {
+      android.util.Log.i(
+        "VoiceCapability",
+        "mode=$tripVoiceMode stt=$sttStatus tts=$ttsStatus ttsUsable=$usable reason=$reason",
+      )
+    }
   }
 
   fun onRecordAudioRevoked() {

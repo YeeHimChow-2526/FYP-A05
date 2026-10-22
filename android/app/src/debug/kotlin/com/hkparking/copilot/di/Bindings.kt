@@ -96,7 +96,8 @@ class SimLocationSource : LocationSource {
 
   fun injectDistanceMeters(meters: Int) {
     distanceMeters = meters
-    dispatch()
+    if (!started || isPaused) return
+    listener?.invoke(distanceMeters, speedKmh, fixAgeSeconds)
   }
 
   fun injectSpeedKmh(kmh: Double) {
@@ -122,7 +123,7 @@ class SimLocationSource : LocationSource {
     speedKmh = (com.hkparking.copilot.NativeConfig.APPROACH_SPEED_THRESHOLD_KMH - 1).toDouble().coerceAtLeast(0.0)
     lowSpeedHoldS = com.hkparking.copilot.NativeConfig.APPROACH_CONSECUTIVE_S
     exitHoldS = 0
-    dispatch()
+    dispatchMotion()
   }
 
   fun injectLeaveTarget(holdS: Int) {
@@ -361,6 +362,7 @@ object Bindings {
     onSiteRejectedCue = null
     pendingConfirmSessionId = null
     networkFailed = false
+    service.networkOnline = true
     voiceInput.setSimControlListener { event, intValue, stringValue ->
       dispatchSim(service, event, intValue, stringValue)
     }
@@ -406,9 +408,13 @@ object Bindings {
         pendingConfirmSessionId = if (pendingDriverConfirm) sessionId else null
       }
       "DRIVER_CONFIRM" -> flushDriverConfirm(service)
-      "NETWORK_FAIL" -> networkFailed = true
+      "NETWORK_FAIL" -> {
+        networkFailed = true
+        service.networkOnline = false
+      }
       "NETWORK_OK" -> {
         networkFailed = false
+        service.networkOnline = true
         flushDriverConfirm(service)
       }
       "CLOCK_HKT_MIDNIGHT" -> {

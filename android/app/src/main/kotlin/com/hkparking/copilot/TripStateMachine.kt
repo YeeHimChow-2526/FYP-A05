@@ -233,7 +233,6 @@ class TripStateMachine(
       recommend = true
       enter(TripState.AMBER_STEADY)
     } else {
-      jitTriggered = false
       recommend = false
       enter(TripState.CRUISING)
     }
@@ -241,6 +240,9 @@ class TripStateMachine(
 
   fun onDistanceToDestination(distanceM: Int) {
     if (!fgsRunning) {
+      return
+    }
+    if (state == TripState.APPROACH_MUTED || state == TripState.PARKED_CONFIRMED) {
       return
     }
     distanceToDestinationM = distanceM
@@ -379,8 +381,10 @@ class TripStateMachine(
     if (!fgsRunning || networkDegraded) {
       return
     }
+    if (state == TripState.APPROACH_MUTED || state == TripState.PARKED_CONFIRMED) {
+      return
+    }
     assignStatusPip(pip)
-    jitTriggered = false
     recommend = false
     enter(TripState.NEARBY_READY)
   }

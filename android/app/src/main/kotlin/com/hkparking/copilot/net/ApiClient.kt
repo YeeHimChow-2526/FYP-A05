@@ -89,7 +89,15 @@ class ApiClient(
     dispatch(COMMIT, mapOf("session_id" to sessionId, "target_carpark_id" to targetCarparkId), null, true, false, conflictCue = true)
 
   suspend fun releaseSession(sessionId: String, targetCarparkId: String, isOnline: Boolean = true): CallOutcome {
-    if (!isOnline) return outcome(false, null, attempts = 0)
+    if (!isOnline) {
+      runCatching {
+        android.util.Log.i("ApiClient", "Release session skipped: sessionId=$sessionId")
+      }
+      return outcome(false, null, attempts = 0)
+    }
+    runCatching {
+      android.util.Log.i("ApiClient", "Release session sent: sessionId=$sessionId")
+    }
     return dispatch(RELEASE, mapOf("session_id" to sessionId, "target_carpark_id" to targetCarparkId, "reason" to PARKED_CONFIRMED), null, false, false)
   }
 

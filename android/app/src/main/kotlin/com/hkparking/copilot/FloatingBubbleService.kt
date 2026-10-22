@@ -8,9 +8,12 @@ import com.hkparking.copilot.voice.CommandCode
 import com.hkparking.copilot.voice.CommandCodes
 import com.hkparking.copilot.voice.LocaleProbe
 import com.hkparking.copilot.voice.ParseContext
+import com.hkparking.copilot.voice.RecommendationCard
 import com.hkparking.copilot.voice.SpeechCapabilityProbe
 import com.hkparking.copilot.voice.TripVoiceMode
+import com.hkparking.copilot.voice.TtsService
 import com.hkparking.copilot.voice.VoiceCapabilityChecker
+import com.hkparking.copilot.voice.createTtsEngine
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.resume
@@ -23,6 +26,8 @@ class FloatingBubbleService : android.app.Service {
   val capabilityChecker: VoiceCapabilityChecker
   val tripStateMachine: TripStateMachine
   val delayMs: suspend (Long) -> Unit
+  val ttsService: TtsService
+  var networkOnline: Boolean = true
   private val apiClient: com.hkparking.copilot.net.ApiClient
 
   constructor() : this(VoiceCapabilityChecker(SilentSpeechProbe()), TripStateMachine(), defaultDelayMs())
@@ -41,6 +46,7 @@ class FloatingBubbleService : android.app.Service {
     this.capabilityChecker = capabilityChecker
     this.tripStateMachine = tripStateMachine
     this.delayMs = clockDelay
+    this.ttsService = TtsService(createTtsEngine(this), capabilityChecker)
     this.apiClient = com.hkparking.copilot.net.ApiClient(
       com.hkparking.copilot.di.Bindings.apiTransport,
       tripStateMachine,
@@ -128,6 +134,13 @@ class FloatingBubbleService : android.app.Service {
   private var pendingInitialDistanceMeters: Int? = null
   private var lastLoggedSnapshot: String? = null
   private var portsWired: Boolean = false
+  private var cachedCards: List<RecommendationCard> = emptyList()
+  private var cachedSourceStatus: String = "ok"
+  private var cachedSpokenCue: String? = null
+  var parkedCandidateSessionId: String? = null
+    private set
+  var parkedCandidateName: String? = null
+    private set
 
   fun onColdBubbleTap(): Boolean {
     if (!isFgsRunning) return false
@@ -156,9 +169,13 @@ class FloatingBubbleService : android.app.Service {
         capabilityChecker.fgsType
       }
       tripStateMachine.syncVoiceCapability(updated, capabilityChecker.hasConfirmed)
+      logVoiceCapability("recheck")
     }
     worker.isDaemon = true
     worker.start()
+    if (runCatching { android.os.Looper.getMainLooper() }.getOrNull() == null) {
+      runCatching { worker.join(NativeConfig.VOICE_CAPABILITY_CHECK_TIMEOUT_MS) }
+    }
     if (!tripStateMachine.fgsStartAccepted) {
       tripStateMachine.requestStart(
         entry = entry,
@@ -248,26 +265,54 @@ class FloatingBubbleService : android.app.Service {
     exitHoldS: Int,
   ) {
     if (!isFgsRunning) return
-    if (exitHoldS > 0) {
-      tripStateMachine.onApproachSample(distanceMeters, speedKmh, lowSpeedHoldS, fixAgeSeconds, exitHoldS)
-      updateCapsuleVisual()
-      return
-    }
-    onLocationFix(distanceMeters)
     tripStateMachine.onApproachSample(distanceMeters, speedKmh, lowSpeedHoldS, fixAgeSeconds, exitHoldS)
     updateCapsuleVisual()
+    if (
+      tripStateMachine.state == TripState.APPROACH_MUTED ||
+      tripStateMachine.state == TripState.PARKED_CONFIRMED
+    ) {
+      return
+    }
+    if (exitHoldS > 0) return
+    onLocationFix(distanceMeters)
   }
 
   fun onEngineShutdown(withinTargetOrBasementLoss: Boolean) {
+    val sessionId = tripStateMachine.sessionId
+    val targetCarparkId = cachedCards.firstOrNull()?.carparkId ?: tripStateMachine.destinationName.orEmpty()
+    val targetName = cachedCards.firstOrNull()?.name ?: tripStateMachine.destinationName
     tripStateMachine.onEngineShutdown(withinTargetOrBasementLoss)
-    isFgsRunning = false
-    isCapsuleVisible = false
-    isMicActive = false
-    isAudioRecordRunning = false
     tripEndedReason = if (withinTargetOrBasementLoss) "PARKED_CONFIRMED" else "ENGINE_SHUTDOWN"
+    if (withinTargetOrBasementLoss && sessionId != null) {
+      parkedCandidateSessionId = sessionId
+      parkedCandidateName = targetName
+      runCatching {
+        android.util.Log.i("FloatingBubbleService", "Parked candidate written: sessionId=$sessionId")
+      }
+      if (networkOnline) {
+        launchApi { apiClient.releaseSession(sessionId, targetCarparkId, isOnline = true) }
+        runCatching {
+          android.util.Log.i("FloatingBubbleService", "Release session sent: sessionId=$sessionId")
+        }
+      } else {
+        runCatching {
+          android.util.Log.i("FloatingBubbleService", "Release session skipped: sessionId=$sessionId")
+        }
+      }
+    } else {
+      runCatching {
+        android.util.Log.i("FloatingBubbleService", "Release session skipped: sessionId=${sessionId ?: ""}")
+      }
+    }
+    val reason = tripEndedReason ?: "ENGINE_SHUTDOWN"
+    launchApi {
+      delayMs(NativeConfig.TEARDOWN_FADE_MS.toLong())
+      finishTeardown(reason)
+    }
   }
 
   fun onVoiceCapabilityApplied(snapshot: CapabilitySnapshot, micFgsActive: Boolean) {
+    val previous = tripStateMachine.tripVoiceMode
     tripStateMachine.syncVoiceCapability(snapshot, hasConfirmed = true)
     tripStateMachine.onMicFgsActive(micFgsActive)
     val fullVoice = snapshot.mode == TripVoiceMode.FULL_VOICE
@@ -276,6 +321,8 @@ class FloatingBubbleService : android.app.Service {
     activeFgsType = if (isMicActive) VoiceCapabilityChecker.FGS_LOCATION_MIC else VoiceCapabilityChecker.FGS_LOCATION
     manualCardVisible = !fullVoice
     if (isMicActive) persistentNotificationText = LISTENING
+    val reason = if (previous != tripStateMachine.tripVoiceMode) "mode_changed" else "applied"
+    logVoiceCapability(reason)
   }
 
   fun onListenSilence(elapsedS: Double?) {
@@ -307,6 +354,12 @@ class FloatingBubbleService : android.app.Service {
 
   private fun onLocationFix(distanceMeters: Int) {
     if (!isFgsRunning) return
+    if (
+      tripStateMachine.state == TripState.APPROACH_MUTED ||
+      tripStateMachine.state == TripState.PARKED_CONFIRMED
+    ) {
+      return
+    }
     lastDistanceMeters = distanceMeters
     val wasJitTriggered = tripStateMachine.jitTriggered
     tripStateMachine.onDistanceToDestination(distanceMeters)
@@ -337,7 +390,23 @@ class FloatingBubbleService : android.app.Service {
 
   private fun launchRecommend(mode: QueryTriggerMode) {
     launchApi {
-      apiClient.recommendAndRoute(buildRecommendRequest(), mode)
+      val outcome = apiClient.recommendAndRoute(buildRecommendRequest(), mode)
+      if (outcome.succeeded) {
+        val cards = outcome.response?.cards.orEmpty()
+        if (cards.isNotEmpty()) {
+          cachedCards = cards
+          cachedSourceStatus = outcome.response?.sourceStatus ?: "ok"
+          cachedSpokenCue = cards.first().spokenCue
+        }
+        if (mode == QueryTriggerMode.DRIVER_ACTIVE) {
+          ttsService.speakFirstChoice(
+            cards,
+            cachedSourceStatus,
+            tripStateMachine.tripVoiceMode,
+            tripStateMachine.state == TripState.APPROACH_MUTED,
+          )
+        }
+      }
       updateCapsuleVisual()
     }
   }
@@ -496,6 +565,32 @@ class FloatingBubbleService : android.app.Service {
     tripStateMachine.onOemKilled()
   }
 
+  private fun finishTeardown(reason: String) {
+    detachCapsuleWindow()
+    isCapsuleVisible = false
+    isFgsRunning = false
+    isMicActive = false
+    isAudioRecordRunning = false
+    runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+    runCatching { stopSelf() }
+    runCatching {
+      android.util.Log.i(
+        "FloatingBubbleService",
+        "FGS stopped after teardown fade (${NativeConfig.TEARDOWN_FADE_MS}ms): reason=$reason",
+      )
+    }
+  }
+
+  private fun logVoiceCapability(reason: String) {
+    val snapshot = capabilityChecker.currentSnapshot(timedOut = false)
+    runCatching {
+      android.util.Log.i(
+        "VoiceCapability",
+        "mode=${snapshot.mode} stt=${snapshot.stt} tts=${snapshot.tts} ttsUsable=${snapshot.ttsUsable} reason=$reason",
+      )
+    }
+  }
+
   companion object {
     const val NOTIFICATION_TAP = "NOTIFICATION_TAP"
     const val MIC_FAILED = "MIC_FAILED"
@@ -542,6 +637,13 @@ private fun defaultDelayMs(): suspend (Long) -> Unit = { ms ->
 }
 
 private class SilentSpeechProbe : SpeechCapabilityProbe {
-  override fun probeStt(locale: String): LocaleProbe = LocaleProbe()
-  override fun probeTts(locale: String): LocaleProbe = LocaleProbe()
+  override fun probeStt(locale: String): LocaleProbe = readyProbe()
+  override fun probeTts(locale: String): LocaleProbe = readyProbe()
+
+  private fun readyProbe(): LocaleProbe = LocaleProbe(
+    setLanguageSucceeded = true,
+    offlineCantoneseVoiceInstalled = true,
+    canRecognizeOrSynthesize = true,
+    supported = true,
+  )
 }
