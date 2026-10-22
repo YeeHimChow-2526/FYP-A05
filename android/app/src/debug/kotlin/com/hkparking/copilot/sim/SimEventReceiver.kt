@@ -89,11 +89,10 @@ class SimEventReceiver(
   }
 
   private fun startTrip(stringValue: String?): Boolean {
+    val destinationName = stringValue?.trim()?.takeIf { it.isNotEmpty() } ?: DEFAULT_DESTINATION
     Bindings.locationSource.start()
     Bindings.voiceInput.startListening(hotword = true)
-    val utterance = stringValue?.takeIf { it.isNotBlank() } ?: "泊車助手，去朗豪坊"
-    Bindings.voiceInput.injectUtterance(utterance)
-    return true
+    return Bindings.lockOrStartTrip(destinationName)
   }
 
   private fun setDistance(event: String, intValue: Int?, stringValue: String?): Boolean {
@@ -266,6 +265,7 @@ class SimEventReceiver(
     private const val MANUAL_ONLY = "MANUAL_ONLY"
     private const val STT_TOKEN = "stt"
     private const val MISSING_TOKEN = "missing"
+    private const val DEFAULT_DESTINATION = "朗豪坊"
 
     fun register(context: android.content.Context, receiver: SimEventReceiver) {
       val filter = android.content.IntentFilter(ACTION_SIM_EVENT)

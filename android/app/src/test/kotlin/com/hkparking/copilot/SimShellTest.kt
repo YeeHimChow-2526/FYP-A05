@@ -613,7 +613,7 @@ class SimShellTest {
     assertEquals(TripState.CRUISING, resolved.tripStateMachine.state)
     assertTrue(resolvedReceiver.dispatchEvent("TRIE_MISS_RESOLVE_OK", stringValue = "朗豪坊"))
     assertEquals("朗豪坊", resolved.tripStateMachine.destinationName)
-    assertEquals(TripState.AMBER_STEADY, resolved.tripStateMachine.state)
+    assertEquals(TripState.CRUISING, resolved.tripStateMachine.state)
     Bindings.detachService(resolved)
 
     val trieFail = openService(FakeClock())

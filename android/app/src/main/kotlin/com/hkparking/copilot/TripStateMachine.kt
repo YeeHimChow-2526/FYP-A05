@@ -197,25 +197,42 @@ class TripStateMachine(
     if (distanceToDestinationM != null) {
       this.distanceToDestinationM = distanceToDestinationM
     }
-    val withinTrigger = fgsRunning &&
-      distanceToDestinationM != null &&
-      distanceToDestinationM <= NativeConfig.TRIGGER_DISTANCE_M
+    val distance = this.distanceToDestinationM
     if (state == TripState.ALERT_BREATHING && !networkDegraded) {
-      if (withinTrigger) {
-        jitTriggered = true
-        recommend = true
-        enter(TripState.AMBER_STEADY)
+      if (fgsRunning && distance != null && distance <= NativeConfig.TRIGGER_DISTANCE_M) {
+        armBackgroundPrefetch(distance)
+        if (state == TripState.ALERT_BREATHING) {
+          enter(TripState.AMBER_STEADY)
+        }
       } else {
         enter(TripState.CRUISING)
       }
       return
     }
-    if (withinTrigger && !jitTriggered) {
-      jitTriggered = true
-      recommend = true
-      if (!networkDegraded && state != TripState.ALERT_BREATHING) {
-        enter(TripState.AMBER_STEADY)
-      }
+    armBackgroundPrefetch(distance)
+  }
+
+  private fun withinTriggerForJit(distanceM: Int?): Boolean {
+    return fgsRunning &&
+      destinationLocked &&
+      distanceM != null &&
+      distanceM <= NativeConfig.TRIGGER_DISTANCE_M &&
+      !jitTriggered
+  }
+
+  private fun armBackgroundPrefetch(distanceM: Int?) {
+    if (!withinTriggerForJit(distanceM)) {
+      return
+    }
+    jitTriggered = true
+    recommend = true
+    if (
+      !networkDegraded &&
+      state != TripState.ALERT_BREATHING &&
+      state != TripState.APPROACH_MUTED &&
+      state != TripState.PARKED_CONFIRMED
+    ) {
+      enter(TripState.AMBER_STEADY)
     }
   }
 
@@ -246,17 +263,7 @@ class TripStateMachine(
       return
     }
     distanceToDestinationM = distanceM
-    if (
-      destinationLocked &&
-      !jitTriggered &&
-      distanceM <= NativeConfig.TRIGGER_DISTANCE_M
-    ) {
-      jitTriggered = true
-      recommend = true
-      if (!networkDegraded && state != TripState.ALERT_BREATHING) {
-        enter(TripState.AMBER_STEADY)
-      }
-    }
+    armBackgroundPrefetch(distanceM)
   }
 
   fun onApproachSample(
@@ -274,7 +281,11 @@ class TripStateMachine(
       distanceM > NativeConfig.APPROACH_EXIT_DISTANCE_M &&
       exitHoldS >= NativeConfig.APPROACH_EXIT_HOLD_S
     ) {
-      enter(TripState.CRUISING)
+      if (networkDegraded) {
+        enter(TripState.GREY_BREATHING)
+      } else {
+        enter(TripState.CRUISING)
+      }
       return
     }
     val coreHit = distanceM <= NativeConfig.APPROACH_CORE_RADIUS_M &&
@@ -283,7 +294,7 @@ class TripStateMachine(
     val deadReckoning = distanceM <= NativeConfig.APPROACH_RADIUS_M &&
       speedKmh < NativeConfig.DEAD_RECKONING_SPEED_KMH &&
       fixAgeS > NativeConfig.GPS_FIX_STALE_S
-    if ((coreHit || deadReckoning) && !networkDegraded && state != TripState.ALERT_BREATHING) {
+    if ((coreHit || deadReckoning) && state != TripState.PARKED_CONFIRMED && state != TripState.ALERT_BREATHING) {
       enter(TripState.APPROACH_MUTED)
     }
   }
@@ -294,6 +305,9 @@ class TripStateMachine(
     }
     networkDegraded = true
     recommend = false
+    if (state == TripState.APPROACH_MUTED) {
+      return
+    }
     enter(TripState.GREY_BREATHING)
   }
 
@@ -302,6 +316,10 @@ class TripStateMachine(
       return
     }
     networkDegraded = false
+    if (state == TripState.APPROACH_MUTED) {
+      deferredAlert = null
+      return
+    }
     val pending = deferredAlert
     deferredAlert = null
     if (pending != null) {

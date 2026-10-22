@@ -1,6 +1,8 @@
 package com.hkparking.copilot.di
 
+import com.hkparking.copilot.FgsBootstrapActivity
 import com.hkparking.copilot.NativeConfig
+import com.hkparking.copilot.PermissionCheckInput
 import com.hkparking.copilot.StartupEntry
 import com.hkparking.copilot.net.ApiTransport
 import com.hkparking.copilot.net.HttpResult
@@ -74,6 +76,7 @@ class SimLocationSource : LocationSource {
   private var listener: ((Int, Double, Int) -> Unit)? = null
   private var motionListener: ((Int, Double, Int, Int, Int) -> Unit)? = null
   private var started = false
+  private var hasSample = false
 
   override fun setLocationListener(listener: ((Int, Double, Int) -> Unit)?) {
     this.listener = listener
@@ -87,7 +90,7 @@ class SimLocationSource : LocationSource {
 
   override fun start() {
     started = true
-    dispatch()
+    if (hasSample) dispatch()
   }
 
   override fun stop() {
@@ -96,6 +99,7 @@ class SimLocationSource : LocationSource {
 
   fun injectDistanceMeters(meters: Int) {
     distanceMeters = meters
+    hasSample = true
     if (!started || isPaused) return
     listener?.invoke(distanceMeters, speedKmh, fixAgeSeconds)
   }
@@ -140,13 +144,18 @@ class SimLocationSource : LocationSource {
     isPaused = false
   }
 
-  fun reset() {
+  fun resetDistance() {
     distanceMeters = 0
     speedKmh = 0.0
-    isPaused = false
     fixAgeSeconds = 0
     lowSpeedHoldS = 0
     exitHoldS = 0
+    hasSample = false
+  }
+
+  fun reset() {
+    resetDistance()
+    isPaused = false
     started = false
     listener = null
     motionListener = null
@@ -344,6 +353,9 @@ object Bindings {
   val apiTransport: FixtureApiTransport = FixtureApiTransport()
   val networkStatus: FixtureNetworkStatus = FixtureNetworkStatus()
   var activeReceiver: SimEventReceiver? = null
+  private var activeService: com.hkparking.copilot.FloatingBubbleService? = null
+  private var retainedHost: com.hkparking.copilot.FloatingBubbleService? = null
+  private var receiverRegistered = false
   var capabilityCheckTimedOut: Boolean = false
     private set
   var todayTripsCleared: Boolean = false
@@ -358,9 +370,8 @@ object Bindings {
   private var networkFailed: Boolean = false
 
   fun attachService(service: com.hkparking.copilot.FloatingBubbleService) {
-    if (activeReceiver != null) {
-      detachService(service)
-    }
+    activeService = service
+    retainedHost = service
     capabilityCheckTimedOut = false
     todayTripsCleared = false
     pendingDriverConfirm = false
@@ -378,21 +389,45 @@ object Bindings {
         service.assets.open("mock/$name").bufferedReader().use { it.readText() }
       }.getOrNull()
     }
-    val receiver = SimEventReceiver(
-      onEventHandled = { service.updateCapsuleVisual() },
-    )
-    activeReceiver = receiver
-    if (runCatching { service.applicationContext }.isSuccess) {
-      runCatching { SimEventReceiver.register(service, receiver) }
+    if (activeReceiver == null) {
+      activeReceiver = SimEventReceiver(
+        onEventHandled = { (activeService ?: retainedHost)?.updateCapsuleVisual() },
+      )
+    }
+    if (!receiverRegistered) {
+      val appContext = runCatching { service.applicationContext }.getOrNull()
+      if (appContext != null && activeReceiver != null) {
+        val registered = runCatching {
+          SimEventReceiver.register(appContext, activeReceiver!!)
+        }.isSuccess
+        if (registered) receiverRegistered = true
+      }
     }
     service.updateCapsuleVisual()
   }
 
   fun detachService(service: com.hkparking.copilot.FloatingBubbleService) {
-    val receiver = activeReceiver ?: return
-    runCatching { service.unregisterReceiver(receiver) }
-    activeReceiver = null
+    if (activeService !== service) return
+    activeService = null
     voiceInput.setSimControlListener(null)
+  }
+
+  fun lockOrStartTrip(destinationName: String): Boolean {
+    val host = activeService ?: retainedHost ?: return false
+    if (!host.isFgsRunning) {
+      locationSource.resetDistance()
+      val handshake = FgsBootstrapActivity(host) { 0L }
+      val launched = handshake.launchFromEntry(
+        StartupEntry.A_2,
+        PermissionCheckInput(recordAudioGranted = false),
+      )
+      if (!launched) return false
+      host.reportFgsStarted()
+      if (!host.isFgsRunning || !handshake.fgsStartedReceived) return false
+    }
+    host.lockDestination(destinationName)
+    return host.tripStateMachine.destinationLocked &&
+      host.tripStateMachine.destinationName == destinationName
   }
 
   private fun dispatchSim(
@@ -469,11 +504,7 @@ object Bindings {
       "BUBBLE_TAP" -> service.onActiveBubbleTap()
       "TRIE_MISS_RESOLVE_OK" -> {
         val name = stringValue?.takeIf { it.isNotBlank() } ?: service.tripStateMachine.destinationName ?: "朗豪坊"
-        service.tripStateMachine.onDestinationSet(
-          distanceToDestinationM = service.lastDistanceMeters(),
-          destinationName = name,
-        )
-        service.updateCapsuleVisual()
+        service.lockDestination(name)
       }
       "TRIE_MISS_NETWORK_FAIL" -> {
         service.tripStateMachine.onNetworkFailure()

@@ -143,7 +143,11 @@ class FloatingBubbleService : android.app.Service {
 
   private var hasPendingFgsStart: Boolean = false
   private var speechHeard: Boolean = false
+  val launchedRecommendModes = mutableListOf<QueryTriggerMode>()
+  var capsuleSnapshot: String = ""
+    private set
   private var lastDistanceMeters: Int = 0
+  private var hasDistanceFix: Boolean = false
   private var pendingFgsStartedCallback: (() -> Unit)? = null
   private var pendingInitialDistanceMeters: Int? = null
   private var lastLoggedSnapshot: String? = null
@@ -171,6 +175,10 @@ class FloatingBubbleService : android.app.Service {
     initialDistanceMeters: Int? = null,
     onFgsStarted: () -> Unit = {},
   ) {
+    if (!isFgsRunning) {
+      lastDistanceMeters = 0
+      hasDistanceFix = false
+    }
     val initial = capabilityChecker.startupSnapshot(recordAudioGranted, hotwordEnabled, entry)
     activeFgsType = if (entry == StartupEntry.B_2) {
       VoiceCapabilityChecker.FGS_LOCATION
@@ -259,9 +267,9 @@ class FloatingBubbleService : android.app.Service {
   }
 
   private fun wirePorts() {
+    com.hkparking.copilot.di.Bindings.attachService(this)
     if (portsWired) return
     portsWired = true
-    com.hkparking.copilot.di.Bindings.attachService(this)
     com.hkparking.copilot.di.Bindings.locationSource.setLocationListener { distanceMeters, _, _ ->
       onLocationFix(distanceMeters)
     }
@@ -379,8 +387,24 @@ class FloatingBubbleService : android.app.Service {
       return
     }
     lastDistanceMeters = distanceMeters
+    hasDistanceFix = true
     val wasJitTriggered = tripStateMachine.jitTriggered
     tripStateMachine.onDistanceToDestination(distanceMeters)
+    publishJitEdge(wasJitTriggered)
+  }
+
+  fun lockDestination(destinationName: String) {
+    val wasJitTriggered = tripStateMachine.jitTriggered
+    tripStateMachine.onDestinationSet(
+      distanceToDestinationM = distanceForDestinationLock(),
+      destinationName = destinationName,
+    )
+    publishJitEdge(wasJitTriggered)
+  }
+
+  private fun distanceForDestinationLock(): Int? = if (hasDistanceFix) lastDistanceMeters else null
+
+  private fun publishJitEdge(wasJitTriggered: Boolean) {
     updateCapsuleVisual()
     if (!wasJitTriggered && tripStateMachine.jitTriggered && tripStateMachine.recommend) {
       launchRecommend(QueryTriggerMode.BACKGROUND_PREFETCH)
@@ -390,11 +414,7 @@ class FloatingBubbleService : android.app.Service {
   private fun onUtterance(text: String, confidence: Double?) {
     val parsed = CommandCodes.parse(text, ParseContext(confidence = confidence))
     if (parsed.code == CommandCode.SET_DESTINATION && !parsed.destinationName.isNullOrBlank()) {
-      tripStateMachine.onDestinationSet(destinationName = parsed.destinationName)
-      updateCapsuleVisual()
-      if (tripStateMachine.recommend) {
-        launchRecommend(QueryTriggerMode.BACKGROUND_PREFETCH)
-      }
+      lockDestination(parsed.destinationName)
     }
     if (parsed.code == CommandCode.FIND_PARKING) {
       launchRecommend(QueryTriggerMode.DRIVER_ACTIVE)
@@ -407,6 +427,7 @@ class FloatingBubbleService : android.app.Service {
   }
 
   private fun launchRecommend(mode: QueryTriggerMode) {
+    launchedRecommendModes += mode
     spokenDriverCues.clear()
     launchApi {
       val outcome = apiClient.recommendAndRoute(buildRecommendRequest(), mode)
@@ -490,6 +511,7 @@ class FloatingBubbleService : android.app.Service {
     val pip = tripStateMachine.statusPip
     capsuleVisualLabel = "P [${light.name}]"
     val snapshot = "light=$light, pip=$pip, state=${tripStateMachine.state}"
+    capsuleSnapshot = snapshot
     if (snapshot != lastLoggedSnapshot) {
       lastLoggedSnapshot = snapshot
       runCatching {

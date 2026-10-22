@@ -1,0 +1,253 @@
+package com.hkparking.copilot
+
+import com.hkparking.copilot.di.Bindings
+import com.hkparking.copilot.net.QueryTriggerMode
+import kotlin.coroutines.Continuation
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class Step17lBehaviorTest {
+  @Test
+  fun startTripLocksNamedDestinationAndJitFiresOnTriggerEdgeOnly() {
+    val service = openService()
+    val receiver = Bindings.activeReceiver!!
+    assertTrue(receiver.dispatchEvent("START_TRIP", stringValue = "朗豪坊"))
+    assertEquals("朗豪坊", service.tripStateMachine.destinationName)
+    assertTrue(service.tripStateMachine.destinationLocked)
+    assertTrue(receiver.dispatchEvent("SET_VOICE_MODE", stringValue = "ANNOUNCE_MANUAL"))
+
+    val beforeFar = Bindings.apiTransport.postCount
+    assertTrue(receiver.dispatchEvent("SET_DISTANCE_M", intValue = 3000))
+    assertEquals(beforeFar, Bindings.apiTransport.postCount)
+    assertEquals(TripState.CRUISING, service.tripStateMachine.state)
+
+    val seen = mutableListOf<TripState>()
+    val prior = service.tripStateMachine.onStateChanged
+    service.tripStateMachine.onStateChanged = {
+      prior?.invoke()
+      seen += service.tripStateMachine.state
+    }
+    val beforeNear = Bindings.apiTransport.postCount
+    val beforeModes = service.launchedRecommendModes.size
+    assertTrue(receiver.dispatchEvent("SET_DISTANCE_M", intValue = NativeConfig.TRIGGER_DISTANCE_M))
+    assertTrue(service.tripStateMachine.jitTriggered)
+    assertTrue(seen.contains(TripState.AMBER_STEADY))
+    assertEquals(1, Bindings.apiTransport.postCount - beforeNear)
+    assertEquals(
+      listOf(QueryTriggerMode.BACKGROUND_PREFETCH),
+      service.launchedRecommendModes.drop(beforeModes),
+    )
+    assertTrue(service.ttsService.spokenCues.isEmpty())
+
+    assertTrue(receiver.dispatchEvent("SET_DISTANCE_M", intValue = 900))
+    assertTrue(receiver.dispatchEvent("SET_DISTANCE_M", intValue = 800))
+    assertEquals(beforeNear + 1, Bindings.apiTransport.postCount)
+    assertTrue(service.tripStateMachine.jitTriggered)
+    Bindings.detachService(service)
+  }
+
+  @Test
+  fun lockingDestinationInsideTriggerPrefetchesOnceWithoutWaitingForNextFix() {
+    val started = openService()
+    val startedReceiver = Bindings.activeReceiver!!
+    Bindings.locationSource.start()
+    val before = Bindings.apiTransport.postCount
+    assertTrue(startedReceiver.dispatchEvent("SET_DISTANCE_M", intValue = 800))
+    assertEquals(before, Bindings.apiTransport.postCount)
+    assertFalse(started.tripStateMachine.jitTriggered)
+    assertTrue(startedReceiver.dispatchEvent("SET_VOICE_MODE", stringValue = "ANNOUNCE_MANUAL"))
+    assertTrue(startedReceiver.dispatchEvent("START_TRIP", stringValue = "朗豪坊"))
+    assertEquals("朗豪坊", started.tripStateMachine.destinationName)
+    assertTrue(started.tripStateMachine.destinationLocked)
+    assertTrue(started.tripStateMachine.jitTriggered)
+    assertEquals(1, Bindings.apiTransport.postCount - before)
+    assertEquals(QueryTriggerMode.BACKGROUND_PREFETCH, started.launchedRecommendModes.single())
+    assertTrue(started.ttsService.spokenCues.isEmpty())
+    assertTrue(startedReceiver.dispatchEvent("SET_DISTANCE_M", intValue = 800))
+    assertEquals(1, Bindings.apiTransport.postCount - before)
+    Bindings.detachService(started)
+
+    val spoken = openService()
+    val spokenReceiver = Bindings.activeReceiver!!
+    Bindings.locationSource.start()
+    Bindings.voiceInput.startListening(hotword = true)
+    assertTrue(spokenReceiver.dispatchEvent("SET_DISTANCE_M", intValue = 800))
+    assertTrue(spokenReceiver.dispatchEvent("SET_VOICE_MODE", stringValue = "ANNOUNCE_MANUAL"))
+    val spokenBefore = Bindings.apiTransport.postCount
+    assertTrue(spokenReceiver.dispatchEvent("INJECT_UTTERANCE", stringValue = "目的地朗豪坊"))
+    assertEquals("朗豪坊", spoken.tripStateMachine.destinationName)
+    assertTrue(spoken.tripStateMachine.jitTriggered)
+    assertEquals(1, Bindings.apiTransport.postCount - spokenBefore)
+    assertEquals(QueryTriggerMode.BACKGROUND_PREFETCH, spoken.launchedRecommendModes.single())
+    assertTrue(spoken.ttsService.spokenCues.isEmpty())
+    Bindings.detachService(spoken)
+
+    val unlocked = openService()
+    val unlockedReceiver = Bindings.activeReceiver!!
+    Bindings.locationSource.start()
+    val unlockedBefore = Bindings.apiTransport.postCount
+    assertTrue(unlockedReceiver.dispatchEvent("SET_DISTANCE_M", intValue = NativeConfig.TRIGGER_DISTANCE_M))
+    assertEquals(unlockedBefore, Bindings.apiTransport.postCount)
+    assertFalse(unlocked.tripStateMachine.destinationLocked)
+    assertFalse(unlocked.tripStateMachine.jitTriggered)
+    Bindings.detachService(unlocked)
+  }
+
+  @Test
+  fun approachMutedLockStillPrefetchesOnceAndKeepsState() {
+    val service = openService()
+    val receiver = Bindings.activeReceiver!!
+    Bindings.locationSource.start()
+    assertTrue(receiver.dispatchEvent("SET_DISTANCE_M", intValue = 800))
+    assertTrue(receiver.dispatchEvent("ARRIVE_CORE"))
+    assertEquals(TripState.APPROACH_MUTED, service.tripStateMachine.state)
+    assertTrue(receiver.dispatchEvent("SET_VOICE_MODE", stringValue = "ANNOUNCE_MANUAL"))
+    val before = Bindings.apiTransport.postCount
+    assertTrue(receiver.dispatchEvent("START_TRIP", stringValue = "朗豪坊"))
+    assertEquals(TripState.APPROACH_MUTED, service.tripStateMachine.state)
+    assertTrue(service.tripStateMachine.jitTriggered)
+    assertEquals(1, Bindings.apiTransport.postCount - before)
+    assertEquals(QueryTriggerMode.BACKGROUND_PREFETCH, service.launchedRecommendModes.single())
+    assertTrue(service.ttsService.spokenCues.isEmpty())
+    Bindings.detachService(service)
+  }
+
+  @Test
+  fun approachMutedSurvivesNetworkAndLeavesOnlyOnHoldOrShutdown() {
+    val clock = StepClock()
+    val service = openService(clock)
+    val receiver = Bindings.activeReceiver!!
+    assertTrue(receiver.dispatchEvent("START_TRIP", stringValue = "朗豪坊"))
+    assertTrue(receiver.dispatchEvent("SET_VOICE_MODE", stringValue = "ANNOUNCE_MANUAL"))
+    assertTrue(receiver.dispatchEvent("NETWORK_FAIL"))
+    assertTrue(receiver.dispatchEvent("INJECT_UTTERANCE", stringValue = "搵位"))
+    exhaustRetries(clock)
+    assertEquals(TripState.GREY_BREATHING, service.tripStateMachine.state)
+    assertTrue(service.tripStateMachine.networkDegraded)
+
+    assertTrue(receiver.dispatchEvent("NETWORK_OK"))
+    assertEquals(TripState.GREY_BREATHING, service.tripStateMachine.state)
+    assertTrue(service.tripStateMachine.networkDegraded)
+
+    assertTrue(receiver.dispatchEvent("FORCE_RATE_LIMIT", intValue = 2))
+    assertTrue(receiver.dispatchEvent("INJECT_UTTERANCE", stringValue = "搵位"))
+    clock.advance(5_000L)
+    assertEquals(TripState.GREY_BREATHING, service.tripStateMachine.state)
+    assertTrue(service.tripStateMachine.networkDegraded)
+
+    assertTrue(receiver.dispatchEvent("ARRIVE_CORE"))
+    assertEquals(TripState.APPROACH_MUTED, service.tripStateMachine.state)
+    assertTrue(service.capsuleSnapshot.contains("state=APPROACH_MUTED"))
+
+    assertTrue(receiver.dispatchEvent("INJECT_UTTERANCE", stringValue = "搵位"))
+    assertEquals(
+      "前方首選朗豪坊停車場，一百八十米，剩十二個位，首小時三十二蚊。",
+      service.ttsService.spokenCues.last(),
+    )
+    assertEquals(TripState.APPROACH_MUTED, service.tripStateMachine.state)
+    assertFalse(service.tripStateMachine.networkDegraded)
+
+    assertTrue(receiver.dispatchEvent("NETWORK_FAIL"))
+    assertTrue(receiver.dispatchEvent("INJECT_UTTERANCE", stringValue = "搵位"))
+    clock.advance(NativeConfig.API_TIMEOUT_MS)
+    assertEquals(TripState.APPROACH_MUTED, service.tripStateMachine.state)
+    assertTrue(service.tripStateMachine.networkDegraded)
+    Bindings.detachService(service)
+
+    val clean = openService()
+    val cleanReceiver = Bindings.activeReceiver!!
+    assertTrue(cleanReceiver.dispatchEvent("START_TRIP", stringValue = "朗豪坊"))
+    assertTrue(cleanReceiver.dispatchEvent("ARRIVE_CORE"))
+    assertEquals(TripState.APPROACH_MUTED, clean.tripStateMachine.state)
+    assertTrue(cleanReceiver.dispatchEvent("LEAVE_TARGET", intValue = NativeConfig.APPROACH_EXIT_HOLD_S - 1))
+    assertEquals(TripState.APPROACH_MUTED, clean.tripStateMachine.state)
+    assertTrue(cleanReceiver.dispatchEvent("LEAVE_TARGET", intValue = NativeConfig.APPROACH_EXIT_HOLD_S))
+    assertEquals(TripState.CRUISING, clean.tripStateMachine.state)
+    assertTrue(cleanReceiver.dispatchEvent("ARRIVE_CORE"))
+    assertEquals(TripState.APPROACH_MUTED, clean.tripStateMachine.state)
+    Bindings.detachService(clean)
+
+    val degradedClock = StepClock()
+    val degraded = openService(degradedClock)
+    val degradedReceiver = Bindings.activeReceiver!!
+    assertTrue(degradedReceiver.dispatchEvent("START_TRIP", stringValue = "朗豪坊"))
+    assertTrue(degradedReceiver.dispatchEvent("SET_VOICE_MODE", stringValue = "ANNOUNCE_MANUAL"))
+    assertTrue(degradedReceiver.dispatchEvent("NETWORK_FAIL"))
+    assertTrue(degradedReceiver.dispatchEvent("INJECT_UTTERANCE", stringValue = "搵位"))
+    exhaustRetries(degradedClock)
+    assertTrue(degraded.tripStateMachine.networkDegraded)
+    assertTrue(degradedReceiver.dispatchEvent("ARRIVE_CORE"))
+    assertEquals(TripState.APPROACH_MUTED, degraded.tripStateMachine.state)
+    assertTrue(degradedReceiver.dispatchEvent("NETWORK_OK"))
+    assertTrue(degradedReceiver.dispatchEvent("LEAVE_TARGET", intValue = NativeConfig.APPROACH_EXIT_HOLD_S))
+    assertEquals(TripState.GREY_BREATHING, degraded.tripStateMachine.state)
+    assertTrue(degradedReceiver.dispatchEvent("INJECT_UTTERANCE", stringValue = "搵位"))
+    assertNotEquals(TripState.GREY_BREATHING, degraded.tripStateMachine.state)
+    Bindings.detachService(degraded)
+  }
+
+  @Test
+  fun startTripAfterEngineShutdownOpensNewSessionThroughExistingHandshake() {
+    val clock = StepClock()
+    val service = openService(clock)
+    val receiver = Bindings.activeReceiver!!
+    assertTrue(receiver.dispatchEvent("START_TRIP", stringValue = "朗豪坊"))
+    val firstSession = service.tripStateMachine.sessionId
+    assertTrue(receiver.dispatchEvent("ENGINE_SHUTDOWN", intValue = 1))
+    clock.advance(NativeConfig.TEARDOWN_FADE_MS.toLong())
+    assertFalse(service.isFgsRunning)
+    Bindings.detachService(service)
+    assertTrue(Bindings.activeReceiver === receiver)
+    assertTrue(receiver.dispatchEvent("START_TRIP", stringValue = "朗豪坊"))
+    assertTrue(service.isFgsRunning)
+    assertNotEquals(firstSession, service.tripStateMachine.sessionId)
+    assertTrue(service.tripStateMachine.sessionId!!.isNotBlank())
+    assertEquals("朗豪坊", service.tripStateMachine.destinationName)
+    assertTrue(service.tripStateMachine.destinationLocked)
+    Bindings.detachService(service)
+  }
+
+  private fun exhaustRetries(clock: StepClock) {
+    clock.advance(NativeConfig.API_TIMEOUT_MS)
+    var guard = 0
+    while (Bindings.apiTransport.postCount < NativeConfig.API_MAX_ATTEMPTS && guard < 20) {
+      clock.advance(NativeConfig.API_RETRY_INTERVAL_MS)
+      clock.advance(NativeConfig.API_TIMEOUT_MS)
+      guard += 1
+    }
+  }
+
+  private fun openService(clock: StepClock = StepClock()): FloatingBubbleService {
+    Bindings.locationSource.reset()
+    Bindings.apiTransport.reset()
+    Bindings.voiceInput.stopListening()
+    val service = FloatingBubbleService(clock.delayMs)
+    service.startInForeground(StartupEntry.A_2, recordAudioGranted = false)
+    service.reportFgsStarted()
+    return service
+  }
+}
+
+private class StepClock {
+  private var now: Long = 0L
+  private val waiters = mutableListOf<Pair<Long, Continuation<Unit>>>()
+  val delayMs: suspend (Long) -> Unit = { ms ->
+    if (ms > 0L) {
+      suspendCoroutine { cont ->
+        waiters += (now + ms) to cont
+      }
+    }
+  }
+
+  fun advance(ms: Long) {
+    now += ms
+    val due = waiters.filter { it.first <= now }.sortedBy { it.first }
+    waiters.removeAll(due)
+    due.forEach { it.second.resume(Unit) }
+  }
+}
