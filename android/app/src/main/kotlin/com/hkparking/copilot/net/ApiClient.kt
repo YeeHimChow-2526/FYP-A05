@@ -113,7 +113,10 @@ class ApiClient(
     var attempts = 0
     while (true) {
       attempts += 1
+      logRequest(endpoint, attempts, mode, rateLimitRetry = false)
       val result = transport.post(endpoint, body)
+      val waitMs = if (result.statusCode == HTTP_TOO_MANY) rateLimitWaitMs(result.resolvedRetryAfterSeconds()) else null
+      logResult(result, waitMs)
       if (result.statusCode == HTTP_TOO_MANY) {
         return finishRateLimit(endpoint, body, mode, ready, conflictCue, silentConflict, timeline, cues, waits, attempts, result)
       }
@@ -145,8 +148,11 @@ class ApiClient(
     val waitMs = rateLimitWaitMs(limited.resolvedRetryAfterSeconds())
     delayMs(waitMs)
     waits += waitMs
-    val retry = transport.post(endpoint, body)
     val total = attempts + 1
+    logRequest(endpoint, total, mode, rateLimitRetry = true)
+    val retry = transport.post(endpoint, body)
+    val retryWaitMs = if (retry.statusCode == HTTP_TOO_MANY) rateLimitWaitMs(retry.resolvedRetryAfterSeconds()) else null
+    logResult(retry, retryWaitMs)
     if (isConflict(retry, conflictCue, silentConflict)) return conflictOutcome(retry, conflictCue, timeline, cues, waits, total)
     if (isOk(retry)) {
       if (ready) markReady(timeline)
@@ -186,6 +192,33 @@ class ApiClient(
       stateMachine.onJitSucceeded(StatusPip.NONE)
     }
     timeline += stateMachine.state
+  }
+
+  private fun logRequest(endpoint: String, attempts: Int, mode: QueryTriggerMode?, rateLimitRetry: Boolean) {
+    val attemptLabel = if (rateLimitRetry) {
+      "rate-limit retry total=$attempts/${NativeConfig.API_MAX_ATTEMPTS}"
+    } else {
+      "attempt $attempts/${NativeConfig.API_MAX_ATTEMPTS}"
+    }
+    val modeName = mode?.name ?: "DIRECT"
+    runCatching {
+      android.util.Log.i("ApiClient", "request path=$endpoint $attemptLabel mode=$modeName")
+    }
+  }
+
+  private fun logResult(result: HttpResult, waitMs: Long?) {
+    val status = when {
+      result.statusCode == HTTP_TOO_MANY -> "RATE_LIMITED"
+      result.statusCode == HTTP_CONFLICT -> "CONFLICT"
+      result.timedOut -> "TIMEOUT"
+      result.networkError -> "NETWORK_ERROR"
+      isOk(result) -> "SUCCESS"
+      else -> "FAILED"
+    }
+    val waitLabel = if (result.statusCode == HTTP_TOO_MANY && waitMs != null) " waitMs=$waitMs" else ""
+    runCatching {
+      android.util.Log.i("ApiClient", "result status=$status statusCode=${result.statusCode}$waitLabel")
+    }
   }
 
   private fun rateLimitWaitMs(retryAfterSeconds: Long?): Long {

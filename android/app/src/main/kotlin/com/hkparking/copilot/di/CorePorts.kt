@@ -5,12 +5,16 @@ import com.hkparking.copilot.net.HttpResult
 
 interface VoiceInput {
   fun setUtteranceListener(listener: ((String, Double?) -> Unit)?)
+  fun setSimControlListener(listener: ((event: String, intValue: Int?, stringValue: String?) -> Unit)?) {}
   fun startListening(hotword: Boolean = false)
   fun stopListening()
 }
 
 interface LocationSource {
   fun setLocationListener(listener: ((distanceMeters: Int, speedKmh: Double, fixAgeSeconds: Int) -> Unit)?)
+  fun setMotionListener(
+    listener: ((distanceMeters: Int, speedKmh: Double, fixAgeSeconds: Int, lowSpeedHoldS: Int, exitHoldS: Int) -> Unit)?,
+  ) {}
   fun start()
   fun stop()
 }

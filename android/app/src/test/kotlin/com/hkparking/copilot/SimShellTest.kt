@@ -9,6 +9,9 @@ import com.hkparking.copilot.net.ApiTransport
 import com.hkparking.copilot.net.RecommendRequest
 import com.hkparking.copilot.sim.SimEventReceiver
 import com.hkparking.copilot.voice.CommandCode
+import com.hkparking.copilot.voice.TripVoiceMode
+import com.hkparking.copilot.voice.VoiceCapabilityChecker
+import com.hkparking.copilot.voice.ZhHkTemplates
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.resume
@@ -374,6 +377,298 @@ class SimShellTest {
     assertEquals(2, Bindings.apiTransport.postCount)
     assertEquals(TripState.NEARBY_READY, recovered.tripStateMachine.state)
     Bindings.detachService(recovered)
+  }
+
+  @Test
+  fun arriveCoreAndStaleFixEnterApproachMuted() {
+    val clock = FakeClock()
+    val service = openService(clock)
+    val receiver = Bindings.activeReceiver!!
+    assertTrue(receiver.dispatchEvent("START_TRIP"))
+    assertEquals(TripState.CRUISING, service.tripStateMachine.state)
+    assertFalse(receiver.dispatchEvent("GPS_FIX_STALE", stringValue = "abc"))
+    assertEquals(TripState.CRUISING, service.tripStateMachine.state)
+    assertTrue(receiver.dispatchEvent("GPS_FIX_STALE", intValue = 1))
+    assertEquals(1, Bindings.locationSource.fixAgeSeconds)
+    assertEquals(TripState.CRUISING, service.tripStateMachine.state)
+    assertTrue(receiver.dispatchEvent("GPS_FIX_STALE"))
+    assertEquals(TripState.APPROACH_MUTED, service.tripStateMachine.state)
+    Bindings.detachService(service)
+
+    val arrive = openService(FakeClock())
+    val arriveReceiver = Bindings.activeReceiver!!
+    assertTrue(arriveReceiver.dispatchEvent("START_TRIP"))
+    assertNotEquals(TripState.APPROACH_MUTED, arrive.tripStateMachine.state)
+    assertTrue(arriveReceiver.dispatchEvent("ARRIVE_CORE"))
+    assertEquals(TripState.APPROACH_MUTED, arrive.tripStateMachine.state)
+    assertEquals(0, arrive.approachExitHoldS)
+    assertFalse(arriveReceiver.dispatchEvent("LEAVE_TARGET", stringValue = "nope"))
+    assertEquals(TripState.APPROACH_MUTED, arrive.tripStateMachine.state)
+    assertTrue(arriveReceiver.dispatchEvent("LEAVE_TARGET", intValue = NativeConfig.APPROACH_EXIT_HOLD_S - 1))
+    assertEquals(NativeConfig.APPROACH_EXIT_HOLD_S - 1, arrive.approachExitHoldS)
+    assertEquals(TripState.APPROACH_MUTED, arrive.tripStateMachine.state)
+    assertTrue(arriveReceiver.dispatchEvent("LEAVE_TARGET"))
+    assertEquals(NativeConfig.APPROACH_EXIT_HOLD_S, arrive.approachExitHoldS)
+    assertTrue(Bindings.locationSource.distanceMeters > NativeConfig.APPROACH_EXIT_DISTANCE_M)
+    assertEquals(TripState.APPROACH_MUTED, arrive.tripStateMachine.state)
+    Bindings.detachService(arrive)
+  }
+
+  @Test
+  fun engineShutdownConfirmAndMidnightUseServicePort() {
+    val outside = openService(FakeClock())
+    val outsideReceiver = Bindings.activeReceiver!!
+    assertTrue(outsideReceiver.dispatchEvent("START_TRIP"))
+    assertEquals(TripState.CRUISING, outside.tripStateMachine.state)
+    assertFalse(outsideReceiver.dispatchEvent("ENGINE_SHUTDOWN", intValue = 2))
+    assertEquals(TripState.CRUISING, outside.tripStateMachine.state)
+    assertTrue(outside.isFgsRunning)
+    assertTrue(outsideReceiver.dispatchEvent("ENGINE_SHUTDOWN", intValue = 0))
+    assertEquals(TripState.ENDED, outside.tripStateMachine.state)
+    assertEquals("ENGINE_SHUTDOWN", outside.tripEndedReason)
+    assertFalse(outside.isFgsRunning)
+    Bindings.detachService(outside)
+
+    val parked = openService(FakeClock())
+    val parkedReceiver = Bindings.activeReceiver!!
+    assertTrue(parkedReceiver.dispatchEvent("START_TRIP"))
+    val before = Bindings.apiTransport.postCount
+    assertTrue(parkedReceiver.dispatchEvent("ENGINE_SHUTDOWN", intValue = 1))
+    assertEquals(TripState.PARKED_CONFIRMED, parked.tripStateMachine.state)
+    assertTrue(parked.pendingDriverConfirm)
+    assertEquals(before, Bindings.apiTransport.postCount)
+    assertTrue(parkedReceiver.dispatchEvent("DRIVER_CONFIRM"))
+    assertTrue(parked.driverConfirmSent)
+    assertEquals(before + 1, Bindings.apiTransport.postCount)
+    assertTrue(Bindings.apiTransport.lastPath.contains("sync"))
+    Bindings.detachService(parked)
+
+    val offline = openService(FakeClock())
+    val offlineReceiver = Bindings.activeReceiver!!
+    assertTrue(offlineReceiver.dispatchEvent("START_TRIP"))
+    assertTrue(offlineReceiver.dispatchEvent("NETWORK_FAIL"))
+    assertTrue(offlineReceiver.dispatchEvent("ENGINE_SHUTDOWN", intValue = 1))
+    val offlineBefore = Bindings.apiTransport.postCount
+    assertTrue(offlineReceiver.dispatchEvent("DRIVER_CONFIRM"))
+    assertEquals(offlineBefore, Bindings.apiTransport.postCount)
+    assertTrue(offline.pendingDriverConfirm)
+    assertTrue(offlineReceiver.dispatchEvent("NETWORK_OK"))
+    assertEquals(offlineBefore + 1, Bindings.apiTransport.postCount)
+    Bindings.detachService(offline)
+
+    val cleared = openService(FakeClock())
+    val clearedReceiver = Bindings.activeReceiver!!
+    assertTrue(clearedReceiver.dispatchEvent("START_TRIP"))
+    assertTrue(clearedReceiver.dispatchEvent("ENGINE_SHUTDOWN", intValue = 1))
+    assertTrue(cleared.pendingDriverConfirm)
+    assertTrue(clearedReceiver.dispatchEvent("CLOCK_HKT_MIDNIGHT"))
+    assertTrue(cleared.todayTripsCleared)
+    assertFalse(cleared.pendingDriverConfirm)
+    val clearedBefore = Bindings.apiTransport.postCount
+    assertTrue(clearedReceiver.dispatchEvent("DRIVER_CONFIRM"))
+    assertEquals(clearedBefore, Bindings.apiTransport.postCount)
+    Bindings.detachService(cleared)
+  }
+
+  @Test
+  fun voiceMicPermissionAndListenEvents() {
+    val service = openService(FakeClock())
+    val receiver = Bindings.activeReceiver!!
+    assertTrue(receiver.dispatchEvent("START_TRIP"))
+    assertEquals(TripState.CRUISING, service.tripStateMachine.state)
+    assertFalse(receiver.dispatchEvent("SET_VOICE_MODE", stringValue = "NOPE"))
+    assertEquals(TripVoiceMode.MANUAL_ONLY, service.tripStateMachine.tripVoiceMode)
+    assertTrue(receiver.dispatchEvent("SET_VOICE_MODE", stringValue = "FULL_VOICE"))
+    assertEquals(TripState.CRUISING, service.tripStateMachine.state)
+    assertEquals(TripVoiceMode.FULL_VOICE, service.tripStateMachine.tripVoiceMode)
+    assertEquals(VoiceCapabilityChecker.FGS_LOCATION_MIC, service.activeFgsType)
+    assertTrue(service.isMicActive)
+    assertTrue(receiver.dispatchEvent("NO_MIC"))
+    assertFalse(service.isMicActive)
+    assertEquals(VoiceCapabilityChecker.FGS_LOCATION, service.activeFgsType)
+    assertEquals(TripState.ALERT_BREATHING, service.tripStateMachine.state)
+    assertTrue(service.tripStateMachine.lastSpokenCue!!.contains(ZhHkTemplates.TAP_CAPSULE))
+    Bindings.detachService(service)
+
+    val micFail = openService(FakeClock())
+    val micReceiver = Bindings.activeReceiver!!
+    assertTrue(micReceiver.dispatchEvent("START_TRIP"))
+    assertTrue(micReceiver.dispatchEvent("SET_VOICE_MODE", stringValue = "ANNOUNCE_MANUAL"))
+    assertEquals(VoiceCapabilityChecker.FGS_LOCATION, micFail.activeFgsType)
+    assertFalse(micFail.isMicActive)
+    assertTrue(micFail.isCapsuleVisible)
+    assertTrue(micReceiver.dispatchEvent("MIC_FAIL"))
+    assertTrue(micFail.isFgsRunning)
+    assertTrue(micFail.isCapsuleVisible)
+    assertFalse(micFail.isMicActive)
+    assertNotEquals(TripState.ENDED, micFail.tripStateMachine.state)
+    Bindings.detachService(micFail)
+
+    val timeout = openService(FakeClock())
+    assertFalse(timeout.capabilityCheckTimedOut)
+    assertTrue(Bindings.activeReceiver!!.dispatchEvent("CAPABILITY_CHECK_TIMEOUT"))
+    assertTrue(timeout.capabilityCheckTimedOut)
+    assertTrue(timeout.isFgsRunning)
+    assertFalse(timeout.capabilityChecker.downloadPromptRequested)
+    Bindings.detachService(timeout)
+
+    val revoked = openService(FakeClock())
+    val revokedReceiver = Bindings.activeReceiver!!
+    assertTrue(revokedReceiver.dispatchEvent("START_TRIP"))
+    assertTrue(revokedReceiver.dispatchEvent("SET_VOICE_MODE", stringValue = "FULL_VOICE"))
+    assertTrue(revokedReceiver.dispatchEvent("REVOKE_RECORD_AUDIO"))
+    assertTrue(revoked.isFgsRunning)
+    assertEquals(VoiceCapabilityChecker.FGS_LOCATION, revoked.activeFgsType)
+    assertFalse(revoked.isAudioRecordRunning)
+    assertNotEquals(TripState.ENDED, revoked.tripStateMachine.state)
+    assertTrue(revokedReceiver.dispatchEvent("REVOKE_REQUIRED"))
+    assertFalse(revoked.isFgsRunning)
+    assertEquals(TripState.ENDED, revoked.tripStateMachine.state)
+    assertEquals(FloatingBubbleService.PERMISSION_REVOKED, revoked.tripEndedReason)
+    Bindings.detachService(revoked)
+
+    val listen = openService(FakeClock())
+    val listenReceiver = Bindings.activeReceiver!!
+    assertTrue(listenReceiver.dispatchEvent("START_TRIP"))
+    assertTrue(Bindings.voiceInput.isListening)
+    assertFalse(listenReceiver.dispatchEvent("INJECT_SILENCE", stringValue = "abc"))
+    assertTrue(Bindings.voiceInput.isListening)
+    assertTrue(listenReceiver.dispatchEvent("INJECT_SILENCE", intValue = 1))
+    assertTrue(Bindings.voiceInput.isListening)
+    assertTrue(listenReceiver.dispatchEvent("INJECT_LONG_UTTERANCE", intValue = 1))
+    assertTrue(Bindings.voiceInput.isListening)
+    assertTrue(listenReceiver.dispatchEvent("INJECT_SILENCE", intValue = 1))
+    assertFalse(Bindings.voiceInput.isListening)
+    assertEquals("END_SILENCE", listen.listenStopReason)
+    assertEquals(NativeConfig.LISTEN_END_SILENCE_S, listen.listenLimitS)
+    Bindings.detachService(listen)
+
+    val opening = openService(FakeClock())
+    val openingReceiver = Bindings.activeReceiver!!
+    assertTrue(openingReceiver.dispatchEvent("START_TRIP"))
+    assertTrue(openingReceiver.dispatchEvent("INJECT_SILENCE"))
+    assertEquals("OPENING_WAIT", opening.listenStopReason)
+    assertEquals(NativeConfig.LISTEN_OPENING_WAIT_S, opening.listenLimitS)
+    Bindings.detachService(opening)
+
+    val longUtterance = openService(FakeClock())
+    val longReceiver = Bindings.activeReceiver!!
+    assertTrue(longReceiver.dispatchEvent("START_TRIP"))
+    assertTrue(longReceiver.dispatchEvent("INJECT_LONG_UTTERANCE"))
+    assertEquals("MAX_UTTERANCE", longUtterance.listenStopReason)
+    assertEquals(NativeConfig.LISTEN_MAX_UTTERANCE_S, longUtterance.listenLimitS)
+    Bindings.detachService(longUtterance)
+
+    val sttTimeout = openService(FakeClock())
+    assertTrue(Bindings.activeReceiver!!.dispatchEvent("INJECT_LONG_UTTERANCE", stringValue = "stt"))
+    assertEquals("STT_TIMEOUT", sttTimeout.listenStopReason)
+    assertEquals(NativeConfig.STT_RESULT_TIMEOUT_S, sttTimeout.listenLimitS)
+    Bindings.detachService(sttTimeout)
+  }
+
+  @Test
+  fun confidenceEchoBootstrapBubbleTrieAndGpsAccuracy() {
+    val confidence = openService(FakeClock())
+    val confidenceReceiver = Bindings.activeReceiver!!
+    assertTrue(confidenceReceiver.dispatchEvent("START_TRIP"))
+    assertEquals(null, confidence.lastCommandResult)
+    assertFalse(confidenceReceiver.dispatchEvent("INJECT_CONFIDENCE", stringValue = "abc"))
+    assertEquals(null, confidence.lastCommandResult)
+    assertTrue(confidenceReceiver.dispatchEvent("INJECT_CONFIDENCE", intValue = -1))
+    assertTrue(confidence.lastCommandResult!!.missingConfidenceNotTreatedAsZero)
+    assertFalse(confidence.lastCommandResult!!.lowConfidence)
+    assertTrue(confidenceReceiver.dispatchEvent("INJECT_CONFIDENCE", intValue = 0))
+    assertTrue(confidence.lastCommandResult!!.lowConfidence)
+    assertFalse(confidence.lastCommandResult!!.missingConfidenceNotTreatedAsZero)
+    assertEquals(TripState.CRUISING, confidence.tripStateMachine.state)
+    assertTrue(confidenceReceiver.dispatchEvent("INJECT_TTS_ECHO"))
+    assertFalse(confidence.lastCommandResult!!.confirmed)
+    assertTrue(confidence.lastCommandResult!!.blockedAsSelfHearing)
+    assertEquals(TripState.CRUISING, confidence.tripStateMachine.state)
+    Bindings.detachService(confidence)
+
+    val bootstrap = FloatingBubbleService(FakeClock().delayMs)
+    bootstrap.startInForeground(StartupEntry.A_2, recordAudioGranted = false)
+    assertFalse(bootstrap.isFgsRunning)
+    assertEquals(null, bootstrap.bootstrapTimeoutReason)
+    assertTrue(Bindings.activeReceiver!!.dispatchEvent("FGS_START_TIMEOUT"))
+    assertFalse(bootstrap.isFgsRunning)
+    assertTrue(bootstrap.bootstrapTimeoutReason!!.contains(NativeConfig.FGS_BOOTSTRAP_TIMEOUT_MS.toString()))
+    Bindings.detachService(bootstrap)
+
+    val tap = openService(FakeClock())
+    assertFalse(tap.manualCardVisible)
+    assertTrue(Bindings.activeReceiver!!.dispatchEvent("BUBBLE_TAP"))
+    assertTrue(tap.manualCardVisible)
+    Bindings.detachService(tap)
+
+    val resolved = openService(FakeClock())
+    val resolvedReceiver = Bindings.activeReceiver!!
+    assertTrue(resolvedReceiver.dispatchEvent("START_TRIP"))
+    assertEquals(TripState.CRUISING, resolved.tripStateMachine.state)
+    assertTrue(resolvedReceiver.dispatchEvent("TRIE_MISS_RESOLVE_OK", stringValue = "朗豪坊"))
+    assertEquals("朗豪坊", resolved.tripStateMachine.destinationName)
+    assertEquals(TripState.AMBER_STEADY, resolved.tripStateMachine.state)
+    Bindings.detachService(resolved)
+
+    val trieFail = openService(FakeClock())
+    val trieFailReceiver = Bindings.activeReceiver!!
+    assertTrue(trieFailReceiver.dispatchEvent("START_TRIP"))
+    assertNotEquals(TripState.GREY_BREATHING, trieFail.tripStateMachine.state)
+    assertTrue(trieFailReceiver.dispatchEvent("TRIE_MISS_NETWORK_FAIL"))
+    assertEquals(TripState.GREY_BREATHING, trieFail.tripStateMachine.state)
+    Bindings.detachService(trieFail)
+
+    val ambiguous = openService(FakeClock())
+    val ambiguousReceiver = Bindings.activeReceiver!!
+    assertTrue(ambiguousReceiver.dispatchEvent("START_TRIP"))
+    assertNotEquals(TripState.ALERT_BREATHING, ambiguous.tripStateMachine.state)
+    assertTrue(ambiguousReceiver.dispatchEvent("TRIE_MISS_AMBIGUOUS"))
+    assertEquals(TripState.ALERT_BREATHING, ambiguous.tripStateMachine.state)
+    Bindings.detachService(ambiguous)
+
+    val gps = openService(FakeClock())
+    val gpsReceiver = Bindings.activeReceiver!!
+    assertTrue(gpsReceiver.dispatchEvent("START_TRIP"))
+    val before = gps.tripStateMachine.state
+    assertFalse(gpsReceiver.dispatchEvent("GPS_BAD_ACCURACY", stringValue = "abc"))
+    assertEquals(null, gps.onSiteRejectedCue)
+    assertEquals(before, gps.tripStateMachine.state)
+    assertTrue(gpsReceiver.dispatchEvent("GPS_BAD_ACCURACY"))
+    assertEquals(ZhHkTemplates.ON_SITE_LOCATION_MISSED, gps.onSiteRejectedCue)
+    assertEquals(before, gps.tripStateMachine.state)
+    Bindings.detachService(gps)
+  }
+
+  @Test
+  fun forceFixturesSwitchNextRecommendOrCommit() {
+    val service = openService(FakeClock())
+    val receiver = Bindings.activeReceiver!!
+    assertTrue(receiver.dispatchEvent("FORCE_STALE"))
+    assertEquals(FixtureApiTransport.STALE_FIXTURE, Bindings.apiTransport.fixtureName)
+    val stale = runSuspend { Bindings.apiTransport.post(ApiClient.RECOMMEND, "{}") }
+    assertTrue(stale.bodyJson.contains("is_stale"))
+    assertEquals(-1, stale.recommendResponse!!.cards.first().vacancies)
+
+    assertTrue(receiver.dispatchEvent("FORCE_DEGRADED"))
+    assertEquals(FixtureApiTransport.DEGRADED_FIXTURE, Bindings.apiTransport.fixtureName)
+    val degraded = runSuspend { Bindings.apiTransport.post(ApiClient.RECOMMEND, "{}") }
+    assertEquals("degraded", degraded.recommendResponse!!.sourceStatus)
+
+    assertTrue(receiver.dispatchEvent("FORCE_LOW_WATERMARK"))
+    val low = runSuspend { Bindings.apiTransport.post(ApiClient.RECOMMEND, "{}") }
+    assertTrue(low.spokenCue!!.contains("只剩兩個位"))
+
+    assertTrue(receiver.dispatchEvent("FORCE_CROWD_FLAG"))
+    val crowd = runSuspend { Bindings.apiTransport.post(ApiClient.RECOMMEND, "{}") }
+    assertEquals(ZhHkTemplates.CROWD_YELLOW_FLAG, crowd.spokenCue)
+
+    assertTrue(receiver.dispatchEvent("FORCE_LOCK_FULL"))
+    assertEquals(FixtureApiTransport.LOCK_FULL_FIXTURE, Bindings.apiTransport.fixtureName)
+    val locked = runSuspend { Bindings.apiTransport.post(ApiClient.COMMIT, "{}") }
+    assertEquals(409, locked.statusCode)
+    assertFalse(locked.spokenCue.isNullOrBlank())
+    Bindings.detachService(service)
   }
 
   private fun openService(clock: FakeClock): FloatingBubbleService {
