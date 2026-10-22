@@ -1,13 +1,20 @@
 package com.hkparking.copilot.di
 
+import com.hkparking.copilot.NativeConfig
+import com.hkparking.copilot.StartupEntry
 import com.hkparking.copilot.net.ApiTransport
 import com.hkparking.copilot.net.HttpResult
 import com.hkparking.copilot.net.RecommendResponse
 import com.hkparking.copilot.sim.SimEventReceiver
+import com.hkparking.copilot.voice.CapabilitySnapshot
+import com.hkparking.copilot.voice.CapabilityStatus
 import com.hkparking.copilot.voice.CommandCodes
 import com.hkparking.copilot.voice.ParseContext
 import com.hkparking.copilot.voice.ParseResult
+import com.hkparking.copilot.voice.PendingQuestion
 import com.hkparking.copilot.voice.RecommendationCard
+import com.hkparking.copilot.voice.TripVoiceMode
+import com.hkparking.copilot.voice.VoiceCapabilityChecker
 
 // SIM: debug source set only
 class SimVoiceInput : VoiceInput {
@@ -22,7 +29,7 @@ class SimVoiceInput : VoiceInput {
     this.listener = listener
   }
 
-  override fun setSimControlListener(listener: ((event: String, intValue: Int?, stringValue: String?) -> Unit)?) {
+  fun setSimControlListener(listener: ((event: String, intValue: Int?, stringValue: String?) -> Unit)?) {
     controlListener = listener
   }
 
@@ -42,6 +49,10 @@ class SimVoiceInput : VoiceInput {
 
   fun emitSimControl(event: String, intValue: Int? = null, stringValue: String? = null) {
     controlListener?.invoke(event, intValue, stringValue)
+  }
+
+  fun recordParse(result: ParseResult) {
+    lastParseResult = result
   }
 }
 
@@ -154,7 +165,7 @@ class SimLocationSource : LocationSource {
 
 // SIM: debug source set only
 class FixtureApiTransport(
-  fixtureLoader: (String) -> String? = { null },
+  fixtureLoader: (String) -> String? = { name -> loadMockFile(name) },
 ) : ApiTransport {
   private var fixtureLoader: (String) -> String? = fixtureLoader
   var fixtureName: String = DEFAULT_FIXTURE
@@ -223,8 +234,8 @@ class FixtureApiTransport(
     }
     if (lockFullArmed && path.contains("commit")) {
       lockFullArmed = false
-      val raw = fixtureLoader(LOCK_FULL_FIXTURE)
-      return HttpResult(statusCode = 409, bodyJson = raw ?: LOCK_FULL_BODY, spokenCue = LOCK_FULL_CUE)
+      val raw = fixtureLoader(LOCK_FULL_FIXTURE).orEmpty()
+      return HttpResult(statusCode = 409, bodyJson = raw, spokenCue = stringField(raw, "spoken_cue"))
     }
     val override = recommendOverride
     if (override != null && path.contains("recommend")) {
@@ -241,71 +252,10 @@ class FixtureApiTransport(
   }
 
   private fun responseFor(name: String): HttpResult {
-    val raw = fixtureLoader(name)
-    val response = fallbackResponse(name)
-    return HttpResult(
-      statusCode = 200,
-      bodyJson = raw ?: fallbackBody(name),
-      recommendResponse = response,
-      spokenCue = response.cards.firstOrNull()?.spokenCue,
-    )
-  }
-
-  private fun fallbackBody(name: String): String {
-    return when (name) {
-      STALE_FIXTURE -> "{\"status\":\"SUCCESS\",\"cards\":[{\"type\":\"METER\",\"is_stale\":true,\"vacancies\":-1}]}"
-      DEGRADED_FIXTURE -> "{\"status\":\"SUCCESS\",\"source_status\":\"degraded\"}"
-      LOW_WATERMARK_FIXTURE -> "{\"status\":\"SUCCESS\",\"spoken_cue\":\"$LOW_WATERMARK_CUE\"}"
-      CROWD_FLAG_FIXTURE -> "{\"status\":\"SUCCESS\",\"spoken_cue\":\"${com.hkparking.copilot.voice.ZhHkTemplates.CROWD_YELLOW_FLAG}\"}"
-      else -> LANGHAM_BODY
-    }
-  }
-
-  private fun fallbackResponse(name: String): RecommendResponse {
-    return when (name) {
-      STALE_FIXTURE -> RecommendResponse(
-        status = "SUCCESS",
-        cards = listOf(
-          RecommendationCard(
-            carparkId = "meter-1",
-            name = "咪錶",
-            type = "METER",
-            vacancies = -1,
-            distanceMeters = 0,
-            feeSummary = "",
-            spokenCue = com.hkparking.copilot.voice.ZhHkTemplates.METER_STALE_SPOKEN,
-            isStale = true,
-          ),
-        ),
-      )
-      DEGRADED_FIXTURE -> RecommendResponse(
-        status = "SUCCESS",
-        sourceStatus = "degraded",
-        cards = listOf(
-          RecommendationCard(
-            carparkId = "meter-1",
-            name = "咪錶",
-            type = "METER",
-            vacancies = 4,
-            distanceMeters = 0,
-            feeSummary = "",
-            spokenCue = com.hkparking.copilot.voice.ZhHkTemplates.METER_STALE_SPOKEN,
-            isStale = false,
-          ),
-        ),
-      )
-      LOW_WATERMARK_FIXTURE -> langhamResponse().copy(
-        cards = listOf(langhamResponse().cards.first().copy(spokenCue = LOW_WATERMARK_CUE, vacancies = 2)),
-      )
-      CROWD_FLAG_FIXTURE -> langhamResponse().copy(
-        cards = listOf(
-          langhamResponse().cards.first().copy(
-            spokenCue = com.hkparking.copilot.voice.ZhHkTemplates.CROWD_YELLOW_FLAG,
-          ),
-        ),
-      )
-      else -> langhamResponse()
-    }
+    val raw = fixtureLoader(name).orEmpty()
+    val response = parseRecommend(raw)
+    val cue = response.cards.firstOrNull()?.spokenCue ?: stringField(raw, "spoken_cue")
+    return HttpResult(statusCode = 200, bodyJson = raw, recommendResponse = response, spokenCue = cue)
   }
 
   companion object {
@@ -317,15 +267,51 @@ class FixtureApiTransport(
     const val CROWD_FLAG_FIXTURE = "recommend_crowd_yellow_flag.json"
     const val LOCK_FULL_FIXTURE = "commit_lock_full_409.json"
     private const val RATE_LIMIT_BODY = "{\"status\":\"RATE_LIMITED\"}"
-    private const val LOCK_FULL_BODY = "{\"status\":\"LOCK_FULL\"}"
-    private const val LOCK_FULL_CUE = "呢度滿咗"
-    private const val LOW_WATERMARK_CUE = "APM 只剩兩個位，隨時會滿，後備可以去 XX 停車場。"
     private const val LANGHAM_BODY =
       "{\"status\":\"SUCCESS\",\"cards\":[{\"carpark_id\":\"langham\",\"name\":\"朗豪坊\",\"spoken_cue\":\"前方首選朗豪坊停車場\"}]}"
     private val RETRY_AFTER_PATTERN = Regex("\"retry_after_seconds\"\\s*:\\s*(\\d+)")
 
     fun parseRetryAfterSeconds(body: String): Long? {
       return RETRY_AFTER_PATTERN.find(body)?.groupValues?.get(1)?.toLongOrNull()
+    }
+
+    fun loadMockFile(name: String): String? {
+      val candidates = listOf(
+        java.io.File("src/debug/assets/mock/$name"),
+        java.io.File("app/src/debug/assets/mock/$name"),
+        java.io.File("android/app/src/debug/assets/mock/$name"),
+      )
+      return candidates.firstOrNull { it.isFile }?.readText()
+    }
+
+    fun stringField(json: String, key: String): String? {
+      return Regex(""""$key"\s*:\s*"([^"]*)"""").find(json)?.groupValues?.get(1)
+    }
+
+    fun intField(json: String, key: String): Int? {
+      return Regex(""""$key"\s*:\s*(-?\d+)""").find(json)?.groupValues?.get(1)?.toIntOrNull()
+    }
+
+    fun parseRecommend(body: String): RecommendResponse {
+      val cards = Regex("""\{[^{}]*\}""").findAll(body).map { it.value }.filter {
+        it.contains("\"type\"") || it.contains("\"carpark_id\"")
+      }.map { card ->
+        RecommendationCard(
+          carparkId = stringField(card, "carpark_id") ?: "",
+          name = stringField(card, "name") ?: "",
+          type = stringField(card, "type") ?: "",
+          vacancies = intField(card, "vacancies") ?: 0,
+          distanceMeters = intField(card, "distance_meters") ?: 0,
+          feeSummary = stringField(card, "fee_summary") ?: "",
+          spokenCue = stringField(card, "spoken_cue") ?: stringField(body, "spoken_cue") ?: "",
+          isStale = Regex(""""is_stale"\s*:\s*true""").containsMatchIn(card),
+        )
+      }.toList()
+      return RecommendResponse(
+        status = stringField(body, "status") ?: "SUCCESS",
+        sourceStatus = stringField(body, "source_status") ?: "ok",
+        cards = cards,
+      )
     }
 
     fun langhamResponse(): RecommendResponse = RecommendResponse(
@@ -351,10 +337,32 @@ object Bindings {
   val locationSource: SimLocationSource = SimLocationSource()
   val apiTransport: FixtureApiTransport = FixtureApiTransport()
   var activeReceiver: SimEventReceiver? = null
+  var capabilityCheckTimedOut: Boolean = false
+    private set
+  var todayTripsCleared: Boolean = false
+    private set
+  var pendingDriverConfirm: Boolean = false
+    private set
+  var driverConfirmSent: Boolean = false
+    private set
+  var onSiteRejectedCue: String? = null
+    private set
+  private var pendingConfirmSessionId: String? = null
+  private var networkFailed: Boolean = false
 
   fun attachService(service: com.hkparking.copilot.FloatingBubbleService) {
     if (activeReceiver != null) {
       detachService(service)
+    }
+    capabilityCheckTimedOut = false
+    todayTripsCleared = false
+    pendingDriverConfirm = false
+    driverConfirmSent = false
+    onSiteRejectedCue = null
+    pendingConfirmSessionId = null
+    networkFailed = false
+    voiceInput.setSimControlListener { event, intValue, stringValue ->
+      dispatchSim(service, event, intValue, stringValue)
     }
     apiTransport.delayMs = service.delayMs
     apiTransport.setFixtureLoader { name ->
@@ -376,5 +384,137 @@ object Bindings {
     val receiver = activeReceiver ?: return
     runCatching { service.unregisterReceiver(receiver) }
     activeReceiver = null
+    voiceInput.setSimControlListener(null)
+  }
+
+  private fun dispatchSim(
+    service: com.hkparking.copilot.FloatingBubbleService,
+    event: String,
+    intValue: Int?,
+    stringValue: String?,
+  ) {
+    when (event) {
+      "ENGINE_SHUTDOWN" -> {
+        val within = when (intValue) {
+          1 -> true
+          0 -> false
+          else -> service.lastDistanceMeters() <= NativeConfig.APPROACH_RADIUS_M
+        }
+        val sessionId = service.tripStateMachine.sessionId
+        service.onEngineShutdown(within)
+        pendingDriverConfirm = within && sessionId != null
+        pendingConfirmSessionId = if (pendingDriverConfirm) sessionId else null
+      }
+      "DRIVER_CONFIRM" -> flushDriverConfirm(service)
+      "NETWORK_FAIL" -> networkFailed = true
+      "NETWORK_OK" -> {
+        networkFailed = false
+        flushDriverConfirm(service)
+      }
+      "CLOCK_HKT_MIDNIGHT" -> {
+        todayTripsCleared = true
+        pendingDriverConfirm = false
+        pendingConfirmSessionId = null
+      }
+      "NO_MIC" -> {
+        service.onVoiceCapabilityApplied(voiceSnapshot(TripVoiceMode.FULL_VOICE), micFgsActive = false)
+        service.tripStateMachine.onPlaceClarificationNeeded()
+        service.updateCapsuleVisual()
+      }
+      "MIC_FAIL" -> service.reportMicReady(succeeded = false)
+      "SET_VOICE_MODE" -> {
+        val mode = runCatching { TripVoiceMode.valueOf(stringValue ?: return) }.getOrNull() ?: return
+        service.onVoiceCapabilityApplied(voiceSnapshot(mode), micFgsActive = mode == TripVoiceMode.FULL_VOICE)
+      }
+      "CAPABILITY_CHECK_TIMEOUT" -> {
+        capabilityCheckTimedOut = true
+        service.onVoiceCapabilityApplied(
+          voiceSnapshot(service.tripStateMachine.tripVoiceMode, timedOut = true),
+          micFgsActive = service.isMicActive,
+        )
+      }
+      "REVOKE_RECORD_AUDIO" -> service.onRuntimePermissionRevoked(com.hkparking.copilot.FloatingBubbleService.RECORD_AUDIO)
+      "REVOKE_REQUIRED" -> service.onRuntimePermissionRevoked("ACCESS_FINE_LOCATION")
+      "INJECT_SILENCE" -> service.onListenSilence(stringValue?.toDoubleOrNull())
+      "INJECT_LONG_UTTERANCE" -> service.onListenUtterance(
+        elapsedS = if (stringValue == "stt") null else stringValue?.toDoubleOrNull(),
+        sttTimedOut = stringValue == "stt",
+      )
+      "INJECT_CONFIDENCE" -> voiceInput.recordParse(
+        CommandCodes.parse("詳細啲", ParseContext(confidence = confidenceOf(intValue, stringValue))),
+      )
+      "INJECT_TTS_ECHO" -> voiceInput.recordParse(
+        CommandCodes.parse(
+          "好",
+          ParseContext(
+            pendingQuestion = PendingQuestion.RECOMMENDATION_CONFIRM,
+            isTtsSpeaking = true,
+            confidence = NativeConfig.STT_CONFIDENCE_THRESHOLD,
+          ),
+        ),
+      )
+      "FGS_START_TIMEOUT" -> if (!service.isFgsRunning) service.onBootstrapTimedOut()
+      "BUBBLE_TAP" -> service.onActiveBubbleTap()
+      "TRIE_MISS_RESOLVE_OK" -> {
+        val name = stringValue?.takeIf { it.isNotBlank() } ?: service.tripStateMachine.destinationName ?: "朗豪坊"
+        service.tripStateMachine.onDestinationSet(
+          distanceToDestinationM = service.lastDistanceMeters(),
+          destinationName = name,
+        )
+        service.updateCapsuleVisual()
+      }
+      "TRIE_MISS_NETWORK_FAIL" -> {
+        service.tripStateMachine.onNetworkFailure()
+        service.updateCapsuleVisual()
+      }
+      "TRIE_MISS_AMBIGUOUS" -> {
+        service.tripStateMachine.onPlaceClarificationNeeded()
+        service.updateCapsuleVisual()
+      }
+      "GPS_BAD_ACCURACY" -> {
+        val accuracy = intValue?.toDouble()
+          ?: stringValue?.toDoubleOrNull()
+          ?: (NativeConfig.ON_SITE_GPS_ACCURACY_MAX_M + 1).toDouble()
+        if (accuracy <= NativeConfig.ON_SITE_GPS_ACCURACY_MAX_M) return
+        val outcome = service.tripStateMachine.requestStart(
+          entry = StartupEntry.ON_SITE,
+          gpsAvailable = true,
+          gpsAccuracyM = accuracy,
+        )
+        if (!outcome.accepted) onSiteRejectedCue = outcome.spokenCue
+      }
+    }
+  }
+
+  private fun flushDriverConfirm(service: com.hkparking.copilot.FloatingBubbleService) {
+    val sessionId = pendingConfirmSessionId
+    if (!pendingDriverConfirm || networkFailed || todayTripsCleared || sessionId == null) return
+    pendingDriverConfirm = false
+    driverConfirmSent = true
+    service.confirmParkedCandidate(sessionId)
+  }
+
+  private fun confidenceOf(intValue: Int?, stringValue: String?): Double? {
+    return when {
+      stringValue == "missing" || (intValue == null && stringValue.isNullOrBlank()) -> null
+      intValue != null -> intValue.toDouble()
+      else -> stringValue?.toDoubleOrNull()
+    }
+  }
+
+  private fun voiceSnapshot(mode: TripVoiceMode, timedOut: Boolean = false): CapabilitySnapshot {
+    val fullVoice = mode == TripVoiceMode.FULL_VOICE
+    return CapabilitySnapshot(
+      stt = if (fullVoice) CapabilityStatus.AVAILABLE else CapabilityStatus.UNSUPPORTED,
+      tts = if (mode == TripVoiceMode.MANUAL_ONLY) CapabilityStatus.UNSUPPORTED else CapabilityStatus.AVAILABLE,
+      mode = mode,
+      voiceInputEnabled = fullVoice,
+      hotwordActive = fullVoice,
+      fgsType = if (fullVoice) VoiceCapabilityChecker.FGS_LOCATION_MIC else VoiceCapabilityChecker.FGS_LOCATION,
+      downloadPrompt = false,
+      blocksFgsStarted = false,
+      timedOut = timedOut,
+      ttsUsable = mode != TripVoiceMode.MANUAL_ONLY,
+    )
   }
 }

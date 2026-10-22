@@ -8,12 +8,9 @@ import com.hkparking.copilot.voice.CommandCode
 import com.hkparking.copilot.voice.CommandCodes
 import com.hkparking.copilot.voice.LocaleProbe
 import com.hkparking.copilot.voice.ParseContext
-import com.hkparking.copilot.voice.ParseResult
-import com.hkparking.copilot.voice.PendingQuestion
 import com.hkparking.copilot.voice.SpeechCapabilityProbe
 import com.hkparking.copilot.voice.TripVoiceMode
 import com.hkparking.copilot.voice.VoiceCapabilityChecker
-import com.hkparking.copilot.voice.ZhHkTemplates
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.resume
@@ -121,27 +118,10 @@ class FloatingBubbleService : android.app.Service {
     private set
   var listenLimitS: Double? = null
     private set
-  var lastCommandResult: ParseResult? = null
-    private set
-  var capabilityCheckTimedOut: Boolean = false
-    private set
-  var todayTripsCleared: Boolean = false
-    private set
-  var pendingDriverConfirm: Boolean = false
-    private set
-  var driverConfirmSent: Boolean = false
-    private set
   var bootstrapTimeoutReason: String? = null
-    private set
-  var onSiteRejectedCue: String? = null
-    private set
-  var approachExitHoldS: Int = 0
-    private set
-  var simNetworkFailed: Boolean = false
     private set
 
   private var hasPendingFgsStart: Boolean = false
-  private var pendingConfirmSessionId: String? = null
   private var speechHeard: Boolean = false
   private var lastDistanceMeters: Int = 0
   private var pendingFgsStartedCallback: (() -> Unit)? = null
@@ -258,9 +238,6 @@ class FloatingBubbleService : android.app.Service {
     com.hkparking.copilot.di.Bindings.voiceInput.setUtteranceListener { text, confidence ->
       onUtterance(text, confidence)
     }
-    com.hkparking.copilot.di.Bindings.voiceInput.setSimControlListener { event, intValue, stringValue ->
-      onSimControl(event, intValue, stringValue)
-    }
   }
 
   private fun onMotionSample(
@@ -272,73 +249,61 @@ class FloatingBubbleService : android.app.Service {
   ) {
     if (!isFgsRunning) return
     if (exitHoldS > 0) {
-      approachExitHoldS = exitHoldS
-      tripStateMachine.onApproachSample(distanceMeters, speedKmh, lowSpeedHoldS, fixAgeSeconds)
+      tripStateMachine.onApproachSample(distanceMeters, speedKmh, lowSpeedHoldS, fixAgeSeconds, exitHoldS)
       updateCapsuleVisual()
       return
     }
     onLocationFix(distanceMeters)
-    tripStateMachine.onApproachSample(distanceMeters, speedKmh, lowSpeedHoldS, fixAgeSeconds)
+    tripStateMachine.onApproachSample(distanceMeters, speedKmh, lowSpeedHoldS, fixAgeSeconds, exitHoldS)
     updateCapsuleVisual()
   }
 
-  private fun onSimControl(event: String, intValue: Int?, stringValue: String?) {
-    when (event) {
-      "ENGINE_SHUTDOWN" -> onSimEngineShutdown(intValue)
-      "DRIVER_CONFIRM" -> flushDriverConfirm()
-      "NETWORK_FAIL" -> simNetworkFailed = true
-      "NETWORK_OK" -> {
-        simNetworkFailed = false
-        flushDriverConfirm()
-      }
-      "CLOCK_HKT_MIDNIGHT" -> {
-        todayTripsCleared = true
-        pendingDriverConfirm = false
-        pendingConfirmSessionId = null
-      }
-      "NO_MIC" -> onSimNoMic()
-      "MIC_FAIL" -> reportMicReady(succeeded = false)
-      "SET_VOICE_MODE" -> applySimVoiceMode(stringValue)
-      "CAPABILITY_CHECK_TIMEOUT" -> {
-        capabilityCheckTimedOut = true
-        tripStateMachine.syncVoiceCapability(currentVoiceSnapshot(timedOut = true), hasConfirmed = true)
-      }
-      "REVOKE_RECORD_AUDIO" -> onRuntimePermissionRevoked(RECORD_AUDIO)
-      "REVOKE_REQUIRED" -> onRuntimePermissionRevoked("ACCESS_FINE_LOCATION")
-      "INJECT_SILENCE" -> onSimSilence(stringValue)
-      "INJECT_LONG_UTTERANCE" -> onSimLongUtterance(stringValue)
-      "INJECT_CONFIDENCE" -> onSimConfidence(intValue, stringValue)
-      "INJECT_TTS_ECHO" -> {
-        lastCommandResult = CommandCodes.parse(
-          "好",
-          ParseContext(
-            pendingQuestion = PendingQuestion.RECOMMENDATION_CONFIRM,
-            isTtsSpeaking = true,
-            confidence = NativeConfig.STT_CONFIDENCE_THRESHOLD,
-          ),
-        )
-      }
-      "FGS_START_TIMEOUT" -> if (!isFgsRunning) onBootstrapTimedOut()
-      "BUBBLE_TAP" -> onActiveBubbleTap()
-      "TRIE_MISS_RESOLVE_OK" -> {
-        val name = stringValue?.takeIf { it.isNotBlank() } ?: tripStateMachine.destinationName ?: "朗豪坊"
-        tripStateMachine.onDestinationSet(
-          distanceToDestinationM = lastDistanceMeters,
-          destinationName = name,
-        )
-        updateCapsuleVisual()
-      }
-      "TRIE_MISS_NETWORK_FAIL" -> {
-        tripStateMachine.onNetworkFailure()
-        updateCapsuleVisual()
-      }
-      "TRIE_MISS_AMBIGUOUS" -> {
-        tripStateMachine.onPlaceClarificationNeeded()
-        updateCapsuleVisual()
-      }
-      "GPS_BAD_ACCURACY" -> onSimGpsBadAccuracy(intValue, stringValue)
-    }
+  fun onEngineShutdown(withinTargetOrBasementLoss: Boolean) {
+    tripStateMachine.onEngineShutdown(withinTargetOrBasementLoss)
+    isFgsRunning = false
+    isCapsuleVisible = false
+    isMicActive = false
+    isAudioRecordRunning = false
+    tripEndedReason = if (withinTargetOrBasementLoss) "PARKED_CONFIRMED" else "ENGINE_SHUTDOWN"
   }
+
+  fun onVoiceCapabilityApplied(snapshot: CapabilitySnapshot, micFgsActive: Boolean) {
+    tripStateMachine.syncVoiceCapability(snapshot, hasConfirmed = true)
+    tripStateMachine.onMicFgsActive(micFgsActive)
+    val fullVoice = snapshot.mode == TripVoiceMode.FULL_VOICE
+    isMicActive = micFgsActive && fullVoice
+    isAudioRecordRunning = isMicActive
+    activeFgsType = if (isMicActive) VoiceCapabilityChecker.FGS_LOCATION_MIC else VoiceCapabilityChecker.FGS_LOCATION
+    manualCardVisible = !fullVoice
+    if (isMicActive) persistentNotificationText = LISTENING
+  }
+
+  fun onListenSilence(elapsedS: Double?) {
+    val limit = if (speechHeard) NativeConfig.LISTEN_END_SILENCE_S else NativeConfig.LISTEN_OPENING_WAIT_S
+    if (elapsedS != null && elapsedS < limit) return
+    com.hkparking.copilot.di.Bindings.voiceInput.stopListening()
+    isAudioRecordRunning = false
+    listenLimitS = limit
+    listenStopReason = if (speechHeard) "END_SILENCE" else "OPENING_WAIT"
+  }
+
+  fun onListenUtterance(elapsedS: Double?, sttTimedOut: Boolean) {
+    if (sttTimedOut) {
+      com.hkparking.copilot.di.Bindings.voiceInput.stopListening()
+      isAudioRecordRunning = false
+      listenLimitS = NativeConfig.STT_RESULT_TIMEOUT_S
+      listenStopReason = "STT_TIMEOUT"
+      return
+    }
+    speechHeard = true
+    if (elapsedS != null && elapsedS < NativeConfig.LISTEN_MAX_UTTERANCE_S) return
+    com.hkparking.copilot.di.Bindings.voiceInput.stopListening()
+    isAudioRecordRunning = false
+    listenLimitS = NativeConfig.LISTEN_MAX_UTTERANCE_S
+    listenStopReason = "MAX_UTTERANCE"
+  }
+
+  fun lastDistanceMeters(): Int = lastDistanceMeters
 
   private fun onLocationFix(distanceMeters: Int) {
     if (!isFgsRunning) return
@@ -366,140 +331,8 @@ class FloatingBubbleService : android.app.Service {
     }
   }
 
-  private fun onSimEngineShutdown(flag: Int?) {
-    val within = when (flag) {
-      1 -> true
-      0 -> false
-      else -> lastDistanceMeters <= NativeConfig.APPROACH_RADIUS_M
-    }
-    val sessionId = tripStateMachine.sessionId
-    val destination = tripStateMachine.destinationName
-    tripStateMachine.onEngineShutdown(within)
-    isFgsRunning = false
-    isCapsuleVisible = false
-    isMicActive = false
-    isAudioRecordRunning = false
-    if (within) {
-      pendingDriverConfirm = sessionId != null
-      pendingConfirmSessionId = sessionId
-      tripEndedReason = destination?.let { "PARKED_CONFIRMED" } ?: "PARKED_CONFIRMED"
-    } else {
-      pendingDriverConfirm = false
-      pendingConfirmSessionId = null
-      tripEndedReason = "ENGINE_SHUTDOWN"
-    }
-  }
-
-  private fun flushDriverConfirm() {
-    val sessionId = pendingConfirmSessionId
-    if (!pendingDriverConfirm || simNetworkFailed || todayTripsCleared || sessionId == null) return
-    pendingDriverConfirm = false
-    driverConfirmSent = true
+  fun confirmParkedCandidate(sessionId: String) {
     launchApi { apiClient.syncDriverConfirmed(sessionId, 0L) }
-  }
-
-  private fun onSimNoMic() {
-    applySimVoiceMode(TripVoiceMode.FULL_VOICE.name)
-    isMicActive = false
-    isAudioRecordRunning = false
-    activeFgsType = VoiceCapabilityChecker.FGS_LOCATION
-    tripStateMachine.onMicFgsActive(false)
-    tripStateMachine.onPlaceClarificationNeeded()
-    updateCapsuleVisual()
-  }
-
-  private fun applySimVoiceMode(modeName: String?) {
-    val mode = runCatching { TripVoiceMode.valueOf(modeName ?: return) }.getOrNull() ?: return
-    val fullVoice = mode == TripVoiceMode.FULL_VOICE
-    tripStateMachine.syncVoiceCapability(
-      CapabilitySnapshot(
-        stt = if (fullVoice) CapabilityStatus.AVAILABLE else CapabilityStatus.UNSUPPORTED,
-        tts = if (mode == TripVoiceMode.MANUAL_ONLY) CapabilityStatus.UNSUPPORTED else CapabilityStatus.AVAILABLE,
-        mode = mode,
-        voiceInputEnabled = fullVoice,
-        hotwordActive = fullVoice,
-        fgsType = if (fullVoice) VoiceCapabilityChecker.FGS_LOCATION_MIC else VoiceCapabilityChecker.FGS_LOCATION,
-        downloadPrompt = false,
-        blocksFgsStarted = false,
-        timedOut = false,
-        ttsUsable = mode != TripVoiceMode.MANUAL_ONLY,
-      ),
-      hasConfirmed = true,
-    )
-    isMicActive = fullVoice
-    isAudioRecordRunning = fullVoice
-    activeFgsType = if (fullVoice) VoiceCapabilityChecker.FGS_LOCATION_MIC else VoiceCapabilityChecker.FGS_LOCATION
-    manualCardVisible = !fullVoice
-    if (fullVoice) persistentNotificationText = LISTENING
-  }
-
-  private fun currentVoiceSnapshot(timedOut: Boolean): CapabilitySnapshot {
-    return CapabilitySnapshot(
-      stt = capabilityChecker.sttStatus,
-      tts = capabilityChecker.ttsStatus,
-      mode = tripStateMachine.tripVoiceMode,
-      voiceInputEnabled = tripStateMachine.voiceInputEnabled,
-      hotwordActive = capabilityChecker.hotwordActive,
-      fgsType = activeFgsType,
-      downloadPrompt = false,
-      blocksFgsStarted = false,
-      timedOut = timedOut,
-      ttsUsable = capabilityChecker.ttsStatus == CapabilityStatus.AVAILABLE &&
-        tripStateMachine.tripVoiceMode != TripVoiceMode.MANUAL_ONLY,
-    )
-  }
-
-  private fun onSimSilence(raw: String?) {
-    val seconds = raw?.toDoubleOrNull()
-    val limit = if (speechHeard) NativeConfig.LISTEN_END_SILENCE_S else NativeConfig.LISTEN_OPENING_WAIT_S
-    if (seconds != null && seconds < limit) return
-    com.hkparking.copilot.di.Bindings.voiceInput.stopListening()
-    isAudioRecordRunning = false
-    listenLimitS = limit
-    listenStopReason = if (speechHeard) "END_SILENCE" else "OPENING_WAIT"
-  }
-
-  private fun onSimLongUtterance(raw: String?) {
-    if (raw == "stt") {
-      com.hkparking.copilot.di.Bindings.voiceInput.stopListening()
-      isAudioRecordRunning = false
-      listenLimitS = NativeConfig.STT_RESULT_TIMEOUT_S
-      listenStopReason = "STT_TIMEOUT"
-      return
-    }
-    speechHeard = true
-    val seconds = raw?.toDoubleOrNull()
-    if (seconds != null && seconds < NativeConfig.LISTEN_MAX_UTTERANCE_S) return
-    com.hkparking.copilot.di.Bindings.voiceInput.stopListening()
-    isAudioRecordRunning = false
-    listenLimitS = NativeConfig.LISTEN_MAX_UTTERANCE_S
-    listenStopReason = "MAX_UTTERANCE"
-  }
-
-  private fun onSimConfidence(intValue: Int?, stringValue: String?) {
-    val confidence = when {
-      stringValue == "missing" || (intValue == null && stringValue.isNullOrBlank()) -> null
-      intValue != null -> intValue.toDouble()
-      else -> stringValue?.toDoubleOrNull()
-    }
-    lastCommandResult = CommandCodes.parse("詳細啲", ParseContext(confidence = confidence))
-  }
-
-  private fun onSimGpsBadAccuracy(intValue: Int?, stringValue: String?) {
-    val accuracy = intValue?.toDouble()
-      ?: stringValue?.toDoubleOrNull()
-      ?: (NativeConfig.ON_SITE_GPS_ACCURACY_MAX_M + 1).toDouble()
-    if (accuracy <= NativeConfig.ON_SITE_GPS_ACCURACY_MAX_M) return
-    val before = tripStateMachine.state
-    val outcome = tripStateMachine.requestStart(
-      entry = StartupEntry.ON_SITE,
-      gpsAvailable = true,
-      gpsAccuracyM = accuracy,
-    )
-    if (!outcome.accepted) onSiteRejectedCue = outcome.spokenCue
-    if (tripStateMachine.state != before && before != TripState.PRE_FGS) {
-      onSiteRejectedCue = outcome.spokenCue
-    }
   }
 
   private fun launchRecommend(mode: QueryTriggerMode) {

@@ -1,0 +1,18 @@
+{
+  "status": "SUCCESS",
+  "speech_locale": "zh-HK",
+  "source_status": "ok",
+  "spoken_cue": "APM 只剩兩個位，隨時會滿，後備可以去 XX 停車場。",
+  "cards": [
+    {
+      "carpark_id": "CP_APM",
+      "name": "APM",
+      "type": "INDOOR",
+      "vacancies": 2,
+      "distance_meters": 220,
+      "fee_summary": "",
+      "spoken_cue": "APM 只剩兩個位，隨時會滿，後備可以去 XX 停車場。",
+      "is_stale": false
+    }
+  ]
+}

@@ -5,7 +5,6 @@ import com.hkparking.copilot.net.HttpResult
 
 interface VoiceInput {
   fun setUtteranceListener(listener: ((String, Double?) -> Unit)?)
-  fun setSimControlListener(listener: ((event: String, intValue: Int?, stringValue: String?) -> Unit)?) {}
   fun startListening(hotword: Boolean = false)
   fun stopListening()
 }

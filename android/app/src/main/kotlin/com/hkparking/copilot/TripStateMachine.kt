@@ -262,8 +262,17 @@ class TripStateMachine(
     speedKmh: Double,
     lowSpeedHoldS: Int,
     fixAgeS: Int,
+    exitHoldS: Int = 0,
   ) {
     if (!fgsRunning) {
+      return
+    }
+    if (
+      state == TripState.APPROACH_MUTED &&
+      distanceM > NativeConfig.APPROACH_EXIT_DISTANCE_M &&
+      exitHoldS >= NativeConfig.APPROACH_EXIT_HOLD_S
+    ) {
+      enter(TripState.CRUISING)
       return
     }
     val coreHit = distanceM <= NativeConfig.APPROACH_CORE_RADIUS_M &&

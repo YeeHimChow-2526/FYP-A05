@@ -1,0 +1,18 @@
+{
+  "status": "SUCCESS",
+  "speech_locale": "zh-HK",
+  "source_status": "ok",
+  "spoken_cue": "近期有司機回報疑似霸位，請留意現場",
+  "cards": [
+    {
+      "carpark_id": "CP_LANGHAM",
+      "name": "朗豪坊商場停車場",
+      "type": "INDOOR",
+      "vacancies": 8,
+      "distance_meters": 180,
+      "fee_summary": "",
+      "spoken_cue": "近期有司機回報疑似霸位，請留意現場",
+      "is_stale": false
+    }
+  ]
+}

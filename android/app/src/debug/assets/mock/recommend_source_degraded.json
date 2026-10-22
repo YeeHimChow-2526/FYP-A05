@@ -1,0 +1,27 @@
+{
+  "status": "SUCCESS",
+  "speech_locale": "zh-HK",
+  "source_status": "degraded",
+  "cards": [
+    {
+      "carpark_id": "METER_1",
+      "name": "附近咪錶",
+      "type": "METER",
+      "vacancies": 4,
+      "distance_meters": 40,
+      "fee_summary": "",
+      "spoken_cue": "附近可能有咪錶，資料暫時未更新",
+      "is_stale": false
+    },
+    {
+      "carpark_id": "CP_LANGHAM",
+      "name": "朗豪坊商場停車場",
+      "type": "INDOOR",
+      "vacancies": 12,
+      "distance_meters": 180,
+      "fee_summary": "首小時三十二蚊",
+      "spoken_cue": "前方首選朗豪坊停車場，一百八十米，剩十二個位，首小時三十二蚊。",
+      "is_stale": false
+    }
+  ]
+}

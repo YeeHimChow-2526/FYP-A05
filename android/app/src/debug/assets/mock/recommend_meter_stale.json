@@ -1,0 +1,17 @@
+{
+  "status": "SUCCESS",
+  "speech_locale": "zh-HK",
+  "source_status": "ok",
+  "cards": [
+    {
+      "carpark_id": "METER_1",
+      "name": "附近咪錶",
+      "type": "METER",
+      "vacancies": -1,
+      "distance_meters": 40,
+      "fee_summary": "",
+      "spoken_cue": "附近可能有咪錶，資料暫時未更新",
+      "is_stale": true
+    }
+  ]
+}
