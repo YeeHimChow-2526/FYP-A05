@@ -1,6 +1,5 @@
 package com.hkparking.copilot.di
 
-import com.hkparking.copilot.StartupEntry
 import com.hkparking.copilot.net.ApiTransport
 import com.hkparking.copilot.net.HttpResult
 import com.hkparking.copilot.net.RecommendResponse
@@ -102,9 +101,11 @@ class FixtureApiTransport(
   private var fixtureLoader: (String) -> String? = fixtureLoader
   var fixtureName: String = DEFAULT_FIXTURE
     private set
+  var delayMs: suspend (Long) -> Unit = {}
+  var postCount: Int = 0
+    private set
   private var networkFail = false
-  private var rateLimited = false
-  private var retryAfterSeconds: Long? = null
+  private var remaining429Count: Int = 0
 
   fun setFixtureName(name: String) {
     fixtureName = name
@@ -119,35 +120,31 @@ class FixtureApiTransport(
     networkFail = failed
   }
 
-  fun forceRateLimit(enabled: Boolean, retryAfterSeconds: Long? = null) {
-    rateLimited = enabled
-    this.retryAfterSeconds = retryAfterSeconds
-    if (enabled) fixtureName = RATE_LIMIT_FIXTURE
+  fun forceRateLimit(count: Int = 1) {
+    remaining429Count = if (count > 0) count else 0
+    if (remaining429Count > 0) fixtureName = RATE_LIMIT_FIXTURE
   }
 
   fun reset() {
     fixtureName = DEFAULT_FIXTURE
     networkFail = false
-    rateLimited = false
-    retryAfterSeconds = null
+    remaining429Count = 0
+    postCount = 0
+    delayMs = {}
   }
 
   override suspend fun post(path: String, bodyJson: String): HttpResult {
+    postCount += 1
     if (networkFail) {
-      return HttpResult(statusCode = 0, networkError = true)
+      delayMs(com.hkparking.copilot.NativeConfig.API_TIMEOUT_MS)
+      return HttpResult(statusCode = 0, timedOut = true, networkError = true)
     }
-    if (rateLimited) {
+    if (remaining429Count > 0) {
+      remaining429Count -= 1
       val raw = fixtureLoader(RATE_LIMIT_FIXTURE)
-      return HttpResult(
-        statusCode = 429,
-        bodyJson = raw ?: RATE_LIMIT_BODY,
-        retryAfterSeconds = retryAfterSeconds,
-      )
+      return HttpResult(statusCode = 429, bodyJson = raw ?: RATE_LIMIT_BODY, retryAfterSeconds = null)
     }
     val raw = fixtureLoader(fixtureName)
-    if (fixtureName == RATE_LIMIT_FIXTURE) {
-      return HttpResult(statusCode = 429, bodyJson = raw ?: RATE_LIMIT_BODY, retryAfterSeconds = retryAfterSeconds)
-    }
     return HttpResult(
       statusCode = 200,
       bodyJson = raw ?: LANGHAM_BODY,
@@ -187,16 +184,16 @@ object Bindings {
   var activeReceiver: SimEventReceiver? = null
 
   fun attachService(service: com.hkparking.copilot.FloatingBubbleService) {
+    apiTransport.delayMs = { ms ->
+      service.delayMs(ms)
+      service.updateCapsuleVisual()
+    }
     apiTransport.setFixtureLoader { name ->
       runCatching {
         service.assets.open("mock/$name").bufferedReader().use { it.readText() }
       }.getOrNull()
     }
-    if (!service.tripStateMachine.fgsStartAccepted) {
-      service.startInForeground(StartupEntry.A_2, recordAudioGranted = false)
-    }
     val receiver = SimEventReceiver(
-      stateMachineProvider = { service.tripStateMachine },
       onEventHandled = { service.updateCapsuleVisual() },
     )
     activeReceiver = receiver

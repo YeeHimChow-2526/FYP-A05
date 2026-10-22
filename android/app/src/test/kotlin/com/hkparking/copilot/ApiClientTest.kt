@@ -205,8 +205,13 @@ class ApiClientTest {
 }
 
 private fun <T> runSuspend(block: suspend () -> T): T {
+  val done = java.util.concurrent.CountDownLatch(1)
   var result: Result<T>? = null
-  block.startCoroutine(Continuation(EmptyCoroutineContext) { result = it })
+  block.startCoroutine(Continuation(EmptyCoroutineContext) {
+    result = it
+    done.countDown()
+  })
+  done.await()
   return result!!.getOrThrow()
 }
 

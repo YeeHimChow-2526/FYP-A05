@@ -1,11 +1,8 @@
 package com.hkparking.copilot.sim
 
-import com.hkparking.copilot.StartupEntry
-import com.hkparking.copilot.TripStateMachine
 import com.hkparking.copilot.di.Bindings
 
 class SimEventReceiver(
-  private val stateMachineProvider: () -> TripStateMachine? = { null },
   private val logger: (String) -> Unit = {},
   private val onEventHandled: () -> Unit = {},
 ) : android.content.BroadcastReceiver() {
@@ -15,7 +12,7 @@ class SimEventReceiver(
     stringValue: String? = null,
   ): Boolean {
     val handled = when (event) {
-      START_TRIP -> startTrip()
+      START_TRIP -> startTrip(stringValue)
       PAUSE -> {
         Bindings.locationSource.pause()
         true
@@ -28,20 +25,14 @@ class SimEventReceiver(
       SET_SPEED_KMH -> setSpeed(event, intValue, stringValue)
       NETWORK_FAIL -> {
         Bindings.apiTransport.setNetworkFail(true)
-        stateMachineProvider()?.onNetworkFailure()
         true
       }
       NETWORK_OK -> {
         Bindings.apiTransport.setNetworkFail(false)
-        Bindings.apiTransport.forceRateLimit(false)
-        stateMachineProvider()?.onRequestSuccess()
+        Bindings.apiTransport.forceRateLimit(0)
         true
       }
-      FORCE_RATE_LIMIT -> {
-        val retrySec = intValue?.toLong() ?: stringValue?.trim()?.toLongOrNull()
-        Bindings.apiTransport.forceRateLimit(enabled = true, retryAfterSeconds = retrySec)
-        true
-      }
+      FORCE_RATE_LIMIT -> forceRateLimit(event, intValue, stringValue)
       INJECT_UTTERANCE -> injectUtterance(event, stringValue)
       else -> ignore(event)
     }
@@ -56,14 +47,11 @@ class SimEventReceiver(
     dispatchEvent(event, raw as? Int, raw as? String)
   }
 
-  private fun startTrip(): Boolean {
+  private fun startTrip(stringValue: String?): Boolean {
     Bindings.locationSource.start()
-    Bindings.voiceInput.startListening()
-    val machine = stateMachineProvider()
-    if (machine != null && !machine.fgsStartAccepted) {
-      machine.requestStart(StartupEntry.A_2)
-      machine.onFgsStarted()
-    }
+    Bindings.voiceInput.startListening(hotword = true)
+    val utterance = stringValue?.takeIf { it.isNotBlank() } ?: "泊車助手，去朗豪坊"
+    Bindings.voiceInput.injectUtterance(utterance)
     return true
   }
 
@@ -71,9 +59,13 @@ class SimEventReceiver(
     val meters = intValue ?: stringValue?.trim()?.toIntOrNull()
     if (meters == null || meters < 0) return ignore(event)
     Bindings.locationSource.injectDistanceMeters(meters)
-    if (!Bindings.locationSource.isPaused) {
-      stateMachineProvider()?.onDistanceToDestination(meters)
-    }
+    return true
+  }
+
+  private fun forceRateLimit(event: String, intValue: Int?, stringValue: String?): Boolean {
+    val count = intValue ?: stringValue?.trim()?.toIntOrNull() ?: 1
+    if (count <= 0) return ignore(event)
+    Bindings.apiTransport.forceRateLimit(count)
     return true
   }
 

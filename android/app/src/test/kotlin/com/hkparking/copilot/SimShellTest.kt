@@ -11,7 +11,9 @@ import com.hkparking.copilot.sim.SimEventReceiver
 import com.hkparking.copilot.voice.CommandCode
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.EmptyCoroutineContext
+import kotlin.coroutines.resume
 import kotlin.coroutines.startCoroutine
+import kotlin.coroutines.suspendCoroutine
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -49,7 +51,7 @@ class SimShellTest {
     assertEquals(TripState.NEARBY_READY, recovered.state)
     assertEquals(TripState.NEARBY_READY, machine.state)
 
-    transport.forceRateLimit(enabled = true, retryAfterSeconds = null)
+    transport.forceRateLimit(2)
     val limited = runSuspend { client.recommendAndRoute(sampleRequest()) }
     assertEquals(2, limited.attempts)
     assertNotEquals(NativeConfig.API_MAX_ATTEMPTS, limited.attempts)
@@ -104,17 +106,16 @@ class SimShellTest {
   fun simEventsDriveDistanceNetworkAndRateLimit() {
     val machine = startedMachine(destinationName = "朗豪坊")
     val logs = mutableListOf<String>()
-    val receiver = SimEventReceiver(stateMachineProvider = { machine }, logger = { logs += it })
+    val receiver = SimEventReceiver(logger = { logs += it })
     Bindings.locationSource.reset()
     Bindings.apiTransport.reset()
     assertTrue(receiver.dispatchEvent("SET_DISTANCE_M", intValue = NativeConfig.TRIGGER_DISTANCE_M))
     assertEquals(NativeConfig.TRIGGER_DISTANCE_M, Bindings.locationSource.distanceMeters)
-    assertTrue(machine.jitTriggered)
-    assertEquals(TripState.AMBER_STEADY, machine.state)
+    assertEquals(TripState.CRUISING, machine.state)
 
     assertTrue(receiver.dispatchEvent("NETWORK_FAIL"))
-    assertEquals(TripState.GREY_BREATHING, machine.state)
-    assertEquals(CapsuleLight.GREY_BREATHING, machine.capsuleLight)
+    assertEquals(TripState.CRUISING, machine.state)
+    assertEquals(CapsuleLight.GREY_STEADY, machine.capsuleLight)
 
     assertTrue(receiver.dispatchEvent("NETWORK_OK"))
     assertFalse(machine.networkDegraded)
@@ -134,7 +135,7 @@ class SimShellTest {
   fun unknownOrInvalidSimEventsAreLoggedAndIgnored() {
     val machine = startedMachine(destinationName = "朗豪坊")
     val logs = mutableListOf<String>()
-    val receiver = SimEventReceiver(stateMachineProvider = { machine }, logger = { logs += it })
+    val receiver = SimEventReceiver(logger = { logs += it })
     Bindings.locationSource.reset()
     val beforeDistance = Bindings.locationSource.distanceMeters
     val beforeState = machine.state
@@ -172,16 +173,14 @@ class SimShellTest {
     assertTrue(file.length() > 0L)
     val machine = startedMachine()
     val logs = mutableListOf<String>()
-    val receiver = SimEventReceiver(stateMachineProvider = { machine }, logger = { logs += it })
+    val receiver = SimEventReceiver(logger = { logs += it })
     Bindings.apiTransport.reset()
     assertTrue(receiver.dispatchEvent("FORCE_RATE_LIMIT", intValue = 5))
     assertEquals(FixtureApiTransport.RATE_LIMIT_FIXTURE, Bindings.apiTransport.fixtureName)
     val transport = fileTransport()
-    transport.forceRateLimit(enabled = true, retryAfterSeconds = 5)
-    val posted = runSuspend { transport.post(ApiClient.RECOMMEND, "{}") }
-    assertEquals(429, posted.statusCode)
-    assertTrue(posted.bodyJson.contains("RATE_LIMITED"))
-    assertTrue(posted.bodyJson.contains("429"))
+    assertTrue(file.readText().contains("RATE_LIMITED"))
+    assertTrue(file.readText().contains("429"))
+    transport.forceRateLimit(2)
     val outcome = runSuspend { ApiClient(transport, machine) { }.recommendAndRoute(sampleRequest()) }
     assertEquals(429, outcome.httpStatus)
     assertEquals(2, outcome.attempts)
@@ -210,25 +209,120 @@ class SimShellTest {
   }
 
   @Test
-  fun attachServiceRefreshesCapsuleVisualOnFgsAndNetworkEvents() {
-    val service = FloatingBubbleService()
-    Bindings.attachService(service)
-    service.reportFgsStarted()
-    assertEquals("P [GREY_STEADY]", service.capsuleVisualLabel)
+  fun networkFailAloneDoesNotChangeCruiseLight() {
+    val service = openService(FakeClock())
+    val receiver = Bindings.activeReceiver!!
+    assertTrue(receiver.dispatchEvent("START_TRIP"))
+    assertEquals("朗豪坊", service.tripStateMachine.destinationName)
+    assertTrue(receiver.dispatchEvent("NETWORK_FAIL"))
+    assertEquals(TripState.CRUISING, service.tripStateMachine.state)
     assertEquals(CapsuleLight.GREY_STEADY, service.tripStateMachine.capsuleLight)
+    assertEquals(0, Bindings.apiTransport.postCount)
+    Bindings.detachService(service)
+  }
 
-    val receiver = Bindings.activeReceiver
-    assertTrue(receiver != null)
-    assertTrue(receiver!!.dispatchEvent("NETWORK_FAIL"))
+  @Test
+  fun networkFailDistanceRetriesThenStopsAtMaxAttempts() {
+    val clock = FakeClock()
+    val service = openService(clock)
+    val receiver = Bindings.activeReceiver!!
+    assertTrue(receiver.dispatchEvent("START_TRIP"))
+    assertTrue(receiver.dispatchEvent("NETWORK_FAIL"))
+    assertTrue(receiver.dispatchEvent("SET_DISTANCE_M", intValue = 500))
+    assertEquals(TripState.AMBER_STEADY, service.tripStateMachine.state)
+    assertEquals(CapsuleLight.AMBER_STEADY, service.tripStateMachine.capsuleLight)
+    assertEquals(1, Bindings.apiTransport.postCount)
+
+    clock.advance(NativeConfig.API_TIMEOUT_MS)
+    assertEquals(TripState.GREY_BREATHING, service.tripStateMachine.state)
     assertEquals(CapsuleLight.GREY_BREATHING, service.tripStateMachine.capsuleLight)
-    assertEquals("P [GREY_BREATHING]", service.capsuleVisualLabel)
+
+    var guard = 0
+    while (Bindings.apiTransport.postCount < NativeConfig.API_MAX_ATTEMPTS && guard < 30) {
+      clock.advance(NativeConfig.API_RETRY_INTERVAL_MS)
+      guard += 1
+    }
+    assertEquals(NativeConfig.API_MAX_ATTEMPTS, Bindings.apiTransport.postCount)
+    val stopped = Bindings.apiTransport.postCount
+    clock.advance(NativeConfig.API_RETRY_INTERVAL_MS)
+    clock.advance(NativeConfig.API_TIMEOUT_MS)
+    assertEquals(stopped, Bindings.apiTransport.postCount)
+    assertEquals(TripState.GREY_BREATHING, service.tripStateMachine.state)
+    Bindings.detachService(service)
+  }
+
+  @Test
+  fun greyStaysUntilDriverAsksAgain() {
+    val clock = FakeClock()
+    val service = openService(clock)
+    val receiver = Bindings.activeReceiver!!
+    assertTrue(receiver.dispatchEvent("START_TRIP"))
+    assertTrue(receiver.dispatchEvent("NETWORK_FAIL"))
+    assertTrue(receiver.dispatchEvent("SET_DISTANCE_M", intValue = 500))
+    clock.advance(NativeConfig.API_TIMEOUT_MS)
+    var guard = 0
+    while (Bindings.apiTransport.postCount < NativeConfig.API_MAX_ATTEMPTS && guard < 30) {
+      clock.advance(NativeConfig.API_RETRY_INTERVAL_MS)
+      guard += 1
+    }
+    assertEquals(TripState.GREY_BREATHING, service.tripStateMachine.state)
+    val before = Bindings.apiTransport.postCount
 
     assertTrue(receiver.dispatchEvent("NETWORK_OK"))
-    assertFalse(service.tripStateMachine.networkDegraded)
-    assertEquals(CapsuleLight.GREY_STEADY, service.tripStateMachine.capsuleLight)
-    assertEquals("P [GREY_STEADY]", service.capsuleVisualLabel)
+    assertEquals(CapsuleLight.GREY_BREATHING, service.tripStateMachine.capsuleLight)
+    assertEquals(TripState.GREY_BREATHING, service.tripStateMachine.state)
+
+    assertTrue(receiver.dispatchEvent("SET_DISTANCE_M", intValue = 500))
+    clock.advance(NativeConfig.API_TIMEOUT_MS)
+    clock.advance(NativeConfig.API_RETRY_INTERVAL_MS)
+    assertEquals(before, Bindings.apiTransport.postCount)
+    assertEquals(CapsuleLight.GREY_BREATHING, service.tripStateMachine.capsuleLight)
+
+    assertTrue(receiver.dispatchEvent("INJECT_UTTERANCE", stringValue = "搵位"))
+    assertEquals(TripState.NEARBY_READY, service.tripStateMachine.state)
+    assertTrue(Bindings.apiTransport.postCount > before)
     Bindings.detachService(service)
+  }
+
+  @Test
+  fun forceRateLimitRetriesOnceWithFakeClock() {
+    val limitedClock = FakeClock()
+    val limited = openService(limitedClock)
+    val limitedReceiver = Bindings.activeReceiver!!
+    assertTrue(limitedReceiver.dispatchEvent("START_TRIP"))
+    assertTrue(limitedReceiver.dispatchEvent("FORCE_RATE_LIMIT", intValue = 2))
+    assertTrue(limitedReceiver.dispatchEvent("SET_DISTANCE_M", intValue = 500))
+    assertEquals(1, Bindings.apiTransport.postCount)
+    assertEquals(TripState.AMBER_STEADY, limited.tripStateMachine.state)
+    limitedClock.advance(NativeConfig.RATE_LIMIT_RETRY_DELAY_MS - 1)
+    assertEquals(1, Bindings.apiTransport.postCount)
+    limitedClock.advance(1)
+    assertEquals(2, Bindings.apiTransport.postCount)
+    assertEquals(TripState.GREY_BREATHING, limited.tripStateMachine.state)
+    assertEquals(CapsuleLight.GREY_BREATHING, limited.tripStateMachine.capsuleLight)
+    Bindings.detachService(limited)
+
+    val recoveredClock = FakeClock()
+    val recovered = openService(recoveredClock)
+    val recoveredReceiver = Bindings.activeReceiver!!
+    assertTrue(recoveredReceiver.dispatchEvent("START_TRIP"))
+    assertTrue(recoveredReceiver.dispatchEvent("FORCE_RATE_LIMIT"))
+    assertTrue(recoveredReceiver.dispatchEvent("SET_DISTANCE_M", intValue = 500))
+    assertEquals(1, Bindings.apiTransport.postCount)
+    recoveredClock.advance(NativeConfig.RATE_LIMIT_RETRY_DELAY_MS)
+    assertEquals(2, Bindings.apiTransport.postCount)
+    assertEquals(TripState.NEARBY_READY, recovered.tripStateMachine.state)
+    Bindings.detachService(recovered)
+  }
+
+  private fun openService(clock: FakeClock): FloatingBubbleService {
+    Bindings.locationSource.reset()
     Bindings.apiTransport.reset()
+    Bindings.voiceInput.stopListening()
+    val service = FloatingBubbleService(clock.delayMs)
+    service.startInForeground(StartupEntry.A_2, recordAudioGranted = false)
+    service.reportFgsStarted()
+    return service
   }
 
   private fun startedMachine(destinationName: String? = null): TripStateMachine {
@@ -247,6 +341,25 @@ class SimShellTest {
     destName = "朗豪坊",
     preference = "SMART_HYBRID",
   )
+}
+
+private class FakeClock {
+  private var now: Long = 0L
+  private val waiters = mutableListOf<Pair<Long, Continuation<Unit>>>()
+  val delayMs: suspend (Long) -> Unit = { ms ->
+    if (ms > 0L) {
+      suspendCoroutine { cont ->
+        waiters += (now + ms) to cont
+      }
+    }
+  }
+
+  fun advance(ms: Long) {
+    now += ms
+    val due = waiters.filter { it.first <= now }.sortedBy { it.first }
+    waiters.removeAll(due)
+    due.forEach { it.second.resume(Unit) }
+  }
 }
 
 private fun <T> runSuspend(block: suspend () -> T): T {

@@ -7,6 +7,8 @@ import com.hkparking.copilot.TripState
 import com.hkparking.copilot.TripStateMachine
 import com.hkparking.copilot.voice.RecommendationCard
 import com.hkparking.copilot.voice.ZhHkTemplates
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 
 enum class QueryTriggerMode { BACKGROUND_PREFETCH, DRIVER_ACTIVE, B2_RESOLUTION }
 
@@ -67,7 +69,14 @@ data class CallOutcome(
 class ApiClient(
   private val transport: ApiTransport,
   private val stateMachine: TripStateMachine = TripStateMachine(),
-  private val delayMs: suspend (Long) -> Unit = { ms -> if (ms > 0L) Thread.sleep(ms) },
+  private val delayMs: suspend (Long) -> Unit = { ms ->
+    if (ms > 0L) {
+      suspendCoroutine { cont ->
+        java.util.concurrent.CompletableFuture.delayedExecutor(ms, java.util.concurrent.TimeUnit.MILLISECONDS)
+          .execute { cont.resume(Unit) }
+      }
+    }
+  },
 ) {
   fun defaultHeaders(): Map<String, String> = mapOf(HEADER_API_KEY to INTERNAL_API_KEY, HEADER_CONTENT_TYPE to JSON_CONTENT_TYPE)
 

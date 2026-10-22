@@ -1,25 +1,54 @@
 package com.hkparking.copilot
 
+import com.hkparking.copilot.net.QueryTriggerMode
+import com.hkparking.copilot.net.RecommendRequest
 import com.hkparking.copilot.voice.CapabilityStatus
+import com.hkparking.copilot.voice.CommandCode
+import com.hkparking.copilot.voice.CommandCodes
 import com.hkparking.copilot.voice.LocaleProbe
+import com.hkparking.copilot.voice.ParseContext
 import com.hkparking.copilot.voice.SpeechCapabilityProbe
 import com.hkparking.copilot.voice.TripVoiceMode
 import com.hkparking.copilot.voice.VoiceCapabilityChecker
+import kotlin.coroutines.Continuation
+import kotlin.coroutines.EmptyCoroutineContext
+import kotlin.coroutines.resume
+import kotlin.coroutines.startCoroutine
+import kotlin.coroutines.suspendCoroutine
 
 data class MicSessionEvent(val isActive: Boolean, val reason: String)
 
 class FloatingBubbleService : android.app.Service {
   val capabilityChecker: VoiceCapabilityChecker
   val tripStateMachine: TripStateMachine
+  val delayMs: suspend (Long) -> Unit
+  private val apiClient: com.hkparking.copilot.net.ApiClient
 
-  constructor() : this(VoiceCapabilityChecker(SilentSpeechProbe()), TripStateMachine())
+  constructor() : this(VoiceCapabilityChecker(SilentSpeechProbe()), TripStateMachine(), defaultDelayMs())
+
+  constructor(delayMs: suspend (Long) -> Unit) : this(
+    VoiceCapabilityChecker(SilentSpeechProbe()),
+    TripStateMachine(),
+    delayMs,
+  )
 
   constructor(
     capabilityChecker: VoiceCapabilityChecker,
     tripStateMachine: TripStateMachine = TripStateMachine(),
+    clockDelay: suspend (Long) -> Unit = defaultDelayMs(),
   ) : super() {
     this.capabilityChecker = capabilityChecker
     this.tripStateMachine = tripStateMachine
+    this.delayMs = { ms ->
+      updateCapsuleVisual()
+      clockDelay(ms)
+      updateCapsuleVisual()
+    }
+    this.apiClient = com.hkparking.copilot.net.ApiClient(
+      com.hkparking.copilot.di.Bindings.apiTransport,
+      tripStateMachine,
+      this.delayMs,
+    )
     tripStateMachine.applyVoiceCapability(capabilityChecker)
   }
 
@@ -43,7 +72,6 @@ class FloatingBubbleService : android.app.Service {
       recordAudioGranted = recordAudioGranted,
       hotwordEnabled = hotwordEnabled,
     )
-    com.hkparking.copilot.di.Bindings.attachService(this)
     if (!enterForeground()) {
       onBootstrapTimedOut()
       return START_NOT_STICKY
@@ -130,6 +158,7 @@ class FloatingBubbleService : android.app.Service {
       )
     }
     tripStateMachine.onMicFgsActive(activeFgsType == VoiceCapabilityChecker.FGS_LOCATION_MIC)
+    wirePorts()
     hasPendingFgsStart = true
     pendingFgsStartedCallback = onFgsStarted
     pendingInitialDistanceMeters = initialDistanceMeters
@@ -157,6 +186,7 @@ class FloatingBubbleService : android.app.Service {
     if (saved != null && saved !== onFgsStarted) saved.invoke()
     onFgsStarted()
     dispatchFgsStarted(this)
+    wirePorts()
     updateCapsuleVisual()
   }
 
@@ -184,6 +214,64 @@ class FloatingBubbleService : android.app.Service {
       startForeground(NOTIFICATION_ID, notification, fgType)
     }
     return posted.isSuccess
+  }
+
+  private fun wirePorts() {
+    com.hkparking.copilot.di.Bindings.attachService(this)
+    com.hkparking.copilot.di.Bindings.locationSource.setLocationListener { distanceMeters, _, _ ->
+      onLocationFix(distanceMeters)
+    }
+    com.hkparking.copilot.di.Bindings.voiceInput.setUtteranceListener { text, confidence ->
+      onUtterance(text, confidence)
+    }
+  }
+
+  private fun onLocationFix(distanceMeters: Int) {
+    if (!isFgsRunning) return
+    val wasJitTriggered = tripStateMachine.jitTriggered
+    tripStateMachine.onDistanceToDestination(distanceMeters)
+    updateCapsuleVisual()
+    if (!wasJitTriggered && tripStateMachine.jitTriggered && tripStateMachine.recommend) {
+      launchRecommend(QueryTriggerMode.BACKGROUND_PREFETCH)
+    }
+  }
+
+  private fun onUtterance(text: String, confidence: Double?) {
+    val parsed = CommandCodes.parse(text, ParseContext(confidence = confidence))
+    if (parsed.code == CommandCode.SET_DESTINATION && !parsed.destinationName.isNullOrBlank()) {
+      tripStateMachine.onDestinationSet(destinationName = parsed.destinationName)
+      updateCapsuleVisual()
+      if (tripStateMachine.recommend) {
+        launchRecommend(QueryTriggerMode.BACKGROUND_PREFETCH)
+      }
+    }
+    if (parsed.code == CommandCode.FIND_PARKING) {
+      launchRecommend(QueryTriggerMode.DRIVER_ACTIVE)
+      updateCapsuleVisual()
+    }
+  }
+
+  private fun launchRecommend(mode: QueryTriggerMode) {
+    launchApi {
+      apiClient.recommendAndRoute(buildRecommendRequest(), mode)
+      updateCapsuleVisual()
+    }
+  }
+
+  private fun buildRecommendRequest(): RecommendRequest {
+    return RecommendRequest(
+      sessionId = tripStateMachine.sessionId ?: "",
+      originLat = 0.0,
+      originLng = 0.0,
+      destLat = 0.0,
+      destLng = 0.0,
+      destName = tripStateMachine.destinationName ?: "",
+      preference = "SMART_HYBRID",
+    )
+  }
+
+  private fun launchApi(block: suspend () -> Unit) {
+    block.startCoroutine(Continuation(EmptyCoroutineContext) { })
   }
 
   fun updateCapsuleVisual() {
@@ -345,6 +433,20 @@ class FloatingBubbleService : android.app.Service {
     fun dispatchFgsStarted(service: FloatingBubbleService) {
       val snapshot = synchronized(fgsStartedListeners) { fgsStartedListeners.toList() }
       snapshot.forEach { it(service) }
+    }
+  }
+}
+
+private fun defaultDelayMs(): suspend (Long) -> Unit = { ms ->
+  if (ms > 0L) {
+    suspendCoroutine { cont ->
+      val looper = runCatching { android.os.Looper.getMainLooper() }.getOrNull()
+      if (looper != null) {
+        android.os.Handler(looper).postDelayed({ cont.resume(Unit) }, ms)
+      } else {
+        java.util.concurrent.CompletableFuture.delayedExecutor(ms, java.util.concurrent.TimeUnit.MILLISECONDS)
+          .execute { cont.resume(Unit) }
+      }
     }
   }
 }
