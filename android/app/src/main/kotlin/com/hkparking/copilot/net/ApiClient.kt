@@ -69,6 +69,7 @@ data class CallOutcome(
 class ApiClient(
   private val transport: ApiTransport,
   private val stateMachine: TripStateMachine = TripStateMachine(),
+  private val onAttemptFailed: (attempt: Int, mode: QueryTriggerMode?, timedOut: Boolean) -> Unit = { _, _, _ -> },
   private val delayMs: suspend (Long) -> Unit = { ms ->
     if (ms > 0L) {
       suspendCoroutine { cont ->
@@ -133,6 +134,7 @@ class ApiClient(
         if (ready) markReady(timeline)
         return success(result, timeline, cues, waits, attempts)
       }
+      onAttemptFailed(attempts, mode, result.timedOut)
       if (attempts == 1 && (result.timedOut || result.networkError)) noteFirstFailure(mode, timeline, cues)
       if (!(graded && attempts < NativeConfig.API_MAX_ATTEMPTS && isGradedFailure(result))) return fail(result, mode, timeline, cues, waits, attempts)
       delayMs(NativeConfig.API_RETRY_INTERVAL_MS)

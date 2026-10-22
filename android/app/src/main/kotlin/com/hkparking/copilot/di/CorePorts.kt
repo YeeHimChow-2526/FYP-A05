@@ -1,10 +1,15 @@
 package com.hkparking.copilot.di
 
+import com.hkparking.copilot.NativeConfig
 import com.hkparking.copilot.net.ApiTransport
 import com.hkparking.copilot.net.HttpResult
 
 fun interface NetworkStatusProvider {
   fun isOnline(): Boolean
+}
+
+fun safeIsOnline(query: () -> Boolean): Boolean {
+  return runCatching { query() }.getOrElse { false }
 }
 
 interface VoiceInput {
@@ -78,6 +83,8 @@ class HttpApiTransport(
       val connection = java.net.URL(baseUrl.trimEnd('/') + path).openConnection() as java.net.HttpURLConnection
       connection.requestMethod = "POST"
       connection.doOutput = true
+      connection.connectTimeout = NativeConfig.API_TIMEOUT_MS.toInt()
+      connection.readTimeout = NativeConfig.API_TIMEOUT_MS.toInt()
       connection.setRequestProperty("Content-Type", "application/json")
       connection.outputStream.use { stream -> stream.write(bodyJson.toByteArray()) }
       val code = connection.responseCode
@@ -90,8 +97,9 @@ class HttpApiTransport(
         headers = if (retryAfter == null) emptyMap() else mapOf("Retry-After" to retryAfter),
         retryAfterSeconds = retryAfter?.toLongOrNull(),
       )
-    }.getOrElse {
-      HttpResult(statusCode = 0, networkError = true)
+    }.getOrElse { error ->
+      val timedOut = error is java.net.SocketTimeoutException
+      HttpResult(statusCode = 0, timedOut = timedOut, networkError = !timedOut)
     }
   }
 }

@@ -27,7 +27,6 @@ class FloatingBubbleService : android.app.Service {
   val capabilityChecker: VoiceCapabilityChecker
   val tripStateMachine: TripStateMachine
   val delayMs: suspend (Long) -> Unit
-  private val rawDelay: suspend (Long) -> Unit
   val ttsService: TtsService
   private val networkStatus: NetworkStatusProvider
   private val apiClient: com.hkparking.copilot.net.ApiClient
@@ -48,13 +47,13 @@ class FloatingBubbleService : android.app.Service {
   ) : super() {
     this.capabilityChecker = capabilityChecker
     this.tripStateMachine = tripStateMachine
-    this.rawDelay = clockDelay
-    this.delayMs = { ms -> onApiDelay(ms) }
+    this.delayMs = clockDelay
     this.networkStatus = networkStatus
-    this.ttsService = TtsService(createTtsEngine(this), capabilityChecker)
+    this.ttsService = TtsService(null, capabilityChecker)
     this.apiClient = com.hkparking.copilot.net.ApiClient(
       com.hkparking.copilot.di.Bindings.apiTransport,
       tripStateMachine,
+      this::onAttemptFailed,
       delayMs,
     )
     capabilityChecker.attachContext(this)
@@ -70,6 +69,15 @@ class FloatingBubbleService : android.app.Service {
   }
 
   override fun onBind(intent: android.content.Intent?): android.os.IBinder = LocalBinder()
+
+  override fun onCreate() {
+    super.onCreate()
+    if (ttsEngineReady) return
+    val engine = createTtsEngine(this, this::onTtsInitFailed)
+    if (engine != null && ttsService.attachEngine(engine)) {
+      ttsEngineReady = true
+    }
+  }
 
   override fun onStartCommand(intent: android.content.Intent?, flags: Int, startId: Int): Int {
     val entryName = intent?.getStringExtra(EXTRA_ENTRY)
@@ -141,8 +149,7 @@ class FloatingBubbleService : android.app.Service {
   private var lastLoggedSnapshot: String? = null
   private var portsWired: Boolean = false
   private var voiceApplyEpoch: Int = 0
-  private var driverFailureSpeak: Boolean = false
-  private var driverTimeouts: Int = 0
+  private var ttsEngineReady: Boolean = false
   private val spokenDriverCues = mutableSetOf<String>()
   private var cachedCards: List<RecommendationCard> = emptyList()
   private var cachedSourceStatus: String = "ok"
@@ -400,8 +407,6 @@ class FloatingBubbleService : android.app.Service {
   }
 
   private fun launchRecommend(mode: QueryTriggerMode) {
-    driverFailureSpeak = mode == QueryTriggerMode.DRIVER_ACTIVE
-    driverTimeouts = 0
     spokenDriverCues.clear()
     launchApi {
       val outcome = apiClient.recommendAndRoute(buildRecommendRequest(), mode)
@@ -421,10 +426,7 @@ class FloatingBubbleService : android.app.Service {
             driverAsked = true,
           )
         }
-      } else if (mode == QueryTriggerMode.DRIVER_ACTIVE) {
-        speakDriverFailureCues(outcome.spokenCues)
       }
-      driverFailureSpeak = false
       updateCapsuleVisual()
     }
   }
@@ -438,15 +440,31 @@ class FloatingBubbleService : android.app.Service {
     }
   }
 
-  private suspend fun onApiDelay(ms: Long) {
-    rawDelay(ms)
-    if (!driverFailureSpeak || ms != NativeConfig.API_TIMEOUT_MS) return
-    driverTimeouts += 1
-    val mode = tripStateMachine.tripVoiceMode
-    if (driverTimeouts == 1) {
+  fun onTtsInitFailed(reason: String) {
+    ttsEngineReady = false
+    runCatching {
+      android.util.Log.i("TtsService", "tts init failed reason=$reason")
+    }
+    val current = capabilityChecker.currentSnapshot(timedOut = false)
+    capabilityChecker.applyExternalSnapshot(
+      current.copy(
+        tts = com.hkparking.copilot.voice.CapabilityStatus.UNKNOWN,
+        mode = TripVoiceMode.MANUAL_ONLY,
+        voiceInputEnabled = false,
+        hotwordActive = false,
+        fgsType = VoiceCapabilityChecker.FGS_LOCATION,
+        ttsUsable = false,
+      ),
+    )
+    tripStateMachine.syncVoiceCapability(capabilityChecker.currentSnapshot(timedOut = false), hasConfirmed = true)
+  }
+
+  private fun onAttemptFailed(attempt: Int, mode: QueryTriggerMode?, timedOut: Boolean) {
+    if (mode != QueryTriggerMode.DRIVER_ACTIVE) return
+    if (attempt == 1 && timedOut) {
       speakDriverFailureCues(listOf(ZhHkTemplates.NETWORK_SLOW))
     }
-    if (driverTimeouts >= NativeConfig.API_MAX_ATTEMPTS) {
+    if (attempt >= NativeConfig.API_MAX_ATTEMPTS) {
       speakDriverFailureCues(listOf(ZhHkTemplates.NETWORK_FAILED))
     }
   }

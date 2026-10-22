@@ -20,18 +20,24 @@ interface TtsEngine {
 }
 
 class TtsService(
-  private val engine: TtsEngine,
+  engine: TtsEngine?,
   private val capabilityChecker: VoiceCapabilityChecker,
 ) {
   var isSpeaking: Boolean = false
     private set
   val spokenCues = ArrayDeque<String>()
 
+  private var engine: TtsEngine? = engine
   private val queue = ArrayDeque<String>()
   private var playbackEpoch: Int = 0
 
   init {
-    engine.bindLocale(NativeConfig.SPEECH_LOCALE_DEFAULT)
+    engine?.bindLocale(NativeConfig.SPEECH_LOCALE_DEFAULT)
+  }
+
+  fun attachEngine(next: TtsEngine): Boolean {
+    engine = next
+    return next.bindLocale(NativeConfig.SPEECH_LOCALE_DEFAULT)
   }
 
   fun pendingCount(): Int = queue.size
@@ -115,7 +121,7 @@ class TtsService(
     playbackEpoch += 1
     queue.clear()
     isSpeaking = false
-    engine.stop()
+    engine?.stop()
   }
 
   private fun firstCueOf(cards: List<RecommendationCard>, sourceStatus: String): String? {
@@ -158,8 +164,14 @@ class TtsService(
     playbackEpoch += 1
     val epoch = playbackEpoch
     isSpeaking = true
+    val active = engine
+    if (active == null) {
+      logEngineFailure("engine_missing")
+      onCurrentUtteranceFailed()
+      return
+    }
     val played = runCatching {
-      engine.speak(
+      active.speak(
         headText,
         onDone = { if (epoch == playbackEpoch) onCurrentUtteranceFinished() },
         onError = {
@@ -211,35 +223,51 @@ fun ttsLanguageBindSucceeded(setLanguageCode: Int): Boolean {
   return setLanguageCode >= TTS_LANG_AVAILABLE
 }
 
-fun createTtsEngine(context: android.content.Context): TtsEngine {
-  return runCatching { AndroidTextToSpeechEngine(context) }.getOrElse { RecordingTtsEngine() }
-}
-
-class RecordingTtsEngine : TtsEngine {
-  var boundLocale: String? = null
-    private set
-
-  override fun bindLocale(locale: String): Boolean {
-    boundLocale = locale
-    return true
+fun createTtsEngine(
+  context: android.content.Context,
+  onInitFailed: (String) -> Unit,
+): TtsEngine? {
+  return try {
+    AndroidTextToSpeechEngine(context, onInitFailed)
+  } catch (error: Throwable) {
+    onInitFailed(error.javaClass.simpleName)
+    null
   }
-
-  override fun speak(text: String, onDone: () -> Unit, onError: () -> Unit) {
-    onDone()
-  }
-
-  override fun stop() {}
 }
 
 class AndroidTextToSpeechEngine(
   context: android.content.Context,
+  private val onInitFailed: (String) -> Unit,
 ) : TtsEngine {
+  private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+  private var pendingDone: (() -> Unit)? = null
+  private var pendingError: (() -> Unit)? = null
+  private var utteranceSerial: Int = 0
   private val tts: android.speech.tts.TextToSpeech =
     android.speech.tts.TextToSpeech(context, this::onInit)
 
+  init {
+    tts.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+      override fun onStart(utteranceId: String?) {}
+
+      override fun onDone(utteranceId: String?) {
+        mainHandler.post { finishUtterance(success = true) }
+      }
+
+      @Deprecated("Use onError(utteranceId)")
+      override fun onError(utteranceId: String?) {
+        mainHandler.post { finishUtterance(success = false) }
+      }
+    })
+  }
+
   private fun onInit(status: Int) {
-    if (status == android.speech.tts.TextToSpeech.SUCCESS) {
-      bindLocale(NativeConfig.SPEECH_LOCALE_DEFAULT)
+    if (status != android.speech.tts.TextToSpeech.SUCCESS) {
+      onInitFailed("status=$status")
+      return
+    }
+    if (!bindLocale(NativeConfig.SPEECH_LOCALE_DEFAULT)) {
+      onInitFailed("bind_locale")
     }
   }
 
@@ -249,17 +277,29 @@ class AndroidTextToSpeechEngine(
   }
 
   override fun speak(text: String, onDone: () -> Unit, onError: () -> Unit) {
-    val result = runCatching {
-      tts.speak(text, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "first-choice")
-    }
-    if (result.isFailure || result.getOrNull() == android.speech.tts.TextToSpeech.ERROR) {
-      onError()
-    } else {
-      onDone()
+    pendingDone = onDone
+    pendingError = onError
+    utteranceSerial += 1
+    val utteranceId = "cue-$utteranceSerial"
+    val code = runCatching {
+      tts.speak(text, android.speech.tts.TextToSpeech.QUEUE_ADD, null, utteranceId)
+    }.getOrNull()
+    if (code == null || code == android.speech.tts.TextToSpeech.ERROR) {
+      mainHandler.post { finishUtterance(success = false) }
     }
   }
 
   override fun stop() {
+    pendingDone = null
+    pendingError = null
     runCatching { tts.stop() }
+  }
+
+  private fun finishUtterance(success: Boolean) {
+    val done = pendingDone
+    val failed = pendingError
+    pendingDone = null
+    pendingError = null
+    if (success) done?.invoke() else failed?.invoke()
   }
 }

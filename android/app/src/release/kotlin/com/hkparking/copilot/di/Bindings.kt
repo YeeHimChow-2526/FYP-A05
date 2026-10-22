@@ -5,14 +5,13 @@ import com.hkparking.copilot.net.ApiTransport
 class ConnectivityNetworkStatus : NetworkStatusProvider {
   var context: android.content.Context? = null
 
-  override fun isOnline(): Boolean {
-    val ctx = context ?: return false
-    val manager = runCatching {
-      ctx.getSystemService(android.net.ConnectivityManager::class.java)
-    }.getOrNull() ?: return false
-    val network = manager.activeNetwork ?: return false
-    val capabilities = manager.getNetworkCapabilities(network) ?: return false
-    return capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+  override fun isOnline(): Boolean = safeIsOnline {
+    val ctx = context ?: return@safeIsOnline false
+    val manager = ctx.getSystemService(android.net.ConnectivityManager::class.java)
+      ?: return@safeIsOnline false
+    val network = manager.activeNetwork ?: return@safeIsOnline false
+    val capabilities = manager.getNetworkCapabilities(network) ?: return@safeIsOnline false
+    capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
   }
 }
 
