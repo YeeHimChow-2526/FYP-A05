@@ -1,6 +1,7 @@
 package com.hkparking.copilot
 
 import com.hkparking.copilot.di.Bindings
+import com.hkparking.copilot.di.FgsStarter
 import com.hkparking.copilot.di.FixtureApiTransport
 import com.hkparking.copilot.di.LocationSource
 import com.hkparking.copilot.di.VoiceInput
@@ -646,6 +647,69 @@ class SimShellTest {
   }
 
   @Test
+  fun pauseResumeAndSpeedInjectionUseExistingLocationPort() {
+    val service = openService(FakeClock())
+    val receiver = Bindings.activeReceiver!!
+    val speeds = mutableListOf<Double>()
+    Bindings.locationSource.start()
+    Bindings.locationSource.setMotionListener { _, speedKmh, _, _, _ ->
+      speeds += speedKmh
+    }
+    assertTrue(receiver.dispatchEvent("SET_DISTANCE_M", intValue = 900))
+    assertEquals(900, service.lastDistanceMeters())
+
+    assertTrue(receiver.dispatchEvent("PAUSE"))
+    assertTrue(Bindings.locationSource.isPaused)
+    assertTrue(receiver.dispatchEvent("SET_DISTANCE_M", intValue = 150))
+    assertEquals(150, Bindings.locationSource.distanceMeters)
+    assertEquals(900, service.lastDistanceMeters())
+    assertTrue(receiver.dispatchEvent("SET_SPEED_KMH", intValue = 12))
+    assertEquals(12.0, Bindings.locationSource.speedKmh, 0.0)
+    assertTrue(speeds.isEmpty())
+
+    assertTrue(receiver.dispatchEvent("RESUME"))
+    assertFalse(Bindings.locationSource.isPaused)
+    assertTrue(receiver.dispatchEvent("SET_DISTANCE_M", intValue = 150))
+    assertEquals(150, service.lastDistanceMeters())
+    assertFalse(receiver.dispatchEvent("SET_SPEED_KMH", intValue = -1))
+    assertEquals(12.0, Bindings.locationSource.speedKmh, 0.0)
+    assertTrue(receiver.dispatchEvent("SET_SPEED_KMH", intValue = 28))
+    assertEquals(28.0, Bindings.locationSource.speedKmh, 0.0)
+    assertEquals(listOf(28.0), speeds)
+    Bindings.detachService(service)
+  }
+
+  @Test
+  fun fgsStartTimeoutRecordsReasonWithoutActivityTrampoline() {
+    val launches = intArrayOf(0)
+    val previous = Bindings.fgsStarter
+    Bindings.fgsStarter = FgsStarter {
+      launches[0]++
+      false
+    }
+    val service = FloatingBubbleService(FakeClock().delayMs)
+    try {
+      service.startInForeground(StartupEntry.A_2, recordAudioGranted = false)
+      assertFalse(service.isFgsRunning)
+      assertEquals(null, service.bootstrapTimeoutReason)
+      val waiting = FgsBootstrapActivity(service)
+      assertTrue(waiting.launchFromEntry(StartupEntry.A_2, PermissionCheckInput()))
+      assertFalse(waiting.isFinished)
+      assertTrue(Bindings.activeReceiver!!.dispatchEvent("FGS_START_TIMEOUT", context = null))
+      assertFalse(service.isFgsRunning)
+      assertEquals(2000L, NativeConfig.FGS_BOOTSTRAP_TIMEOUT_MS)
+      assertTrue(service.bootstrapTimeoutReason!!.contains(NativeConfig.FGS_BOOTSTRAP_TIMEOUT_MS.toString()))
+      assertEquals(0, launches[0])
+      assertFalse(waiting.isFinished)
+      assertFalse(waiting.bootstrapTimedOut)
+      assertFalse(timeoutSourcesMentionTrampoline())
+    } finally {
+      Bindings.fgsStarter = previous
+      Bindings.detachService(service)
+    }
+  }
+
+  @Test
   fun forceFixturesSwitchNextRecommendOrCommit() {
     val service = openService(FakeClock())
     val receiver = Bindings.activeReceiver!!
@@ -788,6 +852,38 @@ class SimShellTest {
     Bindings.detachService(service)
   }
 
+  private fun timeoutSourcesMentionTrampoline(): Boolean {
+    val receiver = readTimeoutSource("src/debug/kotlin/com/hkparking/copilot/sim/SimEventReceiver.kt")
+    val bindings = readTimeoutSource("src/debug/kotlin/com/hkparking/copilot/di/Bindings.kt")
+    val service = readTimeoutSource("src/main/kotlin/com/hkparking/copilot/FloatingBubbleService.kt")
+    val slices = listOf(
+      sliceFrom(receiver, "FGS_START_TIMEOUT ->", "\n"),
+      sliceFrom(bindings, "\"FGS_START_TIMEOUT\" ->", "\n"),
+      sliceFrom(service, "fun onBootstrapTimedOut()", "fun reportFgsStarted"),
+    )
+    val markers = listOf("startActivity", "FgsBootstrapActivity", "startForegroundService")
+    return slices.any { slice -> markers.any { marker -> slice.contains(marker) } }
+  }
+
+  private fun sliceFrom(text: String, start: String, end: String): String {
+    val from = text.indexOf(start)
+    if (from < 0) error("missing timeout slice: $start")
+    val to = text.indexOf(end, from + start.length)
+    if (to < 0) error("missing timeout slice end: $end")
+    return text.substring(from, to)
+  }
+
+  private fun readTimeoutSource(path: String): String {
+    val roots = listOf(
+      java.io.File(System.getProperty("user.dir")),
+      java.io.File(System.getProperty("user.dir"), "android/app"),
+      java.io.File(System.getProperty("user.dir"), "app"),
+    )
+    val file = roots.map { java.io.File(it, path) }.firstOrNull { it.isFile }
+      ?: error("missing timeout source: $path")
+    return file.readText()
+  }
+
   private fun openService(clock: FakeClock): FloatingBubbleService {
     Bindings.locationSource.reset()
     Bindings.apiTransport.reset()
@@ -840,3 +936,4 @@ private fun <T> runSuspend(block: suspend () -> T): T {
   block.startCoroutine(Continuation(EmptyCoroutineContext) { result = it })
   return result!!.getOrThrow()
 }
+
