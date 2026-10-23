@@ -6,6 +6,7 @@ import com.hkparking.copilot.net.ApiTransport
 import com.hkparking.copilot.net.HttpResult
 import com.hkparking.copilot.net.RecommendResponse
 import com.hkparking.copilot.sim.SimEventReceiver
+import com.hkparking.copilot.sim.SimJoystickOverlay
 import com.hkparking.copilot.voice.CapabilitySnapshot
 import com.hkparking.copilot.voice.CapabilityStatus
 import com.hkparking.copilot.voice.CommandCodes
@@ -422,6 +423,7 @@ object Bindings {
         }
       }
     }
+    if (receiverRegistered) SimJoystickOverlay.show(service)
     if (service.isFgsRunning) {
       val name = pendingStartDestination
       if (name != null) {
@@ -436,12 +438,14 @@ object Bindings {
     if (activeService !== service) return
     activeService = null
     voiceInput.setSimControlListener(null)
+    SimJoystickOverlay.hide()
   }
 
   fun clearPorts() {
     locationSource.setLocationListener(null)
     locationSource.setMotionListener(null)
     voiceInput.setUtteranceListener(null)
+    SimJoystickOverlay.hide()
   }
 
   fun clearPendingStart() {

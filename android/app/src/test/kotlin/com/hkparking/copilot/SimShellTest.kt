@@ -9,7 +9,11 @@ import com.hkparking.copilot.di.VoiceInput
 import com.hkparking.copilot.net.ApiClient
 import com.hkparking.copilot.net.ApiTransport
 import com.hkparking.copilot.net.RecommendRequest
+import com.hkparking.copilot.sim.JoystickButton
+import com.hkparking.copilot.sim.JoystickWindowHost
+import com.hkparking.copilot.sim.SimBroadcastSender
 import com.hkparking.copilot.sim.SimEventReceiver
+import com.hkparking.copilot.sim.SimJoystickOverlay
 import com.hkparking.copilot.voice.CommandCode
 import com.hkparking.copilot.voice.TripVoiceMode
 import com.hkparking.copilot.voice.VoiceCapabilityChecker
@@ -899,6 +903,199 @@ class SimShellTest {
       SimEventReceiver.registrar = previous
     }
     assertTrue(SimEventReceiver.registrar === previous)
+  }
+
+  @Test
+  fun joystickButtonsMatchSpecTable() {
+    val previousSender = SimJoystickOverlay.sender
+    val previousHost = SimJoystickOverlay.windowHost
+    installIdleJoystick()
+    SimJoystickOverlay.hide()
+    try {
+      val expected = listOf(
+        JoystickButton("D 遠", "SET_DISTANCE_M", NativeConfig.TRIGGER_DISTANCE_M + 200),
+        JoystickButton("D 1km", "SET_DISTANCE_M", NativeConfig.TRIGGER_DISTANCE_M),
+        JoystickButton("D 150", "SET_DISTANCE_M", NativeConfig.APPROACH_RADIUS_M),
+        JoystickButton("D 80", "SET_DISTANCE_M", NativeConfig.APPROACH_CORE_RADIUS_M),
+        JoystickButton("D 離開", "SET_DISTANCE_M", NativeConfig.APPROACH_EXIT_DISTANCE_M + 50),
+        JoystickButton("V 0", "SET_SPEED_KMH", 0),
+        JoystickButton("V 慢", "SET_SPEED_KMH", NativeConfig.APPROACH_SPEED_THRESHOLD_KMH - 1),
+        JoystickButton("V 巡航", "SET_SPEED_KMH", 30),
+        JoystickButton("PAUSE", "PAUSE", null),
+        JoystickButton("RESUME", "RESUME", null),
+      )
+      assertEquals(10, SimJoystickOverlay.buttons.size)
+      assertEquals(expected, SimJoystickOverlay.buttons)
+    } finally {
+      SimJoystickOverlay.hide()
+      SimJoystickOverlay.sender = previousSender
+      SimJoystickOverlay.windowHost = previousHost
+    }
+  }
+
+  @Test
+  fun joystickTapSendsEventAndSwallowsSenderFailure() {
+    val previousSender = SimJoystickOverlay.sender
+    val previousHost = SimJoystickOverlay.windowHost
+    val received = mutableListOf<Pair<String, Int?>>()
+    installIdleJoystick()
+    SimJoystickOverlay.sender = SimBroadcastSender { _, event, intValue ->
+      received += event to intValue
+    }
+    SimJoystickOverlay.hide()
+    try {
+      val context = BlankContext()
+      SimJoystickOverlay.buttons.forEach { SimJoystickOverlay.tap(context, it) }
+      assertEquals(10, received.size)
+      SimJoystickOverlay.buttons.forEachIndexed { index, button ->
+        assertEquals(button.event, received[index].first)
+        assertEquals(button.intValue, received[index].second)
+      }
+      assertEquals(null, received.first { it.first == "PAUSE" }.second)
+      assertEquals(null, received.first { it.first == "RESUME" }.second)
+      SimJoystickOverlay.sender = SimBroadcastSender { _, _, _ ->
+        throw IllegalStateException("boom")
+      }
+      SimJoystickOverlay.tap(context, SimJoystickOverlay.buttons.first())
+    } finally {
+      SimJoystickOverlay.hide()
+      SimJoystickOverlay.sender = previousSender
+      SimJoystickOverlay.windowHost = previousHost
+    }
+  }
+
+  @Test
+  fun joystickShowHideIsIdempotent() {
+    val previousSender = SimJoystickOverlay.sender
+    val previousHost = SimJoystickOverlay.windowHost
+    var showCount = 0
+    var hideCount = 0
+    installIdleJoystick()
+    SimJoystickOverlay.windowHost = object : JoystickWindowHost {
+      override fun show(
+        context: android.content.Context,
+        buttons: List<JoystickButton>,
+        onTap: (android.content.Context, JoystickButton) -> Unit,
+      ): Boolean {
+        showCount++
+        return true
+      }
+
+      override fun hide() {
+        hideCount++
+      }
+    }
+    SimJoystickOverlay.hide()
+    try {
+      val context = BlankContext()
+      SimJoystickOverlay.show(context)
+      SimJoystickOverlay.show(context)
+      assertEquals(1, showCount)
+      assertTrue(SimJoystickOverlay.isShown)
+      SimJoystickOverlay.hide()
+      assertEquals(1, hideCount)
+      assertFalse(SimJoystickOverlay.isShown)
+      SimJoystickOverlay.hide()
+      assertEquals(1, hideCount)
+      SimJoystickOverlay.show(context)
+      assertEquals(2, showCount)
+      assertTrue(SimJoystickOverlay.isShown)
+    } finally {
+      SimJoystickOverlay.hide()
+      SimJoystickOverlay.sender = previousSender
+      SimJoystickOverlay.windowHost = previousHost
+    }
+  }
+
+  @Test
+  fun joystickShowFailureRetriesOnNextShow() {
+    val previousSender = SimJoystickOverlay.sender
+    val previousHost = SimJoystickOverlay.windowHost
+    var mode = "throw"
+    installIdleJoystick()
+    SimJoystickOverlay.windowHost = object : JoystickWindowHost {
+      override fun show(
+        context: android.content.Context,
+        buttons: List<JoystickButton>,
+        onTap: (android.content.Context, JoystickButton) -> Unit,
+      ): Boolean {
+        if (mode == "throw") throw IllegalStateException("show")
+        return mode == "ok"
+      }
+
+      override fun hide() {}
+    }
+    SimJoystickOverlay.hide()
+    try {
+      val context = BlankContext()
+      SimJoystickOverlay.show(context)
+      assertFalse(SimJoystickOverlay.isShown)
+      mode = "false"
+      SimJoystickOverlay.show(context)
+      assertFalse(SimJoystickOverlay.isShown)
+      mode = "ok"
+      SimJoystickOverlay.show(context)
+      assertTrue(SimJoystickOverlay.isShown)
+    } finally {
+      SimJoystickOverlay.hide()
+      SimJoystickOverlay.sender = previousSender
+      SimJoystickOverlay.windowHost = previousHost
+    }
+  }
+
+  @Test
+  fun joystickFollowsBindingsAttachClearDetach() {
+    val previousSender = SimJoystickOverlay.sender
+    val previousHost = SimJoystickOverlay.windowHost
+    val previousRegistrar = SimEventReceiver.registrar
+    installIdleJoystick()
+    SimJoystickOverlay.windowHost = object : JoystickWindowHost {
+      override fun show(
+        context: android.content.Context,
+        buttons: List<JoystickButton>,
+        onTap: (android.content.Context, JoystickButton) -> Unit,
+      ): Boolean = true
+
+      override fun hide() {}
+    }
+    SimJoystickOverlay.hide()
+    SimEventReceiver.registrar = SimEventReceiver.Companion.ReceiverRegistrar { _, _, _, _ -> }
+    val registered = Bindings::class.java.getDeclaredField("receiverRegistered")
+    registered.isAccessible = true
+    val previousRegistered = registered.getBoolean(null)
+    registered.setBoolean(null, true)
+    val service = FloatingBubbleService(FakeClock().delayMs)
+    try {
+      service.startInForeground(StartupEntry.A_2, recordAudioGranted = false)
+      service.reportFgsStarted()
+      assertTrue(SimJoystickOverlay.isShown)
+      Bindings.clearPorts()
+      assertFalse(SimJoystickOverlay.isShown)
+      Bindings.attachService(service)
+      assertTrue(SimJoystickOverlay.isShown)
+      Bindings.detachService(service)
+      assertFalse(SimJoystickOverlay.isShown)
+    } finally {
+      SimJoystickOverlay.hide()
+      SimJoystickOverlay.sender = previousSender
+      SimJoystickOverlay.windowHost = previousHost
+      SimEventReceiver.registrar = previousRegistrar
+      registered.setBoolean(null, previousRegistered)
+      Bindings.detachService(service)
+    }
+  }
+
+  private fun installIdleJoystick() {
+    SimJoystickOverlay.sender = SimBroadcastSender { _, _, _ -> }
+    SimJoystickOverlay.windowHost = object : JoystickWindowHost {
+      override fun show(
+        context: android.content.Context,
+        buttons: List<JoystickButton>,
+        onTap: (android.content.Context, JoystickButton) -> Unit,
+      ): Boolean = true
+
+      override fun hide() {}
+    }
   }
 
   private fun openService(clock: FakeClock): FloatingBubbleService {
