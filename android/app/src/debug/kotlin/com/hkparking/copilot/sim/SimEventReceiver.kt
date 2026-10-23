@@ -10,6 +10,7 @@ class SimEventReceiver(
     event: String?,
     intValue: Int? = null,
     stringValue: String? = null,
+    context: android.content.Context? = null,
   ): Boolean {
     runCatching {
       android.util.Log.i(
@@ -18,7 +19,7 @@ class SimEventReceiver(
       )
     }
     val handled = when (event) {
-      START_TRIP -> startTrip(stringValue)
+      START_TRIP -> startTrip(stringValue, context)
       PAUSE -> {
         Bindings.locationSource.pause()
         true
@@ -85,14 +86,12 @@ class SimEventReceiver(
     if (intent?.action != ACTION_SIM_EVENT) return
     val event = intent.getStringExtra(EXTRA_EVENT)
     val raw = intent.extras?.get(EXTRA_VALUE)
-    dispatchEvent(event, raw as? Int, raw as? String)
+    dispatchEvent(event, raw as? Int, raw as? String, context)
   }
 
-  private fun startTrip(stringValue: String?): Boolean {
+  private fun startTrip(stringValue: String?, context: android.content.Context?): Boolean {
     val destinationName = stringValue?.trim()?.takeIf { it.isNotEmpty() } ?: DEFAULT_DESTINATION
-    Bindings.locationSource.start()
-    Bindings.voiceInput.startListening(hotword = true)
-    return Bindings.lockOrStartTrip(destinationName)
+    return Bindings.lockOrStartTrip(destinationName, context)
   }
 
   private fun setDistance(event: String, intValue: Int?, stringValue: String?): Boolean {

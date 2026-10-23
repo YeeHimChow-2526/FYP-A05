@@ -1,8 +1,6 @@
 package com.hkparking.copilot.di
 
-import com.hkparking.copilot.FgsBootstrapActivity
 import com.hkparking.copilot.NativeConfig
-import com.hkparking.copilot.PermissionCheckInput
 import com.hkparking.copilot.StartupEntry
 import com.hkparking.copilot.net.ApiTransport
 import com.hkparking.copilot.net.HttpResult
@@ -347,14 +345,25 @@ class FixtureNetworkStatus : com.hkparking.copilot.di.NetworkStatusProvider {
   override fun isOnline(): Boolean = online
 }
 
+fun interface FgsStarter {
+  fun start(context: android.content.Context?): Boolean
+}
+
 object Bindings {
   val voiceInput: SimVoiceInput = SimVoiceInput()
   val locationSource: SimLocationSource = SimLocationSource()
   val apiTransport: FixtureApiTransport = FixtureApiTransport()
   val networkStatus: FixtureNetworkStatus = FixtureNetworkStatus()
   var activeReceiver: SimEventReceiver? = null
+  var pendingStartDestination: String? = null
+  var fgsStarter: FgsStarter = FgsStarter { context ->
+    if (context == null) return@FgsStarter false
+    val intent = android.content.Intent(context, com.hkparking.copilot.FloatingBubbleService::class.java)
+    intent.putExtra(com.hkparking.copilot.FloatingBubbleService.EXTRA_ENTRY, StartupEntry.A_2.name)
+    context.startForegroundService(intent)
+    true
+  }
   private var activeService: com.hkparking.copilot.FloatingBubbleService? = null
-  private var retainedHost: com.hkparking.copilot.FloatingBubbleService? = null
   private var receiverRegistered = false
   var capabilityCheckTimedOut: Boolean = false
     private set
@@ -371,7 +380,6 @@ object Bindings {
 
   fun attachService(service: com.hkparking.copilot.FloatingBubbleService) {
     activeService = service
-    retainedHost = service
     capabilityCheckTimedOut = false
     todayTripsCleared = false
     pendingDriverConfirm = false
@@ -391,7 +399,10 @@ object Bindings {
     }
     if (activeReceiver == null) {
       activeReceiver = SimEventReceiver(
-        onEventHandled = { (activeService ?: retainedHost)?.updateCapsuleVisual() },
+        onEventHandled = {
+          val current = activeService
+          if (current != null) current.updateCapsuleVisual()
+        },
       )
     }
     if (!receiverRegistered) {
@@ -403,6 +414,13 @@ object Bindings {
         if (registered) receiverRegistered = true
       }
     }
+    if (service.isFgsRunning) {
+      val name = pendingStartDestination
+      if (name != null) {
+        pendingStartDestination = null
+        service.lockDestination(name)
+      }
+    }
     service.updateCapsuleVisual()
   }
 
@@ -412,22 +430,42 @@ object Bindings {
     voiceInput.setSimControlListener(null)
   }
 
-  fun lockOrStartTrip(destinationName: String): Boolean {
-    val host = activeService ?: retainedHost ?: return false
-    if (!host.isFgsRunning) {
-      locationSource.resetDistance()
-      val handshake = FgsBootstrapActivity(host) { 0L }
-      val launched = handshake.launchFromEntry(
-        StartupEntry.A_2,
-        PermissionCheckInput(recordAudioGranted = false),
-      )
-      if (!launched) return false
-      host.reportFgsStarted()
-      if (!host.isFgsRunning || !handshake.fgsStartedReceived) return false
+  fun lockOrStartTrip(
+    destinationName: String,
+    context: android.content.Context? = null,
+  ): Boolean {
+    val host = activeService
+    if (host != null && host.isFgsRunning) {
+      locationSource.start()
+      voiceInput.startListening(hotword = true)
+      host.lockDestination(destinationName)
+      return host.tripStateMachine.destinationLocked &&
+        host.tripStateMachine.destinationName == destinationName
     }
-    host.lockDestination(destinationName)
-    return host.tripStateMachine.destinationLocked &&
-      host.tripStateMachine.destinationName == destinationName
+    locationSource.resetDistance()
+    locationSource.start()
+    voiceInput.startListening(hotword = true)
+    pendingStartDestination = destinationName
+    val started = try {
+      fgsStarter.start(context)
+    } catch (e: IllegalStateException) {
+      pendingStartDestination = null
+      runCatching {
+        android.util.Log.i(
+          "SimEventReceiver",
+          "START_TRIP rejected reason=${e::class.java.simpleName}",
+        )
+      }
+      return false
+    }
+    if (!started) {
+      pendingStartDestination = null
+      runCatching {
+        android.util.Log.i("SimEventReceiver", "START_TRIP rejected reason=starter_false")
+      }
+      return false
+    }
+    return true
   }
 
   private fun dispatchSim(

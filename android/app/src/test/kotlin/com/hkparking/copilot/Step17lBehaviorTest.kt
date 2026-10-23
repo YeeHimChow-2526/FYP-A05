@@ -5,6 +5,7 @@ import com.hkparking.copilot.net.QueryTriggerMode
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -12,6 +13,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class Step17lBehaviorTest {
+  @After
+  fun restoreStarter() {
+    Bindings.fgsStarter = defaultFgsStarter
+    Bindings.pendingStartDestination = null
+  }
+
+  companion object {
+    private val defaultFgsStarter = Bindings.fgsStarter
+  }
   @Test
   fun startTripLocksNamedDestinationAndJitFiresOnTriggerEdgeOnly() {
     val service = openService()
@@ -153,8 +163,10 @@ class Step17lBehaviorTest {
     assertFalse(service.tripStateMachine.networkDegraded)
 
     assertTrue(receiver.dispatchEvent("NETWORK_FAIL"))
+    val beforeMutedFail = Bindings.apiTransport.postCount
     assertTrue(receiver.dispatchEvent("INJECT_UTTERANCE", stringValue = "搵位"))
-    clock.advance(NativeConfig.API_TIMEOUT_MS)
+    exhaustRetries(clock, beforeMutedFail + NativeConfig.API_MAX_ATTEMPTS)
+    assertEquals(beforeMutedFail + NativeConfig.API_MAX_ATTEMPTS, Bindings.apiTransport.postCount)
     assertEquals(TripState.APPROACH_MUTED, service.tripStateMachine.state)
     assertTrue(service.tripStateMachine.networkDegraded)
     Bindings.detachService(service)
@@ -192,37 +204,117 @@ class Step17lBehaviorTest {
   }
 
   @Test
-  fun startTripAfterEngineShutdownOpensNewSessionThroughExistingHandshake() {
+  fun startTripAfterEngineShutdownStartsNewFgsViaPendingDestination() {
     val clock = StepClock()
     val service = openService(clock)
     val receiver = Bindings.activeReceiver!!
+    var starts = 0
+    Bindings.fgsStarter = com.hkparking.copilot.di.FgsStarter {
+      starts += 1
+      true
+    }
     assertTrue(receiver.dispatchEvent("START_TRIP", stringValue = "朗豪坊"))
+    assertEquals(0, starts)
     val firstSession = service.tripStateMachine.sessionId
+    assertTrue(receiver.dispatchEvent("SET_DISTANCE_M", intValue = 0))
     assertTrue(receiver.dispatchEvent("ENGINE_SHUTDOWN", intValue = 1))
     clock.advance(NativeConfig.TEARDOWN_FADE_MS.toLong())
     assertFalse(service.isFgsRunning)
     Bindings.detachService(service)
     assertTrue(Bindings.activeReceiver === receiver)
+    val beforeRestart = snapshot(service)
     assertTrue(receiver.dispatchEvent("START_TRIP", stringValue = "朗豪坊"))
+    assertEquals(1, starts)
+    assertEquals(beforeRestart, snapshot(service))
+    assertEquals("朗豪坊", Bindings.pendingStartDestination)
+
+    val restarted = FloatingBubbleService(clock.delayMs)
+    restarted.startInForeground(StartupEntry.A_2, recordAudioGranted = false)
+    restarted.reportFgsStarted()
+    assertEquals("朗豪坊", restarted.tripStateMachine.destinationName)
+    assertTrue(restarted.tripStateMachine.destinationLocked)
+    assertNotEquals(firstSession, restarted.tripStateMachine.sessionId)
+    assertTrue(restarted.tripStateMachine.sessionId!!.isNotBlank())
+    assertEquals(null, Bindings.pendingStartDestination)
+    assertFalse(restarted.tripStateMachine.jitTriggered)
+    assertTrue(restarted.launchedRecommendModes.isEmpty())
+    val beforeNear = Bindings.apiTransport.postCount
+    assertTrue(receiver.dispatchEvent("SET_DISTANCE_M", intValue = 1000))
+    assertTrue(restarted.tripStateMachine.jitTriggered)
+    assertEquals(1, Bindings.apiTransport.postCount - beforeNear)
+    assertEquals(listOf(QueryTriggerMode.BACKGROUND_PREFETCH), restarted.launchedRecommendModes.toList())
+    Bindings.detachService(restarted)
+  }
+
+  @Test
+  fun startTripRejectedWhenStarterThrowsOrReturnsFalse() {
+    val clock = StepClock()
+    val service = openService(clock)
+    val receiver = Bindings.activeReceiver!!
+    assertTrue(receiver.dispatchEvent("START_TRIP", stringValue = "朗豪坊"))
+    assertTrue(receiver.dispatchEvent("ENGINE_SHUTDOWN", intValue = 1))
+    clock.advance(NativeConfig.TEARDOWN_FADE_MS.toLong())
+    Bindings.detachService(service)
+    val before = snapshot(service)
+
+    Bindings.fgsStarter = com.hkparking.copilot.di.FgsStarter {
+      throw IllegalStateException("blocked")
+    }
+    assertFalse(receiver.dispatchEvent("START_TRIP", stringValue = "朗豪坊"))
+    assertEquals(null, Bindings.pendingStartDestination)
+    assertEquals(before, snapshot(service))
+
+    Bindings.fgsStarter = com.hkparking.copilot.di.FgsStarter { false }
+    assertFalse(receiver.dispatchEvent("START_TRIP", stringValue = "朗豪坊"))
+    assertEquals(null, Bindings.pendingStartDestination)
+    assertEquals(before, snapshot(service))
+  }
+
+  @Test
+  fun startTripWhileFgsRunningLocksWithoutCallingStarter() {
+    val service = openService()
+    val receiver = Bindings.activeReceiver!!
+    var starts = 0
+    Bindings.fgsStarter = com.hkparking.copilot.di.FgsStarter {
+      starts += 1
+      true
+    }
     assertTrue(service.isFgsRunning)
-    assertNotEquals(firstSession, service.tripStateMachine.sessionId)
-    assertTrue(service.tripStateMachine.sessionId!!.isNotBlank())
+    assertTrue(receiver.dispatchEvent("START_TRIP", stringValue = "朗豪坊"))
+    assertEquals(0, starts)
     assertEquals("朗豪坊", service.tripStateMachine.destinationName)
     assertTrue(service.tripStateMachine.destinationLocked)
     Bindings.detachService(service)
   }
 
-  private fun exhaustRetries(clock: StepClock) {
+  private fun exhaustRetries(clock: StepClock, requiredPosts: Int = NativeConfig.API_MAX_ATTEMPTS) {
     clock.advance(NativeConfig.API_TIMEOUT_MS)
     var guard = 0
-    while (Bindings.apiTransport.postCount < NativeConfig.API_MAX_ATTEMPTS && guard < 20) {
+    while (Bindings.apiTransport.postCount < requiredPosts && guard < 20) {
       clock.advance(NativeConfig.API_RETRY_INTERVAL_MS)
       clock.advance(NativeConfig.API_TIMEOUT_MS)
       guard += 1
     }
   }
 
+  private fun snapshot(service: FloatingBubbleService): String {
+    val machine = service.tripStateMachine
+    return listOf(
+      service.isFgsRunning,
+      machine.state,
+      machine.sessionId,
+      machine.destinationName,
+      machine.destinationLocked,
+      machine.jitTriggered,
+      machine.networkDegraded,
+      service.launchedRecommendModes.toList(),
+      service.capsuleSnapshot,
+    ).joinToString("|")
+  }
+
   private fun openService(clock: StepClock = StepClock()): FloatingBubbleService {
+    Bindings.fgsStarter = defaultFgsStarter
+    Bindings.pendingStartDestination = null
     Bindings.locationSource.reset()
     Bindings.apiTransport.reset()
     Bindings.voiceInput.stopListening()

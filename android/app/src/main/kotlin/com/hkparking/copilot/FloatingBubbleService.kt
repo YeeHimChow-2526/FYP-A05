@@ -143,8 +143,8 @@ class FloatingBubbleService : android.app.Service {
 
   private var hasPendingFgsStart: Boolean = false
   private var speechHeard: Boolean = false
-  val launchedRecommendModes = mutableListOf<QueryTriggerMode>()
-  var capsuleSnapshot: String = ""
+  internal val launchedRecommendModes = mutableListOf<QueryTriggerMode>()
+  internal var capsuleSnapshot: String = ""
     private set
   private var lastDistanceMeters: Int = 0
   private var hasDistanceFix: Boolean = false
@@ -175,6 +175,7 @@ class FloatingBubbleService : android.app.Service {
     initialDistanceMeters: Int? = null,
     onFgsStarted: () -> Unit = {},
   ) {
+    launchedRecommendModes.clear()
     if (!isFgsRunning) {
       lastDistanceMeters = 0
       hasDistanceFix = false
