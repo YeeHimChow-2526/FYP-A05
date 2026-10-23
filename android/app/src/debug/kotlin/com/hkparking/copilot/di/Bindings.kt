@@ -558,7 +558,16 @@ object Bindings {
           ),
         ),
       )
-      "FGS_START_TIMEOUT" -> if (!service.isFgsRunning) service.onBootstrapTimedOut()
+      "FGS_START_TIMEOUT" -> if (!service.isFgsRunning) {
+        val routed = com.hkparking.copilot.FloatingBubbleService.fireBootstrapTimeout()
+        service.onBootstrapTimedOut()
+        runCatching {
+          android.util.Log.i(
+            "SimEventReceiver",
+            "FGS_START_TIMEOUT route=${if (routed > 0) "activity" else "service_only"}",
+          )
+        }
+      }
       "BUBBLE_TAP" -> service.onActiveBubbleTap()
       "TRIE_MISS_RESOLVE_OK" -> {
         val name = stringValue?.takeIf { it.isNotBlank() } ?: service.tripStateMachine.destinationName ?: "朗豪坊"

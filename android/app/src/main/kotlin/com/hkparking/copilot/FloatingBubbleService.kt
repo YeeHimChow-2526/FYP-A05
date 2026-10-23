@@ -706,6 +706,7 @@ class FloatingBubbleService : android.app.Service {
     const val CAPSULE_MARK = "P"
     const val NOTIFICATION_ID = 1
     private val fgsStartedListeners = mutableListOf<(FloatingBubbleService) -> Unit>()
+    private val bootstrapTimeoutListeners = mutableListOf<() -> Unit>()
 
     fun addFgsStartedListener(listener: (FloatingBubbleService) -> Unit) {
       synchronized(fgsStartedListeners) { fgsStartedListeners += listener }
@@ -713,6 +714,20 @@ class FloatingBubbleService : android.app.Service {
 
     fun removeFgsStartedListener(listener: (FloatingBubbleService) -> Unit) {
       synchronized(fgsStartedListeners) { fgsStartedListeners -= listener }
+    }
+
+    internal fun addBootstrapTimeoutListener(listener: () -> Unit) {
+      synchronized(bootstrapTimeoutListeners) { bootstrapTimeoutListeners += listener }
+    }
+
+    internal fun removeBootstrapTimeoutListener(listener: () -> Unit) {
+      synchronized(bootstrapTimeoutListeners) { bootstrapTimeoutListeners -= listener }
+    }
+
+    internal fun fireBootstrapTimeout(): Int {
+      val snapshot = synchronized(bootstrapTimeoutListeners) { bootstrapTimeoutListeners.toList() }
+      snapshot.forEach { it() }
+      return snapshot.size
     }
 
     fun dispatchFgsStarted(service: FloatingBubbleService) {

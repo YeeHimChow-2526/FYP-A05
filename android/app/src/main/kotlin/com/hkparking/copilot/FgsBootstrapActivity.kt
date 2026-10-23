@@ -60,6 +60,7 @@ class FgsBootstrapActivity : android.app.Activity {
   private var timeoutHandler: android.os.Handler? = null
   private var timeoutRunnable: Runnable? = null
   private var fgsStartedListener: ((FloatingBubbleService) -> Unit)? = null
+  private var bootstrapTimeoutListener: (() -> Unit)? = null
 
   constructor() : super() {
     service = null
@@ -97,14 +98,19 @@ class FgsBootstrapActivity : android.app.Activity {
     }
     fgsStartedListener = listener
     FloatingBubbleService.addFgsStartedListener(listener)
+    val timeoutListener: () -> Unit = {
+      if (markBootstrapTimedOut()) {
+        timeoutRunnable?.let { runnable -> timeoutHandler?.removeCallbacks(runnable) }
+        clearHandshake()
+        finish()
+      }
+    }
+    bootstrapTimeoutListener = timeoutListener
+    FloatingBubbleService.addBootstrapTimeoutListener(timeoutListener)
     val handler = android.os.Handler(android.os.Looper.getMainLooper())
     timeoutHandler = handler
     val timeout = Runnable {
-      if (!fgsStartedReceived) {
-        bootstrapTimedOut = true
-        failureReason = FGS_BOOTSTRAP_TIMEOUT
-        isFinished = true
-        service?.onBootstrapTimedOut()
+      if (markBootstrapTimedOut()) {
         clearHandshake()
         finish()
       }
@@ -158,8 +164,15 @@ class FgsBootstrapActivity : android.app.Activity {
           fgsStartedReceived = true
           isFinished = true
         }
+        clearHandshake()
       },
     )
+    val timeoutListener: () -> Unit = {
+      markBootstrapTimedOut()
+      clearHandshake()
+    }
+    bootstrapTimeoutListener = timeoutListener
+    FloatingBubbleService.addBootstrapTimeoutListener(timeoutListener)
     return true
   }
 
@@ -167,11 +180,18 @@ class FgsBootstrapActivity : android.app.Activity {
     if (fgsStartedReceived || lastPermissionGate?.allowedToStartFgs == false) return
     val elapsed = clockMs() - launchStartedAtMs
     if (!fgsStartedReceived && elapsed >= NativeConfig.FGS_BOOTSTRAP_TIMEOUT_MS) {
-      bootstrapTimedOut = true
-      failureReason = FGS_BOOTSTRAP_TIMEOUT
-      isFinished = true
-      service?.onBootstrapTimedOut()
+      markBootstrapTimedOut()
+      clearHandshake()
     }
+  }
+
+  private fun markBootstrapTimedOut(): Boolean {
+    if (fgsStartedReceived || bootstrapTimedOut) return false
+    bootstrapTimedOut = true
+    failureReason = FGS_BOOTSTRAP_TIMEOUT
+    isFinished = true
+    service?.onBootstrapTimedOut()
+    return true
   }
 
   private fun readEntry(): StartupEntry {
@@ -225,6 +245,8 @@ class FgsBootstrapActivity : android.app.Activity {
   private fun clearHandshake() {
     fgsStartedListener?.let { FloatingBubbleService.removeFgsStartedListener(it) }
     fgsStartedListener = null
+    bootstrapTimeoutListener?.let { FloatingBubbleService.removeBootstrapTimeoutListener(it) }
+    bootstrapTimeoutListener = null
   }
 
   companion object {

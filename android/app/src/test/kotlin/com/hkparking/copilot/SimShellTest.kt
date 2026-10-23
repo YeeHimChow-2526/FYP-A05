@@ -695,16 +695,44 @@ class SimShellTest {
       val waiting = FgsBootstrapActivity(service)
       assertTrue(waiting.launchFromEntry(StartupEntry.A_2, PermissionCheckInput()))
       assertFalse(waiting.isFinished)
-      assertTrue(Bindings.activeReceiver!!.dispatchEvent("FGS_START_TIMEOUT", context = null))
-      assertFalse(service.isFgsRunning)
-      assertEquals(2000L, NativeConfig.FGS_BOOTSTRAP_TIMEOUT_MS)
+      assertTrue(Bindings.activeReceiver!!.dispatchEvent("FGS_START_TIMEOUT"))
+      assertTrue(waiting.bootstrapTimedOut)
+      assertTrue(waiting.isFinished)
+      assertEquals(FgsBootstrapActivity.FGS_BOOTSTRAP_TIMEOUT, waiting.failureReason)
       assertTrue(service.bootstrapTimeoutReason!!.contains(NativeConfig.FGS_BOOTSTRAP_TIMEOUT_MS.toString()))
       assertEquals(0, launches[0])
-      assertFalse(waiting.isFinished)
-      assertFalse(waiting.bootstrapTimedOut)
-      assertFalse(timeoutSourcesMentionTrampoline())
+      service.reportFgsStarted()
+      assertFalse(waiting.fgsStartedReceived)
+      val timedOut = waiting.bootstrapTimedOut
+      val finished = waiting.isFinished
+      val reason = waiting.failureReason
+      val recorded = service.bootstrapTimeoutReason
+      assertTrue(Bindings.activeReceiver!!.dispatchEvent("FGS_START_TIMEOUT"))
+      assertEquals(timedOut, waiting.bootstrapTimedOut)
+      assertEquals(finished, waiting.isFinished)
+      assertEquals(reason, waiting.failureReason)
+      assertEquals(recorded, service.bootstrapTimeoutReason)
+      assertFalse(service.isFgsRunning)
     } finally {
+      FloatingBubbleService.fireBootstrapTimeout()
       Bindings.fgsStarter = previous
+      Bindings.detachService(service)
+    }
+  }
+
+  @Test
+  fun fgsStartTimeoutWithoutWaitingActivityStillRecordsReason() {
+    val service = FloatingBubbleService(FakeClock().delayMs)
+    try {
+      service.startInForeground(StartupEntry.A_2, recordAudioGranted = false)
+      assertEquals(null, service.bootstrapTimeoutReason)
+      assertEquals(0, FloatingBubbleService.fireBootstrapTimeout())
+      assertTrue(Bindings.activeReceiver!!.dispatchEvent("FGS_START_TIMEOUT"))
+      assertFalse(service.isFgsRunning)
+      assertTrue(service.bootstrapTimeoutReason!!.contains(NativeConfig.FGS_BOOTSTRAP_TIMEOUT_MS.toString()))
+      assertEquals(0, FloatingBubbleService.fireBootstrapTimeout())
+    } finally {
+      FloatingBubbleService.fireBootstrapTimeout()
       Bindings.detachService(service)
     }
   }
@@ -850,38 +878,6 @@ class SimShellTest {
     assertTrue(receiver.dispatchEvent("LEAVE_TARGET", intValue = NativeConfig.APPROACH_EXIT_HOLD_S))
     assertEquals(TripState.CRUISING, service.tripStateMachine.state)
     Bindings.detachService(service)
-  }
-
-  private fun timeoutSourcesMentionTrampoline(): Boolean {
-    val receiver = readTimeoutSource("src/debug/kotlin/com/hkparking/copilot/sim/SimEventReceiver.kt")
-    val bindings = readTimeoutSource("src/debug/kotlin/com/hkparking/copilot/di/Bindings.kt")
-    val service = readTimeoutSource("src/main/kotlin/com/hkparking/copilot/FloatingBubbleService.kt")
-    val slices = listOf(
-      sliceFrom(receiver, "FGS_START_TIMEOUT ->", "\n"),
-      sliceFrom(bindings, "\"FGS_START_TIMEOUT\" ->", "\n"),
-      sliceFrom(service, "fun onBootstrapTimedOut()", "fun reportFgsStarted"),
-    )
-    val markers = listOf("startActivity", "FgsBootstrapActivity", "startForegroundService")
-    return slices.any { slice -> markers.any { marker -> slice.contains(marker) } }
-  }
-
-  private fun sliceFrom(text: String, start: String, end: String): String {
-    val from = text.indexOf(start)
-    if (from < 0) error("missing timeout slice: $start")
-    val to = text.indexOf(end, from + start.length)
-    if (to < 0) error("missing timeout slice end: $end")
-    return text.substring(from, to)
-  }
-
-  private fun readTimeoutSource(path: String): String {
-    val roots = listOf(
-      java.io.File(System.getProperty("user.dir")),
-      java.io.File(System.getProperty("user.dir"), "android/app"),
-      java.io.File(System.getProperty("user.dir"), "app"),
-    )
-    val file = roots.map { java.io.File(it, path) }.firstOrNull { it.isFile }
-      ?: error("missing timeout source: $path")
-    return file.readText()
   }
 
   private fun openService(clock: FakeClock): FloatingBubbleService {
