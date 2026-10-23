@@ -882,10 +882,9 @@ class SimShellTest {
   }
 
   @Test
-  fun simEventReceiverRegistersExportedActionOnceAndRestoresRegistrar() {
+  fun simEventReceiverRegistersExportedActionViaRegistrar() {
     val previous = SimEventReceiver.registrar
     val calls = mutableListOf<Pair<String, Int>>()
-    SimEventReceiver.resetRegistrationState()
     SimEventReceiver.registrar = SimEventReceiver.Companion.ReceiverRegistrar { _, _, action, flags ->
       calls += action to flags
     }
@@ -893,14 +892,11 @@ class SimShellTest {
       val context = BlankContext()
       val receiver = SimEventReceiver()
       SimEventReceiver.register(context, receiver)
-      SimEventReceiver.register(context, receiver)
       assertEquals(1, calls.size)
-      assertEquals(SimEventReceiver.ACTION_SIM_EVENT, calls[0].first)
       assertEquals("com.hkparking.copilot.SIM_EVENT", calls[0].first)
       assertEquals(ContextCompat.RECEIVER_EXPORTED, calls[0].second)
     } finally {
       SimEventReceiver.registrar = previous
-      SimEventReceiver.resetRegistrationState()
     }
     assertTrue(SimEventReceiver.registrar === previous)
   }

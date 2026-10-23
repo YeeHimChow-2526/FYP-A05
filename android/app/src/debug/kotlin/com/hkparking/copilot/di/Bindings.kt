@@ -409,10 +409,17 @@ object Bindings {
     if (!receiverRegistered) {
       val appContext = runCatching { service.applicationContext }.getOrNull()
       if (appContext != null && activeReceiver != null) {
-        val registered = runCatching {
-          SimEventReceiver.register(appContext, activeReceiver!!)
-        }.isSuccess
-        if (registered) receiverRegistered = true
+        val result = runCatching { SimEventReceiver.register(appContext, activeReceiver!!) }
+        if (result.isSuccess) {
+          receiverRegistered = true
+        } else {
+          runCatching {
+            android.util.Log.w(
+              "SimEventReceiver",
+              "register failed reason=${result.exceptionOrNull()?.javaClass?.simpleName}",
+            )
+          }
+        }
       }
     }
     if (service.isFgsRunning) {

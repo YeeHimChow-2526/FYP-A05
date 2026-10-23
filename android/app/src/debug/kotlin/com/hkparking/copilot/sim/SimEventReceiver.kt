@@ -281,16 +281,8 @@ class SimEventReceiver(
       ContextCompat.registerReceiver(context, receiver, filter, flags)
     }
 
-    private var registered = false
-
     fun register(context: android.content.Context, receiver: SimEventReceiver) {
-      if (registered) return
       registrar.register(context, receiver, ACTION_SIM_EVENT, ContextCompat.RECEIVER_EXPORTED)
-      registered = true
-    }
-
-    internal fun resetRegistrationState() {
-      registered = false
     }
   }
 }
