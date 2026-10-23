@@ -363,7 +363,8 @@ object Bindings {
     context.startForegroundService(intent)
     true
   }
-  private var activeService: com.hkparking.copilot.FloatingBubbleService? = null
+  internal var activeService: com.hkparking.copilot.FloatingBubbleService? = null
+    private set
   private var receiverRegistered = false
   var capabilityCheckTimedOut: Boolean = false
     private set
@@ -430,6 +431,16 @@ object Bindings {
     voiceInput.setSimControlListener(null)
   }
 
+  fun clearPorts() {
+    locationSource.setLocationListener(null)
+    locationSource.setMotionListener(null)
+    voiceInput.setUtteranceListener(null)
+  }
+
+  fun clearPendingStart() {
+    pendingStartDestination = null
+  }
+
   fun lockOrStartTrip(
     destinationName: String,
     context: android.content.Context? = null,
@@ -465,7 +476,16 @@ object Bindings {
       }
       return false
     }
-    return true
+    if (host == null || activeService !== host) return true
+    host.restartTripFromEntry(StartupEntry.A_2)
+    if (host.isFgsRunning && host.tripStateMachine.destinationLocked) return true
+    if (pendingStartDestination != null) {
+      pendingStartDestination = null
+      runCatching {
+        android.util.Log.i("SimEventReceiver", "START_TRIP rejected reason=start_not_delivered")
+      }
+    }
+    return false
   }
 
   private fun dispatchSim(

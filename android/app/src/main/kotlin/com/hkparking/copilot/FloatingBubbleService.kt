@@ -83,8 +83,15 @@ class FloatingBubbleService : android.app.Service {
     val entryName = intent?.getStringExtra(EXTRA_ENTRY)
     val entry = entryName?.let { runCatching { StartupEntry.valueOf(it) }.getOrNull() } ?: StartupEntry.A_1
     val hotwordEnabled = intent?.getBooleanExtra(EXTRA_HOTWORD, true) ?: true
-    val recordAudioGranted = checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
-      android.content.pm.PackageManager.PERMISSION_GRANTED
+    restartTripFromEntry(entry, hotwordEnabled)
+    return START_NOT_STICKY
+  }
+
+  internal fun restartTripFromEntry(entry: StartupEntry, hotwordEnabled: Boolean = true): Boolean {
+    val recordAudioGranted = runCatching {
+      checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
+        android.content.pm.PackageManager.PERMISSION_GRANTED
+    }.getOrDefault(false)
     startInForeground(
       entry = entry,
       recordAudioGranted = recordAudioGranted,
@@ -92,12 +99,16 @@ class FloatingBubbleService : android.app.Service {
     )
     if (!enterForeground()) {
       onBootstrapTimedOut()
-      return START_NOT_STICKY
+      com.hkparking.copilot.di.Bindings.clearPendingStart()
+      runCatching {
+        android.util.Log.i("SimEventReceiver", "START_TRIP rejected reason=enter_foreground_failed")
+      }
+      return false
     }
     reportFgsStarted()
     attachCapsuleWindow()
     updateCapsuleVisual()
-    return START_NOT_STICKY
+    return true
   }
 
   override fun onDestroy() {
@@ -151,7 +162,9 @@ class FloatingBubbleService : android.app.Service {
   private var pendingFgsStartedCallback: (() -> Unit)? = null
   private var pendingInitialDistanceMeters: Int? = null
   private var lastLoggedSnapshot: String? = null
-  private var portsWired: Boolean = false
+  internal var portsWired: Boolean = false
+    private set
+  internal var enterForegroundGate: (() -> Boolean)? = null
   private var voiceApplyEpoch: Int = 0
   private var ttsEngineReady: Boolean = false
   private val spokenDriverCues = mutableSetOf<String>()
@@ -242,6 +255,7 @@ class FloatingBubbleService : android.app.Service {
   }
 
   private fun enterForeground(): Boolean {
+    enterForegroundGate?.let { return it() }
     val posted = runCatching {
       val manager = getSystemService(android.app.NotificationManager::class.java) ?: return false
       val channel = android.app.NotificationChannel(
@@ -536,7 +550,7 @@ class FloatingBubbleService : android.app.Service {
 
   private fun attachCapsuleWindow() {
     if (capsuleView != null || !isFgsRunning) return
-    val wm = getSystemService(android.view.WindowManager::class.java) ?: return
+    val wm = runCatching { getSystemService(android.view.WindowManager::class.java) }.getOrNull() ?: return
     val view = android.widget.TextView(this).apply { text = CAPSULE_MARK }
     val params = android.view.WindowManager.LayoutParams(
       android.view.WindowManager.LayoutParams.WRAP_CONTENT,
@@ -652,13 +666,18 @@ class FloatingBubbleService : android.app.Service {
     isFgsRunning = false
     isMicActive = false
     isAudioRecordRunning = false
+    portsWired = false
+    com.hkparking.copilot.di.Bindings.clearPorts()
     runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+      .onFailure { e -> logInfo("stopForeground failed reason=${e::class.java.simpleName}") }
     runCatching { stopSelf() }
+      .onFailure { e -> logInfo("stopSelf failed reason=${e::class.java.simpleName}") }
+    logInfo("FGS stopped after teardown fade (${NativeConfig.TEARDOWN_FADE_MS}ms): reason=$reason")
+  }
+
+  private fun logInfo(message: String) {
     runCatching {
-      android.util.Log.i(
-        "FloatingBubbleService",
-        "FGS stopped after teardown fade (${NativeConfig.TEARDOWN_FADE_MS}ms): reason=$reason",
-      )
+      android.util.Log.i("FloatingBubbleService", message)
     }
   }
 

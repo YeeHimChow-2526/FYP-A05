@@ -271,6 +271,89 @@ class Step17lBehaviorTest {
   }
 
   @Test
+  fun engineShutdownLeavesServiceInstanceWithFgsFlagFalse() {
+    val clock = StepClock()
+    val service = openService(clock)
+    assertTrue(Bindings.activeReceiver!!.dispatchEvent("START_TRIP", stringValue = "朗豪坊"))
+    assertTrue(service.portsWired)
+    assertTrue(Bindings.activeReceiver!!.dispatchEvent("ENGINE_SHUTDOWN", intValue = 1))
+    clock.advance(NativeConfig.TEARDOWN_FADE_MS.toLong())
+    assertFalse(service.isFgsRunning)
+    assertFalse(service.portsWired)
+    assertTrue(Bindings.activeService === service)
+    assertEquals(null, Bindings.pendingStartDestination)
+  }
+
+  @Test
+  fun startTripOnLiveStoppedInstanceConsumesPendingWithoutNewObject() {
+    val clock = StepClock()
+    val service = openService(clock)
+    val receiver = Bindings.activeReceiver!!
+    assertTrue(receiver.dispatchEvent("START_TRIP", stringValue = "朗豪坊"))
+    val firstSession = service.tripStateMachine.sessionId
+    assertTrue(receiver.dispatchEvent("ENGINE_SHUTDOWN", intValue = 1))
+    clock.advance(NativeConfig.TEARDOWN_FADE_MS.toLong())
+    assertFalse(service.isFgsRunning)
+    assertTrue(Bindings.activeService === service)
+    service.enterForegroundGate = { true }
+    Bindings.fgsStarter = com.hkparking.copilot.di.FgsStarter { true }
+    assertTrue(receiver.dispatchEvent("START_TRIP", stringValue = "朗豪坊"))
+    assertTrue(service.isFgsRunning)
+    assertTrue(service.tripStateMachine.destinationLocked)
+    assertEquals("朗豪坊", service.tripStateMachine.destinationName)
+    assertNotEquals(firstSession, service.tripStateMachine.sessionId)
+    assertEquals(null, Bindings.pendingStartDestination)
+    assertTrue(service.launchedRecommendModes.isEmpty())
+    val before = Bindings.apiTransport.postCount
+    assertTrue(receiver.dispatchEvent("SET_DISTANCE_M", intValue = 1000))
+    assertEquals(1, Bindings.apiTransport.postCount - before)
+    assertEquals(listOf(QueryTriggerMode.BACKGROUND_PREFETCH), service.launchedRecommendModes.toList())
+    Bindings.detachService(service)
+  }
+
+  @Test
+  fun startForegroundServiceTrueButOnStartCommandSkippedDoesNotReportSuccess() {
+    val clock = StepClock()
+    val service = openService(clock)
+    val receiver = Bindings.activeReceiver!!
+    assertTrue(receiver.dispatchEvent("START_TRIP", stringValue = "朗豪坊"))
+    assertTrue(receiver.dispatchEvent("ENGINE_SHUTDOWN", intValue = 1))
+    clock.advance(NativeConfig.TEARDOWN_FADE_MS.toLong())
+    service.enterForegroundGate = { false }
+    Bindings.fgsStarter = com.hkparking.copilot.di.FgsStarter { true }
+    assertFalse(receiver.dispatchEvent("START_TRIP", stringValue = "朗豪坊"))
+    assertEquals(null, Bindings.pendingStartDestination)
+    assertFalse(service.tripStateMachine.destinationLocked)
+    Bindings.detachService(service)
+  }
+
+  @Test
+  fun reusedInstanceSecondOnStartCommandRewiresPorts() {
+    val clock = StepClock()
+    val service = openService(clock)
+    val receiver = Bindings.activeReceiver!!
+    assertTrue(receiver.dispatchEvent("START_TRIP", stringValue = "朗豪坊"))
+    val firstSession = service.tripStateMachine.sessionId
+    assertTrue(receiver.dispatchEvent("ENGINE_SHUTDOWN", intValue = 1))
+    clock.advance(NativeConfig.TEARDOWN_FADE_MS.toLong())
+    assertFalse(service.isFgsRunning)
+    assertFalse(service.portsWired)
+    Bindings.pendingStartDestination = "朗豪坊"
+    service.enterForegroundGate = { true }
+    service.onStartCommand(null, 0, 0)
+    assertTrue(service.portsWired)
+    assertEquals(null, Bindings.pendingStartDestination)
+    assertTrue(service.tripStateMachine.destinationLocked)
+    assertNotEquals(firstSession, service.tripStateMachine.sessionId)
+    assertTrue(service.capsuleSnapshot.contains("state=${TripState.CRUISING.name}") || service.capsuleSnapshot.contains("state=AMBER_STEADY"))
+    val before = Bindings.apiTransport.postCount
+    assertTrue(receiver.dispatchEvent("SET_DISTANCE_M", intValue = 1000))
+    assertEquals(1, Bindings.apiTransport.postCount - before)
+    assertEquals(listOf(QueryTriggerMode.BACKGROUND_PREFETCH), service.launchedRecommendModes.toList())
+    Bindings.detachService(service)
+  }
+
+  @Test
   fun startTripWhileFgsRunningLocksWithoutCallingStarter() {
     val service = openService()
     val receiver = Bindings.activeReceiver!!

@@ -30,4 +30,12 @@ object Bindings {
       networkStatus.context = null
     }
   }
+
+  fun clearPorts() {
+    voiceInput.setUtteranceListener(null)
+    locationSource.setLocationListener(null)
+    locationSource.setMotionListener(null)
+  }
+
+  fun clearPendingStart() {}
 }
