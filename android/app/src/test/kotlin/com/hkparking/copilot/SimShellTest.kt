@@ -1,5 +1,6 @@
 package com.hkparking.copilot
 
+import androidx.core.content.ContextCompat
 import com.hkparking.copilot.di.Bindings
 import com.hkparking.copilot.di.FgsStarter
 import com.hkparking.copilot.di.FixtureApiTransport
@@ -880,6 +881,30 @@ class SimShellTest {
     Bindings.detachService(service)
   }
 
+  @Test
+  fun simEventReceiverRegistersExportedActionOnceAndRestoresRegistrar() {
+    val previous = SimEventReceiver.registrar
+    val calls = mutableListOf<Pair<String, Int>>()
+    SimEventReceiver.resetRegistrationState()
+    SimEventReceiver.registrar = SimEventReceiver.Companion.ReceiverRegistrar { _, _, action, flags ->
+      calls += action to flags
+    }
+    try {
+      val context = BlankContext()
+      val receiver = SimEventReceiver()
+      SimEventReceiver.register(context, receiver)
+      SimEventReceiver.register(context, receiver)
+      assertEquals(1, calls.size)
+      assertEquals(SimEventReceiver.ACTION_SIM_EVENT, calls[0].first)
+      assertEquals("com.hkparking.copilot.SIM_EVENT", calls[0].first)
+      assertEquals(ContextCompat.RECEIVER_EXPORTED, calls[0].second)
+    } finally {
+      SimEventReceiver.registrar = previous
+      SimEventReceiver.resetRegistrationState()
+    }
+    assertTrue(SimEventReceiver.registrar === previous)
+  }
+
   private fun openService(clock: FakeClock): FloatingBubbleService {
     Bindings.locationSource.reset()
     Bindings.apiTransport.reset()
@@ -906,6 +931,112 @@ class SimShellTest {
     destName = "朗豪坊",
     preference = "SMART_HYBRID",
   )
+}
+
+private class BlankContext : android.content.Context() {
+  override fun bindService(p0: android.content.Intent, p1: android.content.ServiceConnection, p2: Int): Boolean = false
+  override fun checkCallingOrSelfPermission(p0: String): Int = 0
+  override fun checkCallingOrSelfUriPermission(p0: android.net.Uri?, p1: Int): Int = 0
+  override fun checkCallingPermission(p0: String): Int = 0
+  override fun checkCallingUriPermission(p0: android.net.Uri?, p1: Int): Int = 0
+  override fun checkPermission(p0: String, p1: Int, p2: Int): Int = 0
+  override fun checkSelfPermission(p0: String): Int = 0
+  override fun checkUriPermission(p0: android.net.Uri?, p1: Int, p2: Int, p3: Int): Int = 0
+  override fun checkUriPermission(p0: android.net.Uri?, p1: String?, p2: String?, p3: Int, p4: Int, p5: Int): Int = 0
+  override fun clearWallpaper() {}
+  override fun createConfigurationContext(p0: android.content.res.Configuration): android.content.Context = this
+  override fun createContextForSplit(p0: String?): android.content.Context? = null
+  override fun createDeviceProtectedStorageContext(): android.content.Context? = null
+  override fun createDisplayContext(p0: android.view.Display): android.content.Context = this
+  override fun createPackageContext(p0: String?, p1: Int): android.content.Context? = null
+  override fun databaseList(): Array<String>? = null
+  override fun deleteDatabase(p0: String?): Boolean = false
+  override fun deleteFile(p0: String?): Boolean = false
+  override fun deleteSharedPreferences(p0: String?): Boolean = false
+  override fun enforceCallingOrSelfPermission(p0: String, p1: String?) {}
+  override fun enforceCallingOrSelfUriPermission(p0: android.net.Uri?, p1: Int, p2: String?) {}
+  override fun enforceCallingPermission(p0: String, p1: String?) {}
+  override fun enforceCallingUriPermission(p0: android.net.Uri?, p1: Int, p2: String?) {}
+  override fun enforcePermission(p0: String, p1: Int, p2: Int, p3: String?) {}
+  override fun enforceUriPermission(p0: android.net.Uri?, p1: Int, p2: Int, p3: Int, p4: String?) {}
+  override fun enforceUriPermission(p0: android.net.Uri?, p1: String?, p2: String?, p3: Int, p4: Int, p5: Int, p6: String?) {}
+  override fun fileList(): Array<String>? = null
+  override fun getApplicationContext(): android.content.Context? = null
+  override fun getApplicationInfo(): android.content.pm.ApplicationInfo? = null
+  override fun getAssets(): android.content.res.AssetManager? = null
+  override fun getCacheDir(): java.io.File? = null
+  override fun getClassLoader(): ClassLoader? = null
+  override fun getCodeCacheDir(): java.io.File? = null
+  override fun getContentResolver(): android.content.ContentResolver? = null
+  override fun getDataDir(): java.io.File? = null
+  override fun getDatabasePath(p0: String?): java.io.File? = null
+  override fun getDir(p0: String?, p1: Int): java.io.File? = null
+  override fun getExternalCacheDir(): java.io.File? = null
+  override fun getExternalCacheDirs(): Array<java.io.File>? = null
+  override fun getExternalFilesDir(p0: String?): java.io.File? = null
+  override fun getExternalFilesDirs(p0: String?): Array<java.io.File>? = null
+  override fun getExternalMediaDirs(): Array<java.io.File>? = null
+  override fun getFileStreamPath(p0: String?): java.io.File? = null
+  override fun getFilesDir(): java.io.File? = null
+  override fun getMainLooper(): android.os.Looper? = null
+  override fun getNoBackupFilesDir(): java.io.File? = null
+  override fun getObbDir(): java.io.File? = null
+  override fun getObbDirs(): Array<java.io.File>? = null
+  override fun getPackageCodePath(): String? = null
+  override fun getPackageManager(): android.content.pm.PackageManager? = null
+  override fun getPackageName(): String? = null
+  override fun getPackageResourcePath(): String? = null
+  override fun getResources(): android.content.res.Resources? = null
+  override fun getSharedPreferences(p0: String?, p1: Int): android.content.SharedPreferences? = null
+  override fun getSystemService(p0: String): Any = this
+  override fun getSystemServiceName(p0: Class<*>): String? = null
+  override fun getTheme(): android.content.res.Resources.Theme? = null
+  override fun getWallpaper(): android.graphics.drawable.Drawable? = null
+  override fun getWallpaperDesiredMinimumHeight(): Int = 0
+  override fun getWallpaperDesiredMinimumWidth(): Int = 0
+  override fun grantUriPermission(p0: String?, p1: android.net.Uri?, p2: Int) {}
+  override fun isDeviceProtectedStorage(): Boolean = false
+  override fun moveDatabaseFrom(p0: android.content.Context?, p1: String?): Boolean = false
+  override fun moveSharedPreferencesFrom(p0: android.content.Context?, p1: String?): Boolean = false
+  override fun openFileInput(p0: String?): java.io.FileInputStream? = null
+  override fun openFileOutput(p0: String?, p1: Int): java.io.FileOutputStream? = null
+  override fun openOrCreateDatabase(p0: String?, p1: Int, p2: android.database.sqlite.SQLiteDatabase.CursorFactory?): android.database.sqlite.SQLiteDatabase? = null
+  override fun openOrCreateDatabase(p0: String?, p1: Int, p2: android.database.sqlite.SQLiteDatabase.CursorFactory?, p3: android.database.DatabaseErrorHandler?): android.database.sqlite.SQLiteDatabase? = null
+  override fun peekWallpaper(): android.graphics.drawable.Drawable? = null
+  override fun registerReceiver(p0: android.content.BroadcastReceiver?, p1: android.content.IntentFilter?): android.content.Intent? = null
+  override fun registerReceiver(p0: android.content.BroadcastReceiver?, p1: android.content.IntentFilter?, p2: Int): android.content.Intent? = null
+  override fun registerReceiver(p0: android.content.BroadcastReceiver?, p1: android.content.IntentFilter?, p2: String?, p3: android.os.Handler?): android.content.Intent? = null
+  override fun registerReceiver(p0: android.content.BroadcastReceiver?, p1: android.content.IntentFilter?, p2: String?, p3: android.os.Handler?, p4: Int): android.content.Intent? = null
+  override fun removeStickyBroadcast(p0: android.content.Intent?) {}
+  override fun removeStickyBroadcastAsUser(p0: android.content.Intent?, p1: android.os.UserHandle?) {}
+  override fun revokeUriPermission(p0: android.net.Uri?, p1: Int) {}
+  override fun revokeUriPermission(p0: String?, p1: android.net.Uri?, p2: Int) {}
+  override fun sendBroadcast(p0: android.content.Intent?) {}
+  override fun sendBroadcast(p0: android.content.Intent?, p1: String?) {}
+  override fun sendBroadcastAsUser(p0: android.content.Intent?, p1: android.os.UserHandle?) {}
+  override fun sendBroadcastAsUser(p0: android.content.Intent?, p1: android.os.UserHandle?, p2: String?) {}
+  override fun sendOrderedBroadcast(p0: android.content.Intent?, p1: String?) {}
+  override fun sendOrderedBroadcast(p0: android.content.Intent, p1: String?, p2: android.content.BroadcastReceiver?, p3: android.os.Handler?, p4: Int, p5: String?, p6: android.os.Bundle?) {}
+  override fun sendOrderedBroadcastAsUser(p0: android.content.Intent?, p1: android.os.UserHandle?, p2: String?, p3: android.content.BroadcastReceiver?, p4: android.os.Handler?, p5: Int, p6: String?, p7: android.os.Bundle?) {}
+  override fun sendStickyBroadcast(p0: android.content.Intent?) {}
+  override fun sendStickyBroadcastAsUser(p0: android.content.Intent?, p1: android.os.UserHandle?) {}
+  override fun sendStickyOrderedBroadcast(p0: android.content.Intent?, p1: android.content.BroadcastReceiver?, p2: android.os.Handler?, p3: Int, p4: String?, p5: android.os.Bundle?) {}
+  override fun sendStickyOrderedBroadcastAsUser(p0: android.content.Intent?, p1: android.os.UserHandle?, p2: android.content.BroadcastReceiver?, p3: android.os.Handler?, p4: Int, p5: String?, p6: android.os.Bundle?) {}
+  override fun setTheme(p0: Int) {}
+  override fun setWallpaper(p0: android.graphics.Bitmap?) {}
+  override fun setWallpaper(p0: java.io.InputStream?) {}
+  override fun startActivities(p0: Array<android.content.Intent>?) {}
+  override fun startActivities(p0: Array<android.content.Intent>?, p1: android.os.Bundle?) {}
+  override fun startActivity(p0: android.content.Intent?) {}
+  override fun startActivity(p0: android.content.Intent?, p1: android.os.Bundle?) {}
+  override fun startForegroundService(p0: android.content.Intent?): android.content.ComponentName? = null
+  override fun startInstrumentation(p0: android.content.ComponentName, p1: String?, p2: android.os.Bundle?): Boolean = false
+  override fun startIntentSender(p0: android.content.IntentSender?, p1: android.content.Intent?, p2: Int, p3: Int, p4: Int) {}
+  override fun startIntentSender(p0: android.content.IntentSender?, p1: android.content.Intent?, p2: Int, p3: Int, p4: Int, p5: android.os.Bundle?) {}
+  override fun startService(p0: android.content.Intent?): android.content.ComponentName? = null
+  override fun stopService(p0: android.content.Intent?): Boolean = false
+  override fun unbindService(p0: android.content.ServiceConnection) {}
+  override fun unregisterReceiver(p0: android.content.BroadcastReceiver?) {}
 }
 
 private class FakeClock {

@@ -1,5 +1,6 @@
 package com.hkparking.copilot.sim
 
+import androidx.core.content.ContextCompat
 import com.hkparking.copilot.di.Bindings
 
 class SimEventReceiver(
@@ -266,9 +267,30 @@ class SimEventReceiver(
     private const val MISSING_TOKEN = "missing"
     private const val DEFAULT_DESTINATION = "朗豪坊"
 
+    internal fun interface ReceiverRegistrar {
+      fun register(
+        context: android.content.Context,
+        receiver: android.content.BroadcastReceiver,
+        action: String,
+        flags: Int,
+      )
+    }
+
+    internal var registrar: ReceiverRegistrar = ReceiverRegistrar { context, receiver, action, flags ->
+      val filter = android.content.IntentFilter(action)
+      ContextCompat.registerReceiver(context, receiver, filter, flags)
+    }
+
+    private var registered = false
+
     fun register(context: android.content.Context, receiver: SimEventReceiver) {
-      val filter = android.content.IntentFilter(ACTION_SIM_EVENT)
-      context.registerReceiver(receiver, filter, android.content.Context.RECEIVER_EXPORTED)
+      if (registered) return
+      registrar.register(context, receiver, ACTION_SIM_EVENT, ContextCompat.RECEIVER_EXPORTED)
+      registered = true
+    }
+
+    internal fun resetRegistrationState() {
+      registered = false
     }
   }
 }
