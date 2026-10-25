@@ -160,3 +160,16 @@
 - 影響任務編號／常數名／檔案：Step 2.4；`FloatingCardView.kt`、`FloatingBubbleService.kt`、`TripStateMachine.kt`、`CommandCodes.kt`、`docs/specs/01_ui_and_voice_fsm.md`、`docs/specs/04_mock_and_sim_shell.md`
 - 類別：規格缺漏
 - 狀態：待處理
+
+### SC-012
+- 日期：2026-10-25
+- 來源：Pi
+- 裝置（如適用）：不適用
+- 發現：熄匙後口播會讀完先停；GREY 拍膠囊只設旗、冇發請求。待同步 impl Doc。
+- 建議改動：
+  1. 熄匙即停口播次序：`shutdownInProgress` → 清 grey 重試旗 → 收卡 → `invalidate(DIALOGUE_INTERRUPTED)` → 停咪 → `tts.interrupt()`。`finishTeardown` 喺 invalidate 之後再 interrupt 做保底。淡出 `TEARDOWN_FADE_MS` 期間遲到 recommend／commit 丟棄、唔出聲、唔出卡、唔開聆聽窗、唔再叫 TSM。
+  2. GREY 拍膠囊：每次最多一個 `DRIVER_ACTIVE` 請求；喺途唔重發；`launchRecommend` 嘅 `finally` 清旗；唔彈卡。失敗留喺 GREY，唔自動再試。
+  3. PLACE_CLARIFY：保留 `ZhHkTemplates.PLACE_CLARIFY = "邊一區？"`，配 `withVoiceReplyPrompt`。spec 02「去邊度？請拍一拍膠囊答我」待同步 impl Doc 統一，本步唔改字串。
+- 影響任務編號／常數名／檔案：Step 2.5；`FloatingBubbleService.kt`、`ZhHkTemplates.PLACE_CLARIFY`
+- 類別：規格缺漏
+- 狀態：待處理

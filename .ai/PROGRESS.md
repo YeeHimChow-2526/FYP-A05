@@ -1,6 +1,6 @@
 # 開發進度（PROGRESS）— v2.9.1
 
-最後更新：2026-10-20｜任務來源：`.ai/ARCHITECTURE.md` §19 PART 3 路線圖任務表（共 46 條任務項＝44 項工程任務，W-E.2 與 W-F.2 各拆 Part 1／Part 2）｜驗收細節以實作版 PART 3 為準。
+最後更新：2026-10-25｜任務來源：`.ai/ARCHITECTURE.md` §19 PART 3 路線圖任務表（共 46 條任務項＝44 項工程任務，W-E.2 與 W-F.2 各拆 Part 1／Part 2）｜驗收細節以實作版 PART 3 為準。
 
 寫入者：Pi 完成任務並 commit 後勾選並填 commit；Gemini 審查 `.ai/LAST_RUN.md` 後確認；Kenny 可隨時人手修正。
 
@@ -48,16 +48,16 @@
 ### 19.3 Phase 2 — 行車交互精細化與香港特色場景（第 6–10 步）
 
 - [x] W-A.6 偏好三段開關 — commit: 2fbf18b, adee71a
-- [ ] W-A.7 語音優先口播出卡 — 首選口播已落地（Step 1.3）；追問出卡未做 — commit: a5da97e
+- [x] W-A.7 語音優先口播出卡 — commit: a5da97e, 72ae56a, ee0f7b3, 73760f4, 756f582, 6aad728, 765a49e
 - [ ] W-A.8 倒車雷達避讓 — commit: 
-- [ ] W-A.9 熄匙無痕銷毀 — commit: 
+- [ ] W-A.9 熄匙無痕銷毀 — sim 熄匙即停口播已落地；EngineShutdownReceiver／藍牙／車充未做 — commit: 
 - [ ] W-A.10 無終點主動喚起 — commit: 
 - [ ] W-A.13 單一 AudioRecord — commit: 
 - [ ] W-A.14 麥克風 FGS 與權限 — commit: 
 - [x] W-A.19 語音能力檢查 — commit: a5da97e, 623c382, 5922985, 4bff94b
 - [ ] W-A.20 STT 開發前驗證 — commit: 
 - [x] W-A.21 指令碼與語言模板 — commit: a5da97e, 752de53, 5922985, 04d8879, 4bff94b
-- [x] W-A.12 網絡分級重試 — commit: b73fff4, dfadd4f
+- [x] W-A.12 網絡分級重試 — commit: b73fff4, dfadd4f, cc1a27c
 
 ### 19.4 Phase 3 — 商業激戰區強化、安全防禦與眾包反饋（第 11–13 步）
 
@@ -86,16 +86,16 @@
 | MVP 步驟 | 範圍（摘自 `.ai/HANDOFF.md`） | 任務編號 |
 |---|---|---|
 | Step 1 | 雙層骨架＋FGS 握手＋P 膠囊燈號＋`sim/` 殼與 fixtures＋`ApiClient` 分級重試＋三種行程語音模式與能力檢查＋粵語 TTS 口播首選 | Step 1.1：W-A.6；W-A.3 常數檔。Step 1.2：W-A.15；W-A.1 狀態機。Step 1.3：W-A.19、W-A.21；W-A.7 首選口播。Step 1.4：W-A.12。Step 1.5：W-A.16。Step 1.6：W-A.1 |
-| Step 2 | 語音追問閉環＋`FloatingCardView` 追問出卡＋手動模式卡片按鈕＋Intent 喚醒 Google Maps 導航 | 由 Gemini 指定 |
+| Step 2 | 語音追問閉環＋`FloatingCardView` 追問出卡＋手動模式卡片按鈕＋Intent 喚醒 Google Maps 導航 | W-A.7；W-A.12（含 cc1a27c）。W-A.9 只完成 sim 口播即停 |
 | Step 3 | `LocalPoiTrie.kt` 本地字典樹＋Google Maps 分享接盤＋`DistanceTracker.kt` 到場雙態＋Flutter 今日行程 | 由 Gemini 指定 |
 
 - [x] Step 1 必做：原生 sim/ 模擬殼＋mock/*.json fixtures＋注入事件（屬 W-A.18；規格 docs/specs/04_mock_and_sim_shell.md），Step 1 完成前交付 — commit: dff84d8, 97bb2e6
 
 **Step 1 遺留（轉 Step 2/3）**：
-- Step 2：B-1 (c)「聽唔到目的地，請再講一次」同現場即泊 GPS 失敗「暫時搵唔到你位置，請稍後再講一次」只計 cue，未經 TtsService 口播
-- Step 2：ALERT／NO_MIC 追問口播（含「請拍一拍膠囊答我」後綴）只計 cue，未經 TtsService 口播
-- Step 2：`await_voice_reply` → expand_scarcity 重發
+- Step 2 已做：B-1／現場即泊失敗口播、ALERT／NO_MIC 口播（72ae56a）；`await_voice_reply` 重發（ee0f7b3, 73760f4）
 - Step 3：`TRIE_MISS_RESOLVE_OK`／`TRIE_MISS_NETWORK_FAIL`（未口播「網絡唔順，遲啲再試」）／`TRIE_MISS_AMBIGUOUS` 接真 LocalPoiTrie／B-2
+
+未完成：B-2 分享接盤、閘口座標、DistanceTracker、EngineShutdownReceiver（藍牙／車充）、單一 AudioRecord、STT 引擎、今日行程 Flutter。
 - Step 3 開工前裁決：含糊地名口播 02 L110「去邊度？請拍一拍膠囊答我」vs 代碼 `PLACE_CLARIFY`「邊一區？」vs 03 L111「純語音反問」
 - 真機：FGS 真實 2s 逾時 `FgsBootstrapActivity` Log.w 記錄（模擬器無法觸發）
 

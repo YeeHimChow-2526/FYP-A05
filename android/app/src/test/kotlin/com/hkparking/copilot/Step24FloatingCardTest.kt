@@ -272,7 +272,7 @@ class Step24FloatingCardTest {
     assertTrue(grey.service.manualRetryRequested)
     assertTrue(grey.service.manualCardVisible)
     assertFalse(grey.service.floatingCard.uiState.visible)
-    assertEquals(TripState.GREY_BREATHING, grey.service.tripStateMachine.state)
+    assertTrue(grey.service.launchedRecommendModes.contains(com.hkparking.copilot.net.QueryTriggerMode.DRIVER_ACTIVE))
     Bindings.detachService(grey.service)
 
     val stale = openHarness()
