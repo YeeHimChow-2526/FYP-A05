@@ -68,15 +68,15 @@ class SimEventReceiver(
       TRIE_MISS_NETWORK_FAIL -> emit(event, intValue, stringValue)
       TRIE_MISS_AMBIGUOUS -> emit(event, intValue, stringValue)
       GPS_BAD_ACCURACY -> gpsBadAccuracy(event, intValue, stringValue)
-      FORCE_STALE -> armRecommend(com.hkparking.copilot.di.FixtureApiTransport.STALE_FIXTURE)
-      FORCE_DEGRADED -> armRecommend(com.hkparking.copilot.di.FixtureApiTransport.DEGRADED_FIXTURE)
+      FORCE_STALE -> armRecommend(FixtureApiTransport.STALE_FIXTURE)
+      FORCE_DEGRADED -> armRecommend(FixtureApiTransport.DEGRADED_FIXTURE)
       FORCE_RATE_LIMIT -> forceRateLimit(event, intValue, stringValue)
       FORCE_LOCK_FULL -> {
         Bindings.apiTransport.armLockFull()
         true
       }
-      FORCE_LOW_WATERMARK -> armRecommend(com.hkparking.copilot.di.FixtureApiTransport.LOW_WATERMARK_FIXTURE)
-      FORCE_CROWD_FLAG -> armRecommend(com.hkparking.copilot.di.FixtureApiTransport.CROWD_FLAG_FIXTURE)
+      FORCE_LOW_WATERMARK -> armRecommend(FixtureApiTransport.LOW_WATERMARK_FIXTURE)
+      FORCE_CROWD_FLAG -> armRecommend(FixtureApiTransport.CROWD_FLAG_FIXTURE)
       else -> ignore(event)
     }
     if (handled) onEventHandled()

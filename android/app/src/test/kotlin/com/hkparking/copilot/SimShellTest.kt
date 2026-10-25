@@ -3,7 +3,7 @@ package com.hkparking.copilot
 import androidx.core.content.ContextCompat
 import com.hkparking.copilot.di.Bindings
 import com.hkparking.copilot.di.FgsStarter
-import com.hkparking.copilot.di.FixtureApiTransport
+import com.hkparking.copilot.sim.FixtureApiTransport
 import com.hkparking.copilot.di.LocationSource
 import com.hkparking.copilot.di.VoiceInput
 import com.hkparking.copilot.net.ApiClient
