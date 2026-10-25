@@ -272,7 +272,10 @@ object Bindings {
           gpsAvailable = true,
           gpsAccuracyM = accuracy,
         )
-        if (!outcome.accepted) onSiteRejectedCue = outcome.spokenCue
+        if (!outcome.accepted) {
+          onSiteRejectedCue = outcome.spokenCue
+          service.speakStartRejection(StartupEntry.ON_SITE, outcome.spokenCue)
+        }
       }
     }
   }

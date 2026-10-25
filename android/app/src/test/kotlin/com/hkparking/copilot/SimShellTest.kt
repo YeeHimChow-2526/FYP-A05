@@ -1085,6 +1085,250 @@ class SimShellTest {
     }
   }
 
+  @Test
+  fun step21_hotOnSiteRejectionSpeaksOnceAndKeepsTrip() {
+    val service = openService(FakeClock())
+    val receiver = Bindings.activeReceiver!!
+    assertTrue(receiver.dispatchEvent("START_TRIP"))
+    assertTrue(receiver.dispatchEvent("SET_VOICE_MODE", stringValue = "FULL_VOICE"))
+    assertEquals(TripVoiceMode.FULL_VOICE, service.tripStateMachine.tripVoiceMode)
+    val sessionId = service.tripStateMachine.sessionId
+    val state = service.tripStateMachine.state
+    val fgsRunning = service.isFgsRunning
+    val capsuleVisible = service.isCapsuleVisible
+    assertNotEquals(null, sessionId)
+    assertTrue(fgsRunning)
+    assertTrue(capsuleVisible)
+    val n0 = service.ttsService.spokenCues.size
+    assertTrue(
+      receiver.dispatchEvent(
+        "GPS_BAD_ACCURACY",
+        intValue = NativeConfig.ON_SITE_GPS_ACCURACY_MAX_M + 1,
+      ),
+    )
+    assertEquals(
+      listOf(ZhHkTemplates.ON_SITE_LOCATION_MISSED),
+      service.ttsService.spokenCues.drop(n0),
+    )
+    assertEquals(sessionId, service.tripStateMachine.sessionId)
+    assertEquals(state, service.tripStateMachine.state)
+    assertEquals(fgsRunning, service.isFgsRunning)
+    assertEquals(capsuleVisible, service.isCapsuleVisible)
+    val n1 = service.ttsService.spokenCues.size
+    assertTrue(
+      receiver.dispatchEvent(
+        "GPS_BAD_ACCURACY",
+        intValue = NativeConfig.ON_SITE_GPS_ACCURACY_MAX_M,
+      ),
+    )
+    assertEquals(0, service.ttsService.spokenCues.drop(n1).size)
+    Bindings.detachService(service)
+  }
+
+  @Test
+  fun step21_b1MissingDestinationRejectedWithoutSession() {
+    val machine = TripStateMachine()
+    val outcome = machine.requestStart(
+      entry = StartupEntry.B_1,
+      commandCode = CommandCode.FIND_PARKING,
+      destinationName = null,
+    )
+    assertFalse(outcome.accepted)
+    assertEquals(null, outcome.sessionId)
+    assertFalse(outcome.startFgs)
+    assertEquals(ZhHkTemplates.B1_DESTINATION_MISSED, outcome.spokenCue)
+    assertEquals(null, machine.sessionId)
+    assertFalse(machine.fgsStartAccepted)
+    val again = machine.requestStart(
+      entry = StartupEntry.B_1,
+      commandCode = null,
+      destinationName = null,
+    )
+    assertFalse(again.accepted)
+    assertEquals(null, again.sessionId)
+    assertFalse(again.startFgs)
+    assertEquals(ZhHkTemplates.B1_DESTINATION_MISSED, again.spokenCue)
+    assertEquals(null, machine.sessionId)
+    assertFalse(machine.fgsStartAccepted)
+
+    val service = openService(FakeClock())
+    val receiver = Bindings.activeReceiver!!
+    assertTrue(receiver.dispatchEvent("START_TRIP"))
+    assertTrue(receiver.dispatchEvent("SET_VOICE_MODE", stringValue = "FULL_VOICE"))
+    val sessionId = service.tripStateMachine.sessionId
+    val n0 = service.ttsService.spokenCues.size
+    service.speakStartRejection(StartupEntry.B_1, outcome.spokenCue)
+    assertEquals(
+      listOf(ZhHkTemplates.B1_DESTINATION_MISSED),
+      service.ttsService.spokenCues.drop(n0),
+    )
+    assertEquals(sessionId, service.tripStateMachine.sessionId)
+    val n1 = service.ttsService.spokenCues.size
+    service.speakStartRejection(StartupEntry.B_1, null)
+    service.speakStartRejection(StartupEntry.B_1, "")
+    assertEquals(0, service.ttsService.spokenCues.drop(n1).size)
+    Bindings.detachService(service)
+  }
+
+  @Test
+  fun step21_manualOnlyRejectionIsSilent() {
+    val service = openService(FakeClock())
+    val receiver = Bindings.activeReceiver!!
+    assertTrue(receiver.dispatchEvent("START_TRIP"))
+    assertTrue(receiver.dispatchEvent("SET_VOICE_MODE", stringValue = "MANUAL_ONLY"))
+    assertEquals(TripVoiceMode.MANUAL_ONLY, service.tripStateMachine.tripVoiceMode)
+    val sessionId = service.tripStateMachine.sessionId
+    val n0 = service.ttsService.spokenCues.size
+    assertTrue(
+      receiver.dispatchEvent(
+        "GPS_BAD_ACCURACY",
+        intValue = NativeConfig.ON_SITE_GPS_ACCURACY_MAX_M + 1,
+      ),
+    )
+    assertEquals(0, service.ttsService.spokenCues.drop(n0).size)
+    assertEquals(sessionId, service.tripStateMachine.sessionId)
+    Bindings.detachService(service)
+  }
+
+  @Test
+  fun step21_noMicAlertSpeaksOnceWithTapCapsuleSuffix() {
+    val service = openService(FakeClock())
+    val receiver = Bindings.activeReceiver!!
+    assertTrue(receiver.dispatchEvent("START_TRIP"))
+    assertTrue(receiver.dispatchEvent("SET_VOICE_MODE", stringValue = "FULL_VOICE"))
+    assertEquals(TripVoiceMode.FULL_VOICE, service.tripStateMachine.tripVoiceMode)
+    val c0 = service.tripStateMachine.alertSpeakCount
+    val n0 = service.ttsService.spokenCues.size
+    assertTrue(receiver.dispatchEvent("NO_MIC"))
+    assertEquals(c0 + 1, service.tripStateMachine.alertSpeakCount)
+    val expected = ZhHkTemplates.withVoiceReplyPrompt(
+      ZhHkTemplates.PLACE_CLARIFY,
+      TripVoiceMode.FULL_VOICE,
+      false,
+    )
+    assertEquals(listOf(expected), service.ttsService.spokenCues.drop(n0))
+    assertTrue(expected.contains(ZhHkTemplates.TAP_CAPSULE))
+    assertEquals(TripState.ALERT_BREATHING, service.tripStateMachine.state)
+    val after = service.tripStateMachine.alertSpeakCount
+    val n1 = service.ttsService.spokenCues.size
+    assertTrue(receiver.dispatchEvent("NO_MIC"))
+    assertTrue(receiver.dispatchEvent("TRIE_MISS_AMBIGUOUS"))
+    assertEquals(after, service.tripStateMachine.alertSpeakCount)
+    assertEquals(0, service.ttsService.spokenCues.drop(n1).size)
+    Bindings.detachService(service)
+  }
+
+  @Test
+  fun step21_announceManualAlertHasNoTapCapsuleSuffix() {
+    val service = openService(FakeClock())
+    val receiver = Bindings.activeReceiver!!
+    assertTrue(receiver.dispatchEvent("START_TRIP"))
+    assertTrue(receiver.dispatchEvent("SET_VOICE_MODE", stringValue = "ANNOUNCE_MANUAL"))
+    assertEquals(TripVoiceMode.ANNOUNCE_MANUAL, service.tripStateMachine.tripVoiceMode)
+    val c0 = service.tripStateMachine.alertSpeakCount
+    val n0 = service.ttsService.spokenCues.size
+    assertTrue(receiver.dispatchEvent("TRIE_MISS_AMBIGUOUS"))
+    assertEquals(c0 + 1, service.tripStateMachine.alertSpeakCount)
+    val expected = ZhHkTemplates.withVoiceReplyPrompt(
+      ZhHkTemplates.PLACE_CLARIFY,
+      TripVoiceMode.ANNOUNCE_MANUAL,
+      false,
+    )
+    assertEquals(listOf(expected), service.ttsService.spokenCues.drop(n0))
+    assertFalse(expected.contains(ZhHkTemplates.TAP_CAPSULE))
+    Bindings.detachService(service)
+  }
+
+  @Test
+  fun step21_manualOnlyAlertIsSilent() {
+    val service = openService(FakeClock())
+    val receiver = Bindings.activeReceiver!!
+    assertTrue(receiver.dispatchEvent("START_TRIP"))
+    assertTrue(receiver.dispatchEvent("SET_VOICE_MODE", stringValue = "MANUAL_ONLY"))
+    assertEquals(TripVoiceMode.MANUAL_ONLY, service.tripStateMachine.tripVoiceMode)
+    val c0 = service.tripStateMachine.alertSpeakCount
+    val n0 = service.ttsService.spokenCues.size
+    assertTrue(receiver.dispatchEvent("TRIE_MISS_AMBIGUOUS"))
+    assertEquals(c0 + 1, service.tripStateMachine.alertSpeakCount)
+    assertEquals(0, service.ttsService.spokenCues.drop(n0).size)
+    Bindings.detachService(service)
+  }
+
+  @Test
+  fun step21_deferredAlertSpeaksOnlyAfterRecovery() {
+    val service = openService(FakeClock())
+    val receiver = Bindings.activeReceiver!!
+    assertTrue(receiver.dispatchEvent("START_TRIP"))
+    assertTrue(receiver.dispatchEvent("SET_VOICE_MODE", stringValue = "FULL_VOICE"))
+    assertEquals(TripVoiceMode.FULL_VOICE, service.tripStateMachine.tripVoiceMode)
+    val c0 = service.tripStateMachine.alertSpeakCount
+    assertTrue(receiver.dispatchEvent("TRIE_MISS_NETWORK_FAIL"))
+    assertEquals(TripState.GREY_BREATHING, service.tripStateMachine.state)
+    val n0 = service.ttsService.spokenCues.size
+    assertTrue(receiver.dispatchEvent("TRIE_MISS_AMBIGUOUS"))
+    assertEquals(c0, service.tripStateMachine.alertSpeakCount)
+    assertEquals(0, service.ttsService.spokenCues.drop(n0).size)
+    assertEquals(TripState.GREY_BREATHING, service.tripStateMachine.state)
+    assertTrue(receiver.dispatchEvent("INJECT_UTTERANCE", stringValue = "搵位"))
+    assertEquals(c0 + 1, service.tripStateMachine.alertSpeakCount)
+    val expected = ZhHkTemplates.withVoiceReplyPrompt(
+      ZhHkTemplates.PLACE_CLARIFY,
+      TripVoiceMode.FULL_VOICE,
+      true,
+    )
+    assertEquals(1, service.ttsService.spokenCues.drop(n0).count { it == expected })
+    Bindings.detachService(service)
+  }
+
+  @Test
+  fun step21_alertDuringApproachMutedIsCountedButNotSpoken() {
+    val service = openService(FakeClock())
+    val receiver = Bindings.activeReceiver!!
+    assertTrue(receiver.dispatchEvent("START_TRIP"))
+    assertTrue(receiver.dispatchEvent("SET_VOICE_MODE", stringValue = "FULL_VOICE"))
+    assertTrue(receiver.dispatchEvent("ARRIVE_CORE"))
+    assertEquals(TripState.APPROACH_MUTED, service.tripStateMachine.state)
+    val c0 = service.tripStateMachine.alertSpeakCount
+    val n0 = service.ttsService.spokenCues.size
+    assertTrue(receiver.dispatchEvent("TRIE_MISS_AMBIGUOUS"))
+    assertEquals(c0 + 1, service.tripStateMachine.alertSpeakCount)
+    assertEquals(0, service.ttsService.spokenCues.drop(n0).size)
+    Bindings.detachService(service)
+  }
+
+  @Test
+  fun step21_newTripResetsAlertCounter() {
+    val clock = FakeClock()
+    val service = openService(clock)
+    val receiver = Bindings.activeReceiver!!
+    assertTrue(receiver.dispatchEvent("START_TRIP"))
+    assertTrue(receiver.dispatchEvent("SET_VOICE_MODE", stringValue = "FULL_VOICE"))
+    val firstSession = service.tripStateMachine.sessionId
+    val n0 = service.ttsService.spokenCues.size
+    assertTrue(receiver.dispatchEvent("NO_MIC"))
+    assertEquals(1, service.ttsService.spokenCues.drop(n0).size)
+    assertTrue(receiver.dispatchEvent("ENGINE_SHUTDOWN", intValue = 0))
+    clock.advance(NativeConfig.TEARDOWN_FADE_MS.toLong())
+    assertFalse(service.isFgsRunning)
+    service.enterForegroundGate = { true }
+    val previous = Bindings.fgsStarter
+    Bindings.fgsStarter = FgsStarter { true }
+    try {
+      assertTrue(receiver.dispatchEvent("START_TRIP"))
+    } finally {
+      Bindings.fgsStarter = previous
+      service.enterForegroundGate = null
+    }
+    val secondSession = service.tripStateMachine.sessionId
+    assertNotEquals(firstSession, secondSession)
+    assertEquals(0, service.tripStateMachine.alertSpeakCount)
+    assertTrue(receiver.dispatchEvent("SET_VOICE_MODE", stringValue = "FULL_VOICE"))
+    val n1 = service.ttsService.spokenCues.size
+    assertTrue(receiver.dispatchEvent("NO_MIC"))
+    assertEquals(1, service.ttsService.spokenCues.drop(n1).size)
+    Bindings.detachService(service)
+  }
+
   private fun installIdleJoystick() {
     SimJoystickOverlay.sender = SimBroadcastSender { _, _, _ -> }
     SimJoystickOverlay.windowHost = object : JoystickWindowHost {

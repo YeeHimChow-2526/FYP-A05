@@ -100,6 +100,7 @@ class TripStateMachine(
     private set
   var alertSpeakCount: Int = 0
     private set
+  var onAlertCueReady: ((mutedBefore: Boolean) -> Unit)? = null
   var networkDegraded: Boolean = false
     private set
 
@@ -466,6 +467,7 @@ class TripStateMachine(
     if (!fgsRunning) {
       return
     }
+    val mutedBefore = state == TripState.APPROACH_MUTED
     if (networkDegraded) {
       deferredAlert = cause
       enter(TripState.GREY_BREATHING)
@@ -475,6 +477,7 @@ class TripStateMachine(
     if (spokenAlerts.add(cause)) {
       alertSpeakCount += 1
       lastSpokenCue = cueFor(cause)
+      onAlertCueReady?.invoke(mutedBefore)
     }
   }
 

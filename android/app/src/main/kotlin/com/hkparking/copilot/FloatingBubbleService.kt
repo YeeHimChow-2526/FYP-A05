@@ -175,6 +175,8 @@ class FloatingBubbleService : android.app.Service {
     private set
   var parkedCandidateName: String? = null
     private set
+  private var lastSpokenAlertCount: Int = 0
+  private var alertCountSessionId: String? = null
 
   fun onColdBubbleTap(): Boolean {
     if (!isFgsRunning) return false
@@ -215,10 +217,13 @@ class FloatingBubbleService : android.app.Service {
     worker.isDaemon = true
     worker.start()
     if (!tripStateMachine.fgsStartAccepted) {
-      tripStateMachine.requestStart(
+      val outcome = tripStateMachine.requestStart(
         entry = entry,
         distanceToDestinationM = initialDistanceMeters,
       )
+      if (!outcome.accepted) {
+        logInfo("Start rejected: entry=$entry cue=${outcome.spokenCue ?: ""} path=service_start")
+      }
     }
     tripStateMachine.onMicFgsActive(activeFgsType == VoiceCapabilityChecker.FGS_LOCATION_MIC)
     wirePorts()
@@ -282,6 +287,7 @@ class FloatingBubbleService : android.app.Service {
   }
 
   private fun wirePorts() {
+    tripStateMachine.onAlertCueReady = { mutedBefore -> speakNewAlertCue(mutedBefore) }
     com.hkparking.copilot.di.Bindings.attachService(this)
     if (portsWired) return
     portsWired = true
@@ -476,6 +482,27 @@ class FloatingBubbleService : android.app.Service {
     }
   }
 
+  private fun speakNewAlertCue(mutedBefore: Boolean) {
+    val sessionId = tripStateMachine.sessionId
+    if (sessionId != alertCountSessionId) {
+      alertCountSessionId = sessionId
+      lastSpokenAlertCount = 0
+    }
+    val count = tripStateMachine.alertSpeakCount
+    if (count <= lastSpokenAlertCount) return
+    lastSpokenAlertCount = count
+    val cue = tripStateMachine.lastSpokenCue
+    if (cue.isNullOrBlank()) return
+    logInfo("Alert cue speak: count=$count muted=$mutedBefore")
+    ttsService.speak(cue, tripStateMachine.tripVoiceMode, isApproachMuted = mutedBefore)
+  }
+
+  internal fun speakStartRejection(entry: StartupEntry, cue: String?) {
+    if (cue.isNullOrBlank()) return
+    logInfo("Start rejected: entry=$entry cue=$cue path=hot")
+    ttsService.speak(cue, tripStateMachine.tripVoiceMode, isApproachMuted = false, driverAsked = true)
+  }
+
   fun onTtsInitFailed(reason: String) {
     ttsEngineReady = false
     runCatching {
@@ -667,6 +694,7 @@ class FloatingBubbleService : android.app.Service {
     isMicActive = false
     isAudioRecordRunning = false
     portsWired = false
+    tripStateMachine.onAlertCueReady = null
     com.hkparking.copilot.di.Bindings.clearPorts()
     runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
       .onFailure { e -> logInfo("stopForeground failed reason=${e::class.java.simpleName}") }
