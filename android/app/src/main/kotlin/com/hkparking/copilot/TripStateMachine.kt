@@ -198,6 +198,7 @@ class TripStateMachine(
     if (distanceToDestinationM != null) {
       this.distanceToDestinationM = distanceToDestinationM
     }
+    if (state == TripState.NAV_TO_GATE) return
     val distance = this.distanceToDestinationM
     if (state == TripState.ALERT_BREATHING && !networkDegraded) {
       if (fgsRunning && distance != null && distance <= NativeConfig.TRIGGER_DISTANCE_M) {
@@ -222,6 +223,7 @@ class TripStateMachine(
   }
 
   private fun armBackgroundPrefetch(distanceM: Int?) {
+    if (state == TripState.NAV_TO_GATE) return
     if (!withinTriggerForJit(distanceM)) {
       return
     }
@@ -231,7 +233,8 @@ class TripStateMachine(
       !networkDegraded &&
       state != TripState.ALERT_BREATHING &&
       state != TripState.APPROACH_MUTED &&
-      state != TripState.PARKED_CONFIRMED
+      state != TripState.PARKED_CONFIRMED &&
+      state != TripState.NAV_TO_GATE
     ) {
       enter(TripState.AMBER_STEADY)
     }
@@ -260,7 +263,7 @@ class TripStateMachine(
     if (!fgsRunning) {
       return
     }
-    if (state == TripState.APPROACH_MUTED || state == TripState.PARKED_CONFIRMED) {
+    if (state == TripState.APPROACH_MUTED || state == TripState.PARKED_CONFIRMED || state == TripState.NAV_TO_GATE) {
       return
     }
     distanceToDestinationM = distanceM
@@ -317,6 +320,11 @@ class TripStateMachine(
       return
     }
     networkDegraded = false
+    if (state == TripState.NAV_TO_GATE) {
+      deferredAlert = null
+      recommend = false
+      return
+    }
     if (state == TripState.APPROACH_MUTED) {
       deferredAlert = null
       return
@@ -396,11 +404,16 @@ class TripStateMachine(
     raiseAlert(AlertCause.DRIVER_ACTION_FAILED)
   }
 
+  fun onCommitSucceeded() {
+    if (!fgsRunning) return
+    enter(TripState.NAV_TO_GATE)
+  }
+
   fun onJitSucceeded(pip: StatusPip) {
     if (!fgsRunning || networkDegraded) {
       return
     }
-    if (state == TripState.APPROACH_MUTED || state == TripState.PARKED_CONFIRMED) {
+    if (state == TripState.APPROACH_MUTED || state == TripState.PARKED_CONFIRMED || state == TripState.NAV_TO_GATE) {
       return
     }
     assignStatusPip(pip)

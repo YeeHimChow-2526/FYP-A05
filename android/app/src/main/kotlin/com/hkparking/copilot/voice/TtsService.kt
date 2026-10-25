@@ -48,6 +48,7 @@ class TtsService(
     voiceMode: TripVoiceMode,
     isApproachMuted: Boolean,
     driverAsked: Boolean = false,
+    onFinished: ((played: Boolean) -> Unit)? = null,
   ): String? {
     if (voiceMode == TripVoiceMode.MANUAL_ONLY) {
       logManualSkip()
@@ -72,7 +73,7 @@ class TtsService(
     } else {
       first.spokenCue
     }
-    enqueue(text, null)
+    enqueue(text, onFinished)
     return text
   }
 

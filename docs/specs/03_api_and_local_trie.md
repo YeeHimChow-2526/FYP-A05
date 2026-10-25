@@ -65,6 +65,13 @@
 - **409 `{"status":"LOCK_FULL","spoken_cue":"…"}`**：有效剩餘已滿；客戶端照播 spoken_cue，膠囊維持現狀，司機可講「有冇第二個」另選（重發 recommend）。
 - 虛擬鎖只作分流，**並非車位預約**；UI／口播絕不講成「已幫你留位」。
 
+**客戶端導航（SC-010）**
+
+1. 「好／去呢個」只喺 `RECOMMENDATION_CONFIRM` 窗有效；等首選 TTS `onFinished(true)` 且 `isMicActive` 先開窗；開窗前 `speechHeard=false`。
+2. commit 200 → `NAV_TO_GATE`＋`NavigationPort`；URI `google.navigation:q=<URLEncoder UTF-8>&mode=d`，package `com.google.android.apps.maps`，`FLAG_ACTIVITY_NEW_TASK`。
+3. 409 → 口播 spoken_cue；唔 NAV／唔 Maps；記錄已滿 id；其後「有冇第二個」重查並過濾；空則「暫時冇其他選擇」。
+4. FloatingCardView／手動掣／本地切卡 → 2.4；R11 唔屬本步。
+
 ### 2.3 `POST /v1/session/release`
 
 `{ "session_id", "target_carpark_id", "reason": "PARKED_CONFIRMED" }` — 泊妥確認（目標場 150m 內或地庫斷訊＋熄匙）時，原生於寫入今日行程候選後在線即送；離線即放棄（鎖至多保留至 30 分鐘 `expire_at`）。伺服器刪除 `virtual_locks/{session_id}`，並將 session 標記 `PARKED_CONFIRMED`、`ratable = false`（待司機確認）。

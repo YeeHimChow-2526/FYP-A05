@@ -177,8 +177,12 @@ class FloatingBubbleService : android.app.Service {
   private var ttsEngineReady: Boolean = false
   private val spokenDriverCues = mutableSetOf<String>()
   private var cachedCards: List<RecommendationCard> = emptyList()
+  private var selectedCardIndex: Int = 0
   private var cachedSourceStatus: String = "ok"
   private var cachedSpokenCue: String? = null
+  private val fullCarparkIds = mutableSetOf<String>()
+  private var commitInFlight = false
+  private var confirmListenArmed = false
   var parkedCandidateSessionId: String? = null
     private set
   var parkedCandidateName: String? = null
@@ -257,6 +261,10 @@ class FloatingBubbleService : android.app.Service {
     isFgsRunning = true
     isCapsuleVisible = true
     abandonedBySystemKill = false
+    fullCarparkIds.clear()
+    selectedCardIndex = 0
+    commitInFlight = false
+    confirmListenArmed = false
     tripStateMachine.applyVoiceCapability(capabilityChecker)
     tripStateMachine.onFgsStarted()
     if (distance != null && distance <= NativeConfig.TRIGGER_DISTANCE_M) immediateJitTriggered = true
@@ -331,6 +339,9 @@ class FloatingBubbleService : android.app.Service {
   }
 
   fun onEngineShutdown(withinTargetOrBasementLoss: Boolean) {
+    fullCarparkIds.clear()
+    commitInFlight = false
+    confirmListenArmed = false
     val sessionId = tripStateMachine.sessionId
     val targetCarparkId = cachedCards.firstOrNull()?.carparkId ?: tripStateMachine.destinationName.orEmpty()
     val targetName = cachedCards.firstOrNull()?.name ?: tripStateMachine.destinationName
@@ -411,7 +422,8 @@ class FloatingBubbleService : android.app.Service {
     if (!isFgsRunning) return
     if (
       tripStateMachine.state == TripState.APPROACH_MUTED ||
-      tripStateMachine.state == TripState.PARKED_CONFIRMED
+      tripStateMachine.state == TripState.PARKED_CONFIRMED ||
+      tripStateMachine.state == TripState.NAV_TO_GATE
     ) {
       return
     }
@@ -450,6 +462,47 @@ class FloatingBubbleService : android.app.Service {
         confidence = confidence,
       ),
     )
+    if (pendingQuestion == PendingQuestion.RECOMMENDATION_CONFIRM) {
+      if (parsed.blockedAsSelfHearing) {
+        runCatching {
+          android.util.Log.i(
+            "FloatingBubbleService",
+            "Pending kept: self-hearing question=RECOMMENDATION_CONFIRM",
+          )
+        }
+        return
+      }
+      speechHeard = true
+      com.hkparking.copilot.di.Bindings.voiceInput.stopListening()
+      when {
+        parsed.code == CommandCode.CONFIRM_TARGET && parsed.confirmed -> {
+          pendingQuestion = PendingQuestion.NONE
+          listenEpoch += 1
+          confirmListenArmed = false
+          confirmCurrentCandidate()
+          return
+        }
+        parsed.code == CommandCode.CANCEL -> {
+          invalidatePendingQuestion(PendingInvalidation.CANCEL)
+          return
+        }
+        parsed.code == CommandCode.SET_DESTINATION && !parsed.destinationName.isNullOrBlank() -> {
+          invalidatePendingQuestion(PendingInvalidation.DESTINATION_OR_CANDIDATE_CHANGED)
+        }
+        parsed.code == CommandCode.FIND_PARKING -> {
+          invalidatePendingQuestion(PendingInvalidation.DESTINATION_OR_CANDIDATE_CHANGED)
+        }
+        else -> {
+          invalidatePendingQuestion(PendingInvalidation.DIALOGUE_INTERRUPTED)
+          return
+        }
+      }
+    }
+    if (parsed.code == CommandCode.NEXT_OPTION && fullCarparkIds.isNotEmpty()) {
+      launchRecommend(QueryTriggerMode.DRIVER_ACTIVE, filterFull = true)
+      updateCapsuleVisual()
+      return
+    }
     if (pendingQuestion == PendingQuestion.SCARCITY_EXPAND) {
       if (parsed.blockedAsSelfHearing) {
         runCatching {
@@ -495,7 +548,7 @@ class FloatingBubbleService : android.app.Service {
     launchApi { apiClient.syncDriverConfirmed(sessionId, 0L) }
   }
 
-  private fun launchRecommend(mode: QueryTriggerMode, expandScarcity: Boolean = false) {
+  private fun launchRecommend(mode: QueryTriggerMode, expandScarcity: Boolean = false, filterFull: Boolean = false) {
     launchedRecommendModes += mode
     spokenDriverCues.clear()
     launchApi {
@@ -503,19 +556,29 @@ class FloatingBubbleService : android.app.Service {
       if (outcome.succeeded) {
         val response = outcome.response
         val cards = response?.cards.orEmpty()
+        if (filterFull) {
+          val filtered = cards.filter { it.carparkId !in fullCarparkIds }
+          if (filtered.isEmpty()) {
+            if (mode == QueryTriggerMode.DRIVER_ACTIVE) {
+              ttsService.speak(
+                ZhHkTemplates.NO_MORE_OPTIONS,
+                tripStateMachine.tripVoiceMode,
+                isApproachMuted = false,
+                driverAsked = true,
+              )
+            }
+          } else {
+            cacheRecommendation(filtered, response?.sourceStatus ?: "ok")
+            if (mode == QueryTriggerMode.DRIVER_ACTIVE) speakDriverFirstChoice(filtered)
+          }
+          updateCapsuleVisual()
+          return@launchApi
+        }
         val awaitReply = response?.awaitVoiceReply == true
         if (expandScarcity) {
           if (cards.isNotEmpty() && !awaitReply) {
             cacheRecommendation(cards, response?.sourceStatus ?: "ok")
-            if (mode == QueryTriggerMode.DRIVER_ACTIVE) {
-              ttsService.speakFirstChoice(
-                cards,
-                cachedSourceStatus,
-                tripStateMachine.tripVoiceMode,
-                tripStateMachine.state == TripState.APPROACH_MUTED,
-                driverAsked = true,
-              )
-            }
+            if (mode == QueryTriggerMode.DRIVER_ACTIVE) speakDriverFirstChoice(cards)
           } else if (mode == QueryTriggerMode.DRIVER_ACTIVE) {
             ttsService.speak(
               ZhHkTemplates.NO_MORE_OPTIONS,
@@ -538,25 +601,112 @@ class FloatingBubbleService : android.app.Service {
           if (cards.isNotEmpty()) {
             cacheRecommendation(cards, response?.sourceStatus ?: "ok")
           }
-          if (mode == QueryTriggerMode.DRIVER_ACTIVE) {
-            ttsService.speakFirstChoice(
-              cards,
-              cachedSourceStatus,
-              tripStateMachine.tripVoiceMode,
-              tripStateMachine.state == TripState.APPROACH_MUTED,
-              driverAsked = true,
-            )
-          }
+          if (mode == QueryTriggerMode.DRIVER_ACTIVE) speakDriverFirstChoice(cards)
         }
       }
       updateCapsuleVisual()
     }
   }
 
+  internal fun confirmCurrentCandidate() {
+    if (commitInFlight || tripStateMachine.state == TripState.NAV_TO_GATE) return
+    val sessionId = tripStateMachine.sessionId ?: return
+    val card = cachedCards.getOrNull(selectedCardIndex) ?: return
+    commitInFlight = true
+    launchApi {
+      try {
+        val outcome = apiClient.commitSession(sessionId, card.carparkId)
+        if (outcome.succeeded) {
+          tripStateMachine.onCommitSucceeded()
+          com.hkparking.copilot.di.Bindings.navigation.launchGateNavigation(card.name.ifBlank { card.carparkId })
+          updateCapsuleVisual()
+        } else if (outcome.httpStatus == 409) {
+          fullCarparkIds += card.carparkId
+          val cue = outcome.actionSpokenCue
+          if (!cue.isNullOrBlank()) {
+            ttsService.speak(cue, tripStateMachine.tripVoiceMode, isApproachMuted = false, driverAsked = true)
+          }
+        } else {
+          ttsService.speak(
+            ZhHkTemplates.NETWORK_FAILED,
+            tripStateMachine.tripVoiceMode,
+            isApproachMuted = false,
+            driverAsked = true,
+          )
+        }
+        updateCapsuleVisual()
+      } finally {
+        commitInFlight = false
+      }
+    }
+  }
+
   private fun cacheRecommendation(cards: List<RecommendationCard>, sourceStatus: String) {
     cachedCards = cards
+    selectedCardIndex = 0
     cachedSourceStatus = sourceStatus
     cachedSpokenCue = cards.first().spokenCue
+  }
+
+  private fun speakDriverFirstChoice(cards: List<RecommendationCard>) {
+    val fullVoice = tripStateMachine.tripVoiceMode == TripVoiceMode.FULL_VOICE
+    val askEpoch = if (fullVoice) {
+      pendingQuestion = PendingQuestion.RECOMMENDATION_CONFIRM
+      confirmListenArmed = false
+      listenEpoch += 1
+      runCatching {
+        android.util.Log.i(
+          "FloatingBubbleService",
+          "Pending set: question=RECOMMENDATION_CONFIRM mic=$isMicActive",
+        )
+      }
+      listenEpoch
+    } else {
+      null
+    }
+    val spoken = ttsService.speakFirstChoice(
+      cards,
+      cachedSourceStatus,
+      tripStateMachine.tripVoiceMode,
+      tripStateMachine.state == TripState.APPROACH_MUTED,
+      driverAsked = true,
+      onFinished = { played ->
+        if (askEpoch == null) return@speakFirstChoice
+        if (!played) {
+          invalidatePendingQuestion(PendingInvalidation.TIMEOUT)
+          return@speakFirstChoice
+        }
+        if (listenEpoch != askEpoch || pendingQuestion != PendingQuestion.RECOMMENDATION_CONFIRM) return@speakFirstChoice
+        if (!isMicActive) return@speakFirstChoice
+        openConfirmListenWindow()
+      },
+    )
+    if (spoken == null && fullVoice) invalidatePendingQuestion(PendingInvalidation.TIMEOUT)
+  }
+
+  private fun openConfirmListenWindow() {
+    if (confirmListenArmed || !isMicActive || pendingQuestion != PendingQuestion.RECOMMENDATION_CONFIRM) return
+    confirmListenArmed = true
+    speechHeard = false
+    com.hkparking.copilot.di.Bindings.voiceInput.startListening(hotword = false)
+    val epoch = listenEpoch
+    runCatching {
+      android.util.Log.i(
+        "FloatingBubbleService",
+        "Listen opened: question=RECOMMENDATION_CONFIRM waitS=${NativeConfig.LISTEN_OPENING_WAIT_S}",
+      )
+    }
+    launchApi {
+      delayMs((NativeConfig.LISTEN_OPENING_WAIT_S * 1000).toLong())
+      if (
+        listenEpoch == epoch &&
+        pendingQuestion == PendingQuestion.RECOMMENDATION_CONFIRM &&
+        !speechHeard
+      ) {
+        onListenSilence(NativeConfig.LISTEN_OPENING_WAIT_S)
+        invalidatePendingQuestion(PendingInvalidation.TIMEOUT)
+      }
+    }
   }
 
   private fun askScarcityExpand(cards: List<RecommendationCard>) {
@@ -594,15 +744,7 @@ class FloatingBubbleService : android.app.Service {
           invalidatePendingQuestion(PendingInvalidation.TIMEOUT)
         }
       }
-      TripVoiceMode.ANNOUNCE_MANUAL -> {
-        ttsService.speakFirstChoice(
-          cards,
-          cachedSourceStatus,
-          tripStateMachine.tripVoiceMode,
-          tripStateMachine.state == TripState.APPROACH_MUTED,
-          driverAsked = true,
-        )
-      }
+      TripVoiceMode.ANNOUNCE_MANUAL -> speakDriverFirstChoice(cards)
       TripVoiceMode.MANUAL_ONLY -> Unit
     }
   }
@@ -632,13 +774,15 @@ class FloatingBubbleService : android.app.Service {
   }
 
   private fun invalidatePendingQuestion(reason: PendingInvalidation) {
-    listenEpoch += 1
     if (pendingQuestion == PendingQuestion.NONE) return
+    val question = pendingQuestion
+    listenEpoch += 1
+    confirmListenArmed = false
     pendingQuestion = CommandCodes.invalidatePending(reason)
     runCatching {
       android.util.Log.i(
         "FloatingBubbleService",
-        "Pending invalidated: question=SCARCITY_EXPAND reason=$reason",
+        "Pending invalidated: question=$question reason=$reason",
       )
     }
   }
@@ -847,6 +991,14 @@ class FloatingBubbleService : android.app.Service {
     ) {
       startScarcityOpeningWaitTimer()
     }
+    if (
+      tripStateMachine.tripVoiceMode == TripVoiceMode.FULL_VOICE &&
+      pendingQuestion == PendingQuestion.RECOMMENDATION_CONFIRM &&
+      !ttsService.isSpeaking &&
+      !confirmListenArmed
+    ) {
+      openConfirmListenWindow()
+    }
     return true
   }
 
@@ -866,6 +1018,9 @@ class FloatingBubbleService : android.app.Service {
   }
 
   private fun finishTeardown(reason: String) {
+    fullCarparkIds.clear()
+    commitInFlight = false
+    confirmListenArmed = false
     invalidatePendingQuestion(PendingInvalidation.DIALOGUE_INTERRUPTED)
     detachCapsuleWindow()
     isCapsuleVisible = false

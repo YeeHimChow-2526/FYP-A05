@@ -7,6 +7,7 @@ import com.hkparking.copilot.sim.FixtureNetworkStatus
 import com.hkparking.copilot.sim.SimEventReceiver
 import com.hkparking.copilot.sim.SimJoystickOverlay
 import com.hkparking.copilot.sim.SimLocationSource
+import com.hkparking.copilot.sim.SimNavigationLauncher
 import com.hkparking.copilot.sim.SimVoiceInput
 import com.hkparking.copilot.voice.CapabilitySnapshot
 import com.hkparking.copilot.voice.CapabilityStatus
@@ -25,6 +26,7 @@ object Bindings {
   val locationSource: SimLocationSource = SimLocationSource()
   val apiTransport: FixtureApiTransport = FixtureApiTransport()
   val networkStatus: FixtureNetworkStatus = FixtureNetworkStatus()
+  val navigation: SimNavigationLauncher = SimNavigationLauncher()
   var activeReceiver: SimEventReceiver? = null
   var pendingStartDestination: String? = null
   var fgsStarter: FgsStarter = FgsStarter { context ->
@@ -115,6 +117,7 @@ object Bindings {
     locationSource.setLocationListener(null)
     locationSource.setMotionListener(null)
     voiceInput.setUtteranceListener(null)
+    navigation.reset()
     SimJoystickOverlay.hide()
   }
 

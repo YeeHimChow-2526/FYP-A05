@@ -20,14 +20,21 @@ object Bindings {
   val locationSource: LocationSource = FusedLocationSource()
   val apiTransport: ApiTransport = HttpApiTransport()
   val networkStatus: ConnectivityNetworkStatus = ConnectivityNetworkStatus()
+  private var appContext: android.content.Context? = null
+  val navigation: NavigationPort = IntentNavigationPort { appContext }
 
   fun attachService(service: com.hkparking.copilot.FloatingBubbleService) {
-    networkStatus.context = service.applicationContext
+    val context = service.applicationContext
+    networkStatus.context = context
+    appContext = context
   }
 
   fun detachService(service: com.hkparking.copilot.FloatingBubbleService) {
     if (networkStatus.context === service.applicationContext) {
       networkStatus.context = null
+    }
+    if (appContext === service.applicationContext) {
+      appContext = null
     }
   }
 

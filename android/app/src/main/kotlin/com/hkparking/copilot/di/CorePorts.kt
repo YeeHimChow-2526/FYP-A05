@@ -107,3 +107,34 @@ class HttpApiTransport(
     }
   }
 }
+
+fun interface NavigationPort {
+  fun launchGateNavigation(carparkName: String): Boolean
+}
+
+class IntentNavigationPort(
+  private val contextProvider: () -> android.content.Context?,
+) : NavigationPort {
+  override fun launchGateNavigation(carparkName: String): Boolean {
+    val ctx = contextProvider() ?: return false
+    val q = java.net.URLEncoder.encode(carparkName, Charsets.UTF_8.name()).replace("+", "%20")
+    val uri = android.net.Uri.parse("google.navigation:q=$q&mode=d")
+    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, uri).apply {
+      setPackage("com.google.android.apps.maps")
+      addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    return runCatching {
+      ctx.startActivity(intent)
+      android.util.Log.i("NavigationPort", "launchGateNavigation ok name=$carparkName")
+      true
+    }.getOrElse { err ->
+      runCatching {
+        android.util.Log.w(
+          "NavigationPort",
+          "launchGateNavigation failed name=$carparkName reason=${err.javaClass.simpleName}",
+        )
+      }
+      false
+    }
+  }
+}

@@ -125,3 +125,19 @@
 - 影響任務編號／常數名／檔案：Step 2.2b；`net/ApiResponses.kt`、`HttpApiTransport`、`FixtureApiTransport.kt`、`docs/specs/03_api_and_local_trie.md`
 - 類別：規格缺漏
 - 狀態：待處理
+
+### SC-010
+- 日期：2026-10-25
+- 來源：Pi
+- 裝置（如適用）：不適用
+- 發現：首選確認後 commit／409／Google Maps 導航未有客戶端契約。待同步 impl Doc。
+- 建議改動：客戶端導航（SC-010）：
+  1. 「好／去呢個」只喺 `RECOMMENDATION_CONFIRM` 窗有效；等首選 TTS `onFinished(true)` 且 `isMicActive` 先開窗；開窗前 `speechHeard=false`。
+  2. commit 200 → `NAV_TO_GATE`＋`NavigationPort`；URI `google.navigation:q=<URLEncoder UTF-8>&mode=d`，package `com.google.android.apps.maps`，`FLAG_ACTIVITY_NEW_TASK`。
+  3. 409 → 口播 spoken_cue；唔 NAV／唔 Maps；記錄已滿 id；其後「有冇第二個」重查並過濾；空則「暫時冇其他選擇」。
+  4. FloatingCardView／手動掣／本地切卡 → 2.4；R11 唔屬本步。
+  遺留項：
+  - R11：仍遺留（FloatingCardView／手動掣／本地切卡，不屬 Step 2.3）
+- 影響任務編號／常數名／檔案：Step 2.3；`TripStateMachine.kt`、`NavigationPort`、`FloatingBubbleService.kt`、`docs/specs/03_api_and_local_trie.md`
+- 類別：規格缺漏
+- 狀態：待處理
