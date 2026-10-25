@@ -96,6 +96,7 @@
 - Step 3：`TRIE_MISS_RESOLVE_OK`／`TRIE_MISS_NETWORK_FAIL`（未口播「網絡唔順，遲啲再試」）／`TRIE_MISS_AMBIGUOUS` 接真 LocalPoiTrie／B-2
 
 未完成：B-2 分享接盤、閘口座標、DistanceTracker、EngineShutdownReceiver（藍牙／車充）、單一 AudioRecord、STT 引擎、今日行程 Flutter。
+Step 3.1：LocalPoiTrie＋hk_poi_master.json（未接駁；tools/poi 建置）
 - Step 3 開工前裁決：含糊地名口播 02 L110「去邊度？請拍一拍膠囊答我」vs 代碼 `PLACE_CLARIFY`「邊一區？」vs 03 L111「純語音反問」
 - 真機：FGS 真實 2s 逾時 `FgsBootstrapActivity` Log.w 記錄（模擬器無法觸發）
 

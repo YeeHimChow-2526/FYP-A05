@@ -173,3 +173,24 @@
 - 影響任務編號／常數名／檔案：Step 2.5；`FloatingBubbleService.kt`、`ZhHkTemplates.PLACE_CLARIFY`
 - 類別：規格缺漏
 - 狀態：待處理
+
+### SC-013
+- 日期：2026-10-26
+- 來源：評估（Step 3.1 資料同程式預建，Pi 落地）
+- 裝置（如適用）：不適用
+- 發現：本機字典樹資料範圍、正規化、命中優先次序未有規格。待同步 impl Doc。
+- 建議改動：本機字典樹（SC-013）：
+  1. 範圍：3.1 只交資料＋`LocalPoiTrie.kt`（純 Kotlin，冇 android.*），**未接駁**；接 `TRIE_MISS_*`／行程流程屬 3.1b。
+  2. 資料 `assets/hk_poi_master.json`，由 `tools/poi/build_poi_master.py` 產生，四個來源：地政總署地名（CSDI，只取 Official 且 Area／Town）、地政總署 iGeoCom 商場（TYPE=MAL）、運輸署停車場（全部）、民政事務總署 18 區（另作 t=D）。唔收：村（Village）、屋邨資料集、非運輸署停車場。來源、sha256 見 `tools/poi/SOURCES.md`。
+  3. 大小上限 ≤153,600 bytes，依據 ARCHITECTURE L697「＜150KB」。超出只裁商場：先裁 150m 內冇運輸署停車場嘅商場，再裁近停車場嘅，`aliases_overlay.json` 指向嘅商場最後先裁；同層由 id 大到細裁。（朗豪坊商場附近冇運輸署停車場，所以要保護。）
+  4. 正規化（Python／Kotlin 一致）：NFKC → 小寫 → 刪 Unicode P*／Z* → 最多剝一個後綴（最長優先：停車場、停車塲、商場、購物中心、carpark、carparks、parking、shoppingmall、shoppingcentre、mall）→ 剝完係空就用剝之前嘅值。唔做簡繁轉換，唔剝「第X期」。normalize(zh) 少過 2 字唔收。
+  5. 查詢：先完整 key；冇就搵 query 最長而長度 ≥2 嘅完整 key 前綴；都冇就 Miss。多個 POI 時類型優先 A＞M＞C＞D；最高類型只得一區 → Hit（id 最細）；多區 → Ambiguous，每區一個，按區名排，最多 3 個。
+  6. 「朗豪坊」靠剝「商場」後綴命中 iGeoCom 朗豪坊商場（油尖旺）。
+  7. 18 區 POI：zh 用全名（如「南區」），d 用無「區」短名；短名 ≥2 字先加做別名（南／東／北冇別名）。
+  8. 「數據來源」畫面延後到 3.4；JSON `attribution` 已備好字串。
+  遺留項：
+  - 3.1b：接駁 `TRIE_MISS_RESOLVE_OK`／`TRIE_MISS_NETWORK_FAIL`／`TRIE_MISS_AMBIGUOUS`，asset 載入
+  - 3.4：數據來源畫面
+- 影響任務編號／常數名／檔案：Step 3.1；`LocalPoiTrie.kt`、`NativeConfig.TRIE_LOOKUP_BUDGET_MS`、`assets/hk_poi_master.json`、`tools/poi/*`、`docs/specs/03_api_and_local_trie.md`
+- 類別：規格缺漏
+- 狀態：待處理
