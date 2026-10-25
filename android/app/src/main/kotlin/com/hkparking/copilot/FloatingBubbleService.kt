@@ -59,9 +59,15 @@ class FloatingBubbleService : android.app.Service {
       delayMs,
     )
     capabilityChecker.attachContext(this)
-    tripStateMachine.onStateChanged = { updateCapsuleVisual() }
+    tripStateMachine.onStateChanged = { onTripStateChanged() }
     tripStateMachine.applyVoiceCapability(capabilityChecker)
   }
+
+  val floatingCard: FloatingCardView = FloatingCardView(
+    onConfirm = { confirmCurrentCandidate() },
+    onNext = { handleFollowUp(CommandCode.NEXT_OPTION) },
+    onDismiss = { dismissCardFromUser() },
+  )
 
   private var capsuleView: android.view.View? = null
 
@@ -115,6 +121,7 @@ class FloatingBubbleService : android.app.Service {
   }
 
   override fun onDestroy() {
+    abandonCardOverlay()
     if (portsWired) { portsWired = false; com.hkparking.copilot.di.Bindings.clearPorts() }
     com.hkparking.copilot.di.Bindings.detachService(this)
     detachCapsuleWindow()
@@ -177,7 +184,12 @@ class FloatingBubbleService : android.app.Service {
   private var ttsEngineReady: Boolean = false
   private val spokenDriverCues = mutableSetOf<String>()
   private var cachedCards: List<RecommendationCard> = emptyList()
-  private var selectedCardIndex: Int = 0
+  var selectedCardIndex: Int = 0
+    private set
+  private var cardTransitionEpoch: Int = 0
+  private var observedTripState: TripState = TripState.PRE_FGS
+  private var pendingFollowUp: CommandCode? = null
+  private var showManualCardAfterRecommend: Boolean = false
   private var cachedSourceStatus: String = "ok"
   private var cachedSpokenCue: String? = null
   private val fullCarparkIds = mutableSetOf<String>()
@@ -261,6 +273,7 @@ class FloatingBubbleService : android.app.Service {
     isFgsRunning = true
     isCapsuleVisible = true
     abandonedBySystemKill = false
+    abandonCardOverlay()
     fullCarparkIds.clear()
     selectedCardIndex = 0
     commitInFlight = false
@@ -339,6 +352,7 @@ class FloatingBubbleService : android.app.Service {
   }
 
   fun onEngineShutdown(withinTargetOrBasementLoss: Boolean) {
+    abandonCardOverlay()
     fullCarparkIds.clear()
     commitInFlight = false
     confirmListenArmed = false
@@ -454,15 +468,31 @@ class FloatingBubbleService : android.app.Service {
 
   private fun onUtterance(text: String, confidence: Double?) {
     if (!isFgsRunning) { runCatching { android.util.Log.i("FloatingBubbleService", "Utterance ignored: service not running") }; return }
+    val cardBound = pendingQuestion == PendingQuestion.NONE && cardConfirmBound()
+    val effectivePending = if (cardBound) PendingQuestion.RECOMMENDATION_CONFIRM else pendingQuestion
     val parsed = CommandCodes.parse(
       text,
       ParseContext(
-        pendingQuestion = pendingQuestion,
+        pendingQuestion = effectivePending,
         isTtsSpeaking = ttsService.isSpeaking,
         confidence = confidence,
       ),
     )
-    if (pendingQuestion == PendingQuestion.RECOMMENDATION_CONFIRM) {
+    if (parsed.code == CommandCode.CANCEL) {
+      ttsService.interrupt()
+      speechHeard = true
+      com.hkparking.copilot.di.Bindings.voiceInput.stopListening()
+      invalidatePendingQuestion(PendingInvalidation.CANCEL)
+      dismissCardFromUser()
+      return
+    }
+    if (parsed.lowConfidence) {
+      if (pendingQuestion != PendingQuestion.NONE) {
+        invalidatePendingQuestion(PendingInvalidation.DIALOGUE_INTERRUPTED)
+      }
+      return
+    }
+    if (effectivePending == PendingQuestion.RECOMMENDATION_CONFIRM) {
       if (parsed.blockedAsSelfHearing) {
         runCatching {
           android.util.Log.i(
@@ -472,36 +502,41 @@ class FloatingBubbleService : android.app.Service {
         }
         return
       }
-      speechHeard = true
-      com.hkparking.copilot.di.Bindings.voiceInput.stopListening()
-      when {
-        parsed.code == CommandCode.CONFIRM_TARGET && parsed.confirmed -> {
-          pendingQuestion = PendingQuestion.NONE
-          listenEpoch += 1
-          confirmListenArmed = false
-          confirmCurrentCandidate()
-          return
-        }
-        parsed.code == CommandCode.CANCEL -> {
-          invalidatePendingQuestion(PendingInvalidation.CANCEL)
-          return
-        }
-        parsed.code == CommandCode.SET_DESTINATION && !parsed.destinationName.isNullOrBlank() -> {
-          invalidatePendingQuestion(PendingInvalidation.DESTINATION_OR_CANDIDATE_CHANGED)
-        }
-        parsed.code == CommandCode.FIND_PARKING -> {
-          invalidatePendingQuestion(PendingInvalidation.DESTINATION_OR_CANDIDATE_CHANGED)
-        }
-        else -> {
+      if (parsed.code == CommandCode.CONFIRM_TARGET && parsed.confirmed) {
+        speechHeard = true
+        com.hkparking.copilot.di.Bindings.voiceInput.stopListening()
+        pendingQuestion = PendingQuestion.NONE
+        listenEpoch += 1
+        confirmListenArmed = false
+        confirmCurrentCandidate()
+        return
+      }
+      if (parsed.code == CommandCode.SHOW_DETAILS || parsed.code == CommandCode.NEXT_OPTION) {
+        if (pendingQuestion == PendingQuestion.RECOMMENDATION_CONFIRM) {
+          speechHeard = true
+          com.hkparking.copilot.di.Bindings.voiceInput.stopListening()
           invalidatePendingQuestion(PendingInvalidation.DIALOGUE_INTERRUPTED)
-          return
+        }
+        handleFollowUp(parsed.code)
+        updateCapsuleVisual()
+        return
+      }
+      if (!cardBound && pendingQuestion == PendingQuestion.RECOMMENDATION_CONFIRM) {
+        speechHeard = true
+        com.hkparking.copilot.di.Bindings.voiceInput.stopListening()
+        when {
+          parsed.code == CommandCode.SET_DESTINATION && !parsed.destinationName.isNullOrBlank() -> {
+            invalidatePendingQuestion(PendingInvalidation.DESTINATION_OR_CANDIDATE_CHANGED)
+          }
+          parsed.code == CommandCode.FIND_PARKING -> {
+            invalidatePendingQuestion(PendingInvalidation.DESTINATION_OR_CANDIDATE_CHANGED)
+          }
+          else -> {
+            invalidatePendingQuestion(PendingInvalidation.DIALOGUE_INTERRUPTED)
+            return
+          }
         }
       }
-    }
-    if (parsed.code == CommandCode.NEXT_OPTION && fullCarparkIds.isNotEmpty()) {
-      launchRecommend(QueryTriggerMode.DRIVER_ACTIVE, filterFull = true)
-      updateCapsuleVisual()
-      return
     }
     if (pendingQuestion == PendingQuestion.SCARCITY_EXPAND) {
       if (parsed.blockedAsSelfHearing) {
@@ -542,10 +577,201 @@ class FloatingBubbleService : android.app.Service {
       launchRecommend(QueryTriggerMode.DRIVER_ACTIVE)
       updateCapsuleVisual()
     }
+    if (parsed.code == CommandCode.SHOW_DETAILS || parsed.code == CommandCode.NEXT_OPTION) {
+      handleFollowUp(parsed.code)
+      updateCapsuleVisual()
+    }
   }
 
   fun confirmParkedCandidate(sessionId: String) {
     launchApi { apiClient.syncDriverConfirmed(sessionId, 0L) }
+  }
+
+  private fun onTripStateChanged() {
+    val next = tripStateMachine.state
+    val previous = observedTripState
+    observedTripState = next
+    if (
+      next == TripState.APPROACH_MUTED &&
+      previous != TripState.EXPANDED &&
+      previous != TripState.APPROACH_MUTED
+    ) {
+      abandonCardOverlay()
+    }
+    updateCapsuleVisual()
+  }
+
+  private fun cardConfirmBound(): Boolean {
+    return tripStateMachine.state == TripState.EXPANDED || floatingCard.uiState.visible
+  }
+
+  private fun followUpAllowed(): Boolean {
+    if (!isFgsRunning) return false
+    return tripStateMachine.state != TripState.NAV_TO_GATE &&
+      tripStateMachine.state != TripState.ENDED &&
+      tripStateMachine.state != TripState.PARKED_CONFIRMED
+  }
+
+  private fun handleFollowUp(code: CommandCode) {
+    if (!followUpAllowed()) return
+    if (pendingQuestion == PendingQuestion.RECOMMENDATION_CONFIRM) {
+      invalidatePendingQuestion(PendingInvalidation.DIALOGUE_INTERRUPTED)
+    }
+    if (cachedCards.isEmpty()) {
+      pendingFollowUp = code
+      launchRecommend(QueryTriggerMode.DRIVER_ACTIVE)
+      return
+    }
+    executeStoredFollowUp(code)
+  }
+
+  private fun executeStoredFollowUp(code: CommandCode) {
+    if (code == CommandCode.SHOW_DETAILS) showDetailsNow() else handleNext()
+  }
+
+  private fun showDetailsNow() {
+    val card = cachedCards.getOrNull(selectedCardIndex) ?: return
+    tripStateMachine.enterExpanded()
+    presentCard()
+    armConfirmAfterSpeech(detailsText(card))
+  }
+
+  private fun handleNext() {
+    if (fullCarparkIds.isNotEmpty()) {
+      launchRecommend(QueryTriggerMode.DRIVER_ACTIVE, filterFull = true)
+      return
+    }
+    val next = selectedCardIndex + 1
+    if (next >= cachedCards.size) {
+      speakNoMore(
+        reopenConfirm = floatingCard.uiState.visible &&
+          tripStateMachine.tripVoiceMode == TripVoiceMode.FULL_VOICE,
+      )
+      return
+    }
+    val epoch = cardTransitionEpoch
+    val pageDelay = NativeConfig.CARD_PAGE_TRANSITION_MS.toLong()
+    launchApi {
+      if (!transitionLive(epoch)) return@launchApi
+      delayMs(pageDelay)
+      if (!transitionLive(epoch)) return@launchApi
+      val card = cachedCards.getOrNull(next) ?: return@launchApi
+      selectedCardIndex = next
+      tripStateMachine.enterExpanded()
+      presentCard()
+      armConfirmAfterSpeech(spokenCueFor(card))
+    }
+  }
+
+  private fun speakNoMore(reopenConfirm: Boolean) {
+    ttsService.speak(
+      ZhHkTemplates.NO_MORE_OPTIONS,
+      tripStateMachine.tripVoiceMode,
+      isApproachMuted = false,
+      driverAsked = true,
+      onFinished = { played ->
+        if (!reopenConfirm || !played || !isMicActive || !floatingCard.uiState.visible) return@speak
+        if (tripStateMachine.tripVoiceMode != TripVoiceMode.FULL_VOICE) return@speak
+        pendingQuestion = PendingQuestion.RECOMMENDATION_CONFIRM
+        confirmListenArmed = false
+        listenEpoch += 1
+        openConfirmListenWindow()
+      },
+    )
+  }
+
+  private fun presentCard(forceManualButtons: Boolean? = null) {
+    val card = cachedCards.getOrNull(selectedCardIndex) ?: return
+    val manual = forceManualButtons ?: !(tripStateMachine.tripVoiceMode == TripVoiceMode.FULL_VOICE && isMicActive)
+    floatingCard.show(
+      CardUiState(
+        visible = true,
+        carparkId = card.carparkId,
+        title = card.name,
+        subtitle = detailsText(card),
+        showManualButtons = manual,
+        manualActions = if (manual) FloatingCardView.MANUAL_ACTIONS else emptyList(),
+        transitionMs = NativeConfig.CARD_PAGE_TRANSITION_MS,
+        backgroundColor = FloatingCardView.CARD_BACKGROUND,
+        blurRadius = FloatingCardView.CARD_BLUR_RADIUS,
+      ),
+      this,
+    )
+  }
+
+  private fun presentManualCardFromTap(announce: Boolean) {
+    if (!followUpAllowed()) return
+    if (cachedCards.isNotEmpty()) {
+      selectedCardIndex = 0
+      tripStateMachine.enterExpanded()
+      presentCard(forceManualButtons = true)
+      if (announce) speakDriverFirstChoice(cachedCards)
+      return
+    }
+    showManualCardAfterRecommend = true
+    launchRecommend(QueryTriggerMode.DRIVER_ACTIVE)
+  }
+
+  private fun detailsText(card: RecommendationCard): String {
+    if (card.isStale || (card.type == CARD_METER && cachedSourceStatus == "degraded")) {
+      return ZhHkTemplates.METER_STALE_SPOKEN
+    }
+    return ZhHkTemplates.cardDetails(card)
+  }
+
+  private fun spokenCueFor(card: RecommendationCard): String {
+    if (card.type == CARD_METER && (card.isStale || cachedSourceStatus == "degraded")) {
+      return ZhHkTemplates.METER_STALE_SPOKEN
+    }
+    return card.spokenCue
+  }
+
+  private fun armConfirmAfterSpeech(text: String) {
+    val fullVoice = tripStateMachine.tripVoiceMode == TripVoiceMode.FULL_VOICE
+    val askEpoch = if (fullVoice) {
+      pendingQuestion = PendingQuestion.RECOMMENDATION_CONFIRM
+      confirmListenArmed = false
+      listenEpoch += 1
+      listenEpoch
+    } else {
+      null
+    }
+    val spoken = ttsService.speak(
+      text,
+      tripStateMachine.tripVoiceMode,
+      tripStateMachine.state == TripState.APPROACH_MUTED,
+      driverAsked = true,
+      onFinished = { played ->
+        if (askEpoch == null) return@speak
+        if (!played) {
+          invalidatePendingQuestion(PendingInvalidation.TIMEOUT)
+          return@speak
+        }
+        if (listenEpoch != askEpoch || pendingQuestion != PendingQuestion.RECOMMENDATION_CONFIRM) return@speak
+        if (!isMicActive) return@speak
+        openConfirmListenWindow()
+      },
+    )
+    if (spoken == null && fullVoice) invalidatePendingQuestion(PendingInvalidation.TIMEOUT)
+  }
+
+  private fun transitionLive(epoch: Int): Boolean {
+    return epoch == cardTransitionEpoch && isFgsRunning
+  }
+
+  private fun dismissCardFromUser() {
+    val shouldRestore = floatingCard.uiState.visible || tripStateMachine.state == TripState.EXPANDED
+    abandonCardOverlay()
+    ttsService.interrupt()
+    invalidatePendingQuestion(PendingInvalidation.CANCEL)
+    if (shouldRestore) tripStateMachine.onCardDismissed(cachedCards.isNotEmpty())
+  }
+
+  private fun abandonCardOverlay() {
+    cardTransitionEpoch += 1
+    pendingFollowUp = null
+    showManualCardAfterRecommend = false
+    floatingCard.hide()
   }
 
   private fun launchRecommend(mode: QueryTriggerMode, expandScarcity: Boolean = false, filterFull: Boolean = false) {
@@ -553,56 +779,82 @@ class FloatingBubbleService : android.app.Service {
     spokenDriverCues.clear()
     launchApi {
       val outcome = apiClient.recommendAndRoute(buildRecommendRequest(expandScarcity), mode)
-      if (outcome.succeeded) {
-        val response = outcome.response
-        val cards = response?.cards.orEmpty()
-        if (filterFull) {
-          val filtered = cards.filter { it.carparkId !in fullCarparkIds }
-          if (filtered.isEmpty()) {
-            if (mode == QueryTriggerMode.DRIVER_ACTIVE) {
-              ttsService.speak(
-                ZhHkTemplates.NO_MORE_OPTIONS,
-                tripStateMachine.tripVoiceMode,
-                isApproachMuted = false,
-                driverAsked = true,
-              )
-            }
-          } else {
-            cacheRecommendation(filtered, response?.sourceStatus ?: "ok")
-            if (mode == QueryTriggerMode.DRIVER_ACTIVE) speakDriverFirstChoice(filtered)
-          }
-          updateCapsuleVisual()
-          return@launchApi
-        }
-        val awaitReply = response?.awaitVoiceReply == true
-        if (expandScarcity) {
-          if (cards.isNotEmpty() && !awaitReply) {
-            cacheRecommendation(cards, response?.sourceStatus ?: "ok")
-            if (mode == QueryTriggerMode.DRIVER_ACTIVE) speakDriverFirstChoice(cards)
-          } else if (mode == QueryTriggerMode.DRIVER_ACTIVE) {
+      if (!outcome.succeeded) {
+        pendingFollowUp = null
+        showManualCardAfterRecommend = false
+        updateCapsuleVisual()
+        return@launchApi
+      }
+      val response = outcome.response
+      val cards = response?.cards.orEmpty()
+      if (filterFull) {
+        val refresh = floatingCard.uiState.visible || tripStateMachine.state == TripState.EXPANDED
+        pendingFollowUp = null
+        showManualCardAfterRecommend = false
+        val filtered = cards.filter { it.carparkId !in fullCarparkIds }
+        if (filtered.isEmpty()) {
+          if (mode == QueryTriggerMode.DRIVER_ACTIVE) {
             ttsService.speak(
               ZhHkTemplates.NO_MORE_OPTIONS,
               tripStateMachine.tripVoiceMode,
               isApproachMuted = false,
               driverAsked = true,
             )
-            runCatching {
-              android.util.Log.i("FloatingBubbleService", "Scarcity expand result: none")
-            }
           }
-        } else if (
-          mode == QueryTriggerMode.DRIVER_ACTIVE &&
-          awaitReply &&
-          cards.isNotEmpty()
-        ) {
-          cacheRecommendation(cards, response?.sourceStatus ?: "ok")
-          askScarcityExpand(cards)
         } else {
-          if (cards.isNotEmpty()) {
-            cacheRecommendation(cards, response?.sourceStatus ?: "ok")
+          cacheRecommendation(filtered, response?.sourceStatus ?: "ok")
+          if (refresh) {
+            selectedCardIndex = 0
+            tripStateMachine.enterExpanded()
+            presentCard()
           }
-          if (mode == QueryTriggerMode.DRIVER_ACTIVE) speakDriverFirstChoice(cards)
+          if (mode == QueryTriggerMode.DRIVER_ACTIVE) speakDriverFirstChoice(filtered)
         }
+        updateCapsuleVisual()
+        return@launchApi
+      }
+      val awaitReply = response?.awaitVoiceReply == true
+      if (expandScarcity) {
+        pendingFollowUp = null
+        showManualCardAfterRecommend = false
+        if (cards.isNotEmpty() && !awaitReply) {
+          cacheRecommendation(cards, response?.sourceStatus ?: "ok")
+          if (mode == QueryTriggerMode.DRIVER_ACTIVE) speakDriverFirstChoice(cards)
+        } else if (mode == QueryTriggerMode.DRIVER_ACTIVE) {
+          ttsService.speak(
+            ZhHkTemplates.NO_MORE_OPTIONS,
+            tripStateMachine.tripVoiceMode,
+            isApproachMuted = false,
+            driverAsked = true,
+          )
+          runCatching {
+            android.util.Log.i("FloatingBubbleService", "Scarcity expand result: none")
+          }
+        }
+      } else if (
+        mode == QueryTriggerMode.DRIVER_ACTIVE &&
+        awaitReply &&
+        cards.isNotEmpty()
+      ) {
+        cacheRecommendation(cards, response?.sourceStatus ?: "ok")
+        pendingFollowUp = null
+        showManualCardAfterRecommend = false
+        askScarcityExpand(cards)
+      } else {
+        if (cards.isNotEmpty()) {
+          cacheRecommendation(cards, response?.sourceStatus ?: "ok")
+        }
+        val follow = pendingFollowUp
+        pendingFollowUp = null
+        val showManual = showManualCardAfterRecommend
+        showManualCardAfterRecommend = false
+        if (mode == QueryTriggerMode.DRIVER_ACTIVE && follow == null) speakDriverFirstChoice(cards)
+        if (showManual && cachedCards.isNotEmpty() && tripStateMachine.state != TripState.GREY_BREATHING) {
+          selectedCardIndex = 0
+          tripStateMachine.enterExpanded()
+          presentCard(forceManualButtons = true)
+        }
+        if (follow != null && cachedCards.isNotEmpty()) executeStoredFollowUp(follow)
       }
       updateCapsuleVisual()
     }
@@ -617,6 +869,7 @@ class FloatingBubbleService : android.app.Service {
       try {
         val outcome = apiClient.commitSession(sessionId, card.carparkId)
         if (outcome.succeeded) {
+          abandonCardOverlay()
           tripStateMachine.onCommitSucceeded()
           com.hkparking.copilot.di.Bindings.navigation.launchGateNavigation(card.name.ifBlank { card.carparkId })
           updateCapsuleVisual()
@@ -968,8 +1221,11 @@ class FloatingBubbleService : android.app.Service {
 
   fun onActiveBubbleTap(): Boolean {
     if (!isFgsRunning || !isCapsuleVisible) return onColdBubbleTap()
-    if (tripStateMachine.state == TripState.GREY_BREATHING) manualRetryRequested = true
-    if (capabilityChecker.tripVoiceMode == TripVoiceMode.FULL_VOICE) {
+    val grey = tripStateMachine.state == TripState.GREY_BREATHING
+    if (grey) manualRetryRequested = true
+    val fullVoice = capabilityChecker.tripVoiceMode == TripVoiceMode.FULL_VOICE
+    val micWasActive = isMicActive
+    if (fullVoice) {
       if (!isMicActive) {
         activeFgsType = VoiceCapabilityChecker.FGS_LOCATION_MIC
         isMicActive = true
@@ -999,6 +1255,9 @@ class FloatingBubbleService : android.app.Service {
     ) {
       openConfirmListenWindow()
     }
+    if (!grey && pendingQuestion != PendingQuestion.SCARCITY_EXPAND && (!fullVoice || !micWasActive)) {
+      presentManualCardFromTap(announce = tripStateMachine.tripVoiceMode == TripVoiceMode.ANNOUNCE_MANUAL)
+    }
     return true
   }
 
@@ -1018,6 +1277,7 @@ class FloatingBubbleService : android.app.Service {
   }
 
   private fun finishTeardown(reason: String) {
+    abandonCardOverlay()
     fullCarparkIds.clear()
     commitInFlight = false
     confirmListenArmed = false
@@ -1066,6 +1326,7 @@ class FloatingBubbleService : android.app.Service {
     const val CHANNEL_ID = "hkparking_copilot_fgs"
     const val CHANNEL_NAME = "泊車副駕"
     const val CAPSULE_MARK = "P"
+    private const val CARD_METER = "METER"
     const val NOTIFICATION_ID = 1
     private val fgsStartedListeners = mutableListOf<(FloatingBubbleService) -> Unit>()
     private val bootstrapTimeoutListeners = mutableListOf<() -> Unit>()

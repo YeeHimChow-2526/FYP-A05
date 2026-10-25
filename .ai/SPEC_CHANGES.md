@@ -141,3 +141,22 @@
 - 影響任務編號／常數名／檔案：Step 2.3；`TripStateMachine.kt`、`NavigationPort`、`FloatingBubbleService.kt`、`docs/specs/03_api_and_local_trie.md`
 - 類別：規格缺漏
 - 狀態：待處理
+
+### SC-011
+- 日期：2026-10-25
+- 來源：Pi
+- 裝置（如適用）：不適用
+- 發現：追問卡出卡、本地切卡、確認窗逾時後仍可確認、409 不收卡，未有客戶端契約。待同步 impl Doc。
+- 建議改動：客戶端追問卡（SC-011）：
+  1. `FloatingCardView` 只喺追問或手動降級拍膠囊時出；高度跟 `OVERLAY_MAX_CARD_HEIGHT_DP`／`OVERLAY_MAX_SCREEN_COVERAGE`；底色 `#121212` 約 80%；不設自動收起。
+  2. `EXPANDED` 燈 `GREY_STEADY`。到場取樣唔強制踢走 `EXPANDED`；非 EXPANDED 進入 `APPROACH_MUTED` 先收卡。收卡還原：仍符合到場 → `APPROACH_MUTED`；有推薦 → `NEARBY_READY`；否則 `CRUISING`。
+  3. 卡可見或 `EXPANDED` 時，「好」經 parse 綁 `RECOMMENDATION_CONFIRM`（自聽／低信心唔確認）。逾時唔收卡。取消無論 pending／是否播緊都停口播並收卡。窗內「詳細啲／有冇第二個」先打斷再出卡／切卡。
+  4. 已有滿鎖 id 時「下一個」立即過濾重查，唔本地翻頁、唔等 350ms。否則本地切卡，`CARD_PAGE_TRANSITION_MS` 前後對 epoch；收卡／取消／進 `APPROACH_MUTED`／commit 成功／熄匙拆除令 epoch 失效。
+  5. 409 不收卡。`GREY_BREATHING` 拍膠囊唔自動出卡。詳情：stale 或咪錶 degraded 讀 `METER_STALE_SPOKEN`；否則 `cardDetails`。
+  6. Sim：`CARD_TAP`／`CARD_SWIPE`／`CARD_NEXT`／`CARD_CONFIRM`／`CARD_CANCEL` 經 debug `Bindings.dispatchSim`；`FORCE_TWO_INDOOR` → `recommend_success_two_indoor.json`。預設 langham 不變。
+  遺留項：
+  - R11：熄匙 `tts.stop` 仍唔屬本步
+  - `GREY_BREATHING` 拍膠囊仍只設 `manualRetryRequested`，冇新增重試迴圈
+- 影響任務編號／常數名／檔案：Step 2.4；`FloatingCardView.kt`、`FloatingBubbleService.kt`、`TripStateMachine.kt`、`CommandCodes.kt`、`docs/specs/01_ui_and_voice_fsm.md`、`docs/specs/04_mock_and_sim_shell.md`
+- 類別：規格缺漏
+- 狀態：待處理

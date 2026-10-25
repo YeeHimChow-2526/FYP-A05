@@ -27,6 +27,7 @@ android/app/src/
 ```
 android/app/src/debug/assets/mock/
   recommend_success_langham.json
+  recommend_success_two_indoor.json  # 兩張 INDOOR；FORCE_TWO_INDOOR 先用，預設仍係 langham
   recommend_scarcity_await_reply.json
   recommend_empty_expand.json
   recommend_scarcity_expanded.json
@@ -80,6 +81,8 @@ debug 建置提供虛擬搖桿 overlay／adb broadcast 注入事件（指令格�
 | `INJECT_TTS_ECHO` | TTS 播放期間注入「好」→ 不得視作確認 |
 | `FGS_START_TIMEOUT` | FGS_STARTED 未於 2000ms 內回報 → FgsBootstrapActivity finish() 並記錄原因 |
 | `BUBBLE_TAP` | 模擬拍膠囊升級收音（全語音）；STT 不可用時顯示手動卡片 |
+| `CARD_TAP` / `CARD_SWIPE` / `CARD_NEXT` / `CARD_CONFIRM` / `CARD_CANCEL` | 追問卡盲撳／滑走／下一個／確認／取消；經 `Bindings.dispatchSim` 轉呼，Receiver 唔持 service |
+| `FORCE_TWO_INDOOR` | 下一次 recommend 回 `recommend_success_two_indoor.json`；唔改預設 langham |
 | `TRIE_MISS_RESOLVE_OK` / `TRIE_MISS_NETWORK_FAIL` / `TRIE_MISS_AMBIGUOUS` | B-2 背景解析三結果 |
 | `GPS_BAD_ACCURACY` | 現場即泊精度 >100m 失敗支 |
 | `FORCE_STALE` / `FORCE_DEGRADED` | 下一次 recommend 回對應 fixture |
@@ -184,7 +187,8 @@ interface ApiTransport {
 - [ ] `FORCE_LOW_WATERMARK` → 口播只點名一個後備
 - [ ] `FORCE_CROWD_FLAG` → 照播黃旗句、選項仍保留
 - [ ] `FORCE_STALE`／`FORCE_DEGRADED` → 咪錶卡「咪錶資料暫時未更新」、無數字；室內場照常
-- [ ] `FORCE_LOCK_FULL` → 播 409 spoken_cue，膠囊唔轉 ALERT，可講「有冇第二個」
+- [ ] `FORCE_LOCK_FULL` → 播 409 spoken_cue，膠囊唔轉 ALERT，可講「有冇第二個」；卡已顯示則 409 不收卡，其後 `CARD_NEXT`／「有冇第二個」走過濾重查
+- [ ] `FORCE_TWO_INDOOR` → 本地下一張等 `CARD_PAGE_TRANSITION_MS`；`CARD_*` 經 Bindings 轉呼
 - [ ] `FORCE_RATE_LIMIT` → 等候（`Retry-After` 上限 `RATE_LIMIT_MAX_WAIT_MS`，或 `RATE_LIMIT_RETRY_DELAY_MS`）後只重試一次；`value` 2（第二次亦 429）→ GREY＋拍膠囊重試；全程冇即時重試迴圈
 
 ## 7. 五階段客戶端路線圖（摘要）

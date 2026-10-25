@@ -105,6 +105,10 @@ class TripStateMachine(
     private set
 
   private var distanceToDestinationM: Int? = null
+  private var lastApproachDistanceM: Int? = null
+  private var lastApproachSpeedKmh: Double = 0.0
+  private var lastApproachLowSpeedHoldS: Int = 0
+  private var lastApproachFixAgeS: Int = 0
   private var treatAsOnSite: Boolean = false
   private var deferredAlert: AlertCause? = null
   private val spokenAlerts = mutableSetOf<AlertCause>()
@@ -263,6 +267,10 @@ class TripStateMachine(
     if (!fgsRunning) {
       return
     }
+    if (state == TripState.EXPANDED) {
+      distanceToDestinationM = distanceM
+      return
+    }
     if (state == TripState.APPROACH_MUTED || state == TripState.PARKED_CONFIRMED || state == TripState.NAV_TO_GATE) {
       return
     }
@@ -278,6 +286,13 @@ class TripStateMachine(
     exitHoldS: Int = 0,
   ) {
     if (!fgsRunning) {
+      return
+    }
+    lastApproachDistanceM = distanceM
+    lastApproachSpeedKmh = speedKmh
+    lastApproachLowSpeedHoldS = lowSpeedHoldS
+    lastApproachFixAgeS = fixAgeS
+    if (state == TripState.EXPANDED) {
       return
     }
     if (
@@ -409,11 +424,47 @@ class TripStateMachine(
     enter(TripState.NAV_TO_GATE)
   }
 
+  fun enterExpanded() {
+    if (!fgsRunning) return
+    if (state == TripState.NAV_TO_GATE || state == TripState.ENDED || state == TripState.PARKED_CONFIRMED) return
+    enter(TripState.EXPANDED)
+  }
+
+  fun onCardDismissed(hasRecommendation: Boolean) {
+    if (!fgsRunning) return
+    if (state == TripState.NAV_TO_GATE || state == TripState.ENDED || state == TripState.PARKED_CONFIRMED) return
+    if (approachConditionsMet()) {
+      enter(TripState.APPROACH_MUTED)
+      return
+    }
+    if (hasRecommendation || statusPip != StatusPip.NONE) {
+      enter(TripState.NEARBY_READY)
+      return
+    }
+    enter(TripState.CRUISING)
+  }
+
+  private fun approachConditionsMet(): Boolean {
+    val distance = lastApproachDistanceM ?: return false
+    val coreHit = distance <= NativeConfig.APPROACH_CORE_RADIUS_M &&
+      lastApproachSpeedKmh < NativeConfig.APPROACH_SPEED_THRESHOLD_KMH &&
+      lastApproachLowSpeedHoldS >= NativeConfig.APPROACH_CONSECUTIVE_S
+    val deadReckoning = distance <= NativeConfig.APPROACH_RADIUS_M &&
+      lastApproachSpeedKmh < NativeConfig.DEAD_RECKONING_SPEED_KMH &&
+      lastApproachFixAgeS > NativeConfig.GPS_FIX_STALE_S
+    return coreHit || deadReckoning
+  }
+
   fun onJitSucceeded(pip: StatusPip) {
     if (!fgsRunning || networkDegraded) {
       return
     }
     if (state == TripState.APPROACH_MUTED || state == TripState.PARKED_CONFIRMED || state == TripState.NAV_TO_GATE) {
+      return
+    }
+    if (state == TripState.EXPANDED) {
+      assignStatusPip(pip)
+      recommend = false
       return
     }
     assignStatusPip(pip)

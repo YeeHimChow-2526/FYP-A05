@@ -59,7 +59,12 @@ STT 不可用（播報＋手動／純手動）：
 - 口播期間隨時支援語音取消（「取消／唔好／等等」）與語音確認（「好／去呢個」）；手勢滑動卡片即刻停止口播，靜默待命（實作版 §6.5）。
 - 卡片高度 = `min(175dp, 0.4 × 螢幕高)`（`NativeConfig.OVERLAY_MAX_CARD_HEIGHT_DP` / `OVERLAY_MAX_SCREEN_COVERAGE`）。
 - **全卡方框盲撳**（唔設獨立按鈕行）；任何車速均可追問；底色約 `#121212`／80% 不透明 + Backdrop blur（低階機實色降級）。
-- 已顯示卡片保留至確認／取消／滑走／`NAV_TO_GATE`／`APPROACH_MUTED`；**不設自動收起計時**。
+- 已顯示卡片保留至確認／取消／滑走／`NAV_TO_GATE`／`APPROACH_MUTED`；**不設自動收起計時**。409 **不**收卡。
+- 出卡狀態為 `EXPANDED`（燈 `GREY_STEADY`）。`EXPANDED` 時到場取樣**不**強制轉 `APPROACH_MUTED`；由非 `EXPANDED` 進入 `APPROACH_MUTED` 則收卡。收卡後：仍符合到場條件 → `APPROACH_MUTED`；否則有推薦 → `NEARBY_READY`；否則 `CRUISING`。`onDistanceToDestination` 唔好用 1km 邏輯切走 `EXPANDED`（`NAV_TO_GATE` 既有擋保留）。
+- 確認窗逾時只關聽窗（`pending→NONE`），**不**收卡、不清 index。卡仍顯示或仍處 `EXPANDED` 時，「好／去呢個」經 `CommandCodes.parse` 綁定 `RECOMMENDATION_CONFIRM`（含自聽／低信心），唔好繞過 parse。
+- 「取消／唔好／等等」無論 pending、無論 TTS 播放中：停止口播、invalidate `CANCEL`、卡顯示中則完整收卡。確認窗內「詳細啲／有冇第二個」先 invalidate `DIALOGUE_INTERRUPTED`，再出卡／切卡。
+- 「有冇第二個」：已有滿鎖 id → 立即重查並過濾（唔本地翻頁、唔等 `CARD_PAGE_TRANSITION_MS`）；否則本地下一張，延遲該常數後先切。切卡 epoch 在收卡、取消、進入 `APPROACH_MUTED`、commit 成功、熄匙／拆除時遞增；延遲前後 epoch 或 FGS 不一致即放棄。
+- `GREY_BREATHING` 拍膠囊只走原有重試，不自動出卡。詳情口播：`is_stale` 或咪錶且 `source_status=degraded` → `METER_STALE_SPOKEN`；否則 `feeSummary` 非空 →「名稱，收費」，否則名稱（`ZhHkTemplates.cardDetails`）。
 
 ## 4. 到場雙態（W-A.17）
 

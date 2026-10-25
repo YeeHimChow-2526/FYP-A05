@@ -203,4 +203,9 @@ object ZhHkTemplates {
     }
     return cue + TAP_CAPSULE
   }
+
+  fun cardDetails(card: RecommendationCard): String {
+    if (card.feeSummary.isNotBlank()) return "${card.name}，${card.feeSummary}"
+    return card.name
+  }
 }

@@ -64,6 +64,11 @@ class SimEventReceiver(
       INJECT_TTS_ECHO -> emit(event, intValue, stringValue)
       FGS_START_TIMEOUT -> emit(event, intValue, stringValue)
       BUBBLE_TAP -> emit(event, intValue, stringValue)
+      CARD_TAP -> emit(event, intValue, stringValue)
+      CARD_SWIPE -> emit(event, intValue, stringValue)
+      CARD_NEXT -> emit(event, intValue, stringValue)
+      CARD_CONFIRM -> emit(event, intValue, stringValue)
+      CARD_CANCEL -> emit(event, intValue, stringValue)
       TRIE_MISS_RESOLVE_OK -> emit(event, intValue, stringValue)
       TRIE_MISS_NETWORK_FAIL -> emit(event, intValue, stringValue)
       TRIE_MISS_AMBIGUOUS -> emit(event, intValue, stringValue)
@@ -78,6 +83,7 @@ class SimEventReceiver(
       FORCE_LOW_WATERMARK -> armRecommend(FixtureApiTransport.LOW_WATERMARK_FIXTURE)
       FORCE_CROWD_FLAG -> armRecommend(FixtureApiTransport.CROWD_FLAG_FIXTURE)
       FORCE_SCARCITY -> forceScarcity(event, intValue, stringValue)
+      FORCE_TWO_INDOOR -> armRecommend(FixtureApiTransport.TWO_INDOOR_FIXTURE)
       else -> ignore(event)
     }
     if (handled) onEventHandled()
@@ -264,6 +270,11 @@ class SimEventReceiver(
     private const val INJECT_TTS_ECHO = "INJECT_TTS_ECHO"
     private const val FGS_START_TIMEOUT = "FGS_START_TIMEOUT"
     private const val BUBBLE_TAP = "BUBBLE_TAP"
+    private const val CARD_TAP = "CARD_TAP"
+    private const val CARD_SWIPE = "CARD_SWIPE"
+    private const val CARD_NEXT = "CARD_NEXT"
+    private const val CARD_CONFIRM = "CARD_CONFIRM"
+    private const val CARD_CANCEL = "CARD_CANCEL"
     private const val TRIE_MISS_RESOLVE_OK = "TRIE_MISS_RESOLVE_OK"
     private const val TRIE_MISS_NETWORK_FAIL = "TRIE_MISS_NETWORK_FAIL"
     private const val TRIE_MISS_AMBIGUOUS = "TRIE_MISS_AMBIGUOUS"
@@ -274,6 +285,7 @@ class SimEventReceiver(
     private const val FORCE_LOW_WATERMARK = "FORCE_LOW_WATERMARK"
     private const val FORCE_CROWD_FLAG = "FORCE_CROWD_FLAG"
     private const val FORCE_SCARCITY = "FORCE_SCARCITY"
+    private const val FORCE_TWO_INDOOR = "FORCE_TWO_INDOOR"
     private const val FULL_VOICE = "FULL_VOICE"
     private const val ANNOUNCE_MANUAL = "ANNOUNCE_MANUAL"
     private const val MANUAL_ONLY = "MANUAL_ONLY"

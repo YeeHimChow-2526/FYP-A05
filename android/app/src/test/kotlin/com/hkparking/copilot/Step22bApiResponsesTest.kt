@@ -24,11 +24,12 @@ class Step22bApiResponsesTest {
   fun step22b_allRecommendFixturesParseWithExpectedFields() {
     val dir = mockDir()
     val jsonFiles = dir.listFiles { file -> file.isFile && file.name.endsWith(".json") }?.toList().orEmpty()
-    assertEquals(10, jsonFiles.size)
+    assertEquals(11, jsonFiles.size)
     val recommend = jsonFiles.map { it.name }.filter { it.startsWith("recommend_") && !it.contains("429") }.sorted()
-    assertEquals(8, recommend.size)
+    assertEquals(9, recommend.size)
     val counts = mapOf(
       "recommend_success_langham.json" to 1,
+      "recommend_success_two_indoor.json" to 2,
       "recommend_crowd_yellow_flag.json" to 1,
       "recommend_empty_expand.json" to 0,
       "recommend_low_watermark.json" to 1,

@@ -253,6 +253,11 @@ object Bindings {
         }
       }
       "BUBBLE_TAP" -> service.onActiveBubbleTap()
+      "CARD_TAP" -> service.floatingCard.performCardTap()
+      "CARD_SWIPE" -> service.floatingCard.performSwipeDismiss()
+      "CARD_NEXT" -> service.floatingCard.performManualNext()
+      "CARD_CONFIRM" -> service.floatingCard.performManualConfirm()
+      "CARD_CANCEL" -> service.floatingCard.performManualCancel()
       "TRIE_MISS_RESOLVE_OK" -> {
         val name = stringValue?.takeIf { it.isNotBlank() } ?: service.tripStateMachine.destinationName ?: "朗豪坊"
         service.lockDestination(name)

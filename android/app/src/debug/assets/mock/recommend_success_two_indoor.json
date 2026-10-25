@@ -1,0 +1,27 @@
+{
+  "status": "SUCCESS",
+  "speech_locale": "zh-HK",
+  "source_status": "ok",
+  "cards": [
+    {
+      "carpark_id": "CP_INDOOR_A",
+      "name": "第一室內場",
+      "type": "INDOOR",
+      "vacancies": 6,
+      "distance_meters": 120,
+      "fee_summary": "首小時二十蚊",
+      "spoken_cue": "第一張室內場口播",
+      "is_stale": false
+    },
+    {
+      "carpark_id": "CP_INDOOR_B",
+      "name": "第二室內場",
+      "type": "INDOOR",
+      "vacancies": 4,
+      "distance_meters": 260,
+      "fee_summary": "首小時二十八蚊",
+      "spoken_cue": "第二張室內場口播",
+      "is_stale": false
+    }
+  ]
+}

@@ -136,6 +136,7 @@ class FixtureApiTransport(
     const val SCARCITY_EXPANDED_FIXTURE = "recommend_scarcity_expanded.json"
     const val SCARCITY_EMPTY_FIXTURE = "recommend_empty_expand.json"
     const val LOCK_FULL_FIXTURE = "commit_lock_full_409.json"
+    const val TWO_INDOOR_FIXTURE = "recommend_success_two_indoor.json"
     private const val RATE_LIMIT_BODY = "{\"status\":\"RATE_LIMITED\"}"
     private const val LANGHAM_BODY =
       "{\"status\":\"SUCCESS\",\"cards\":[{\"carpark_id\":\"langham\",\"name\":\"朗豪坊\",\"spoken_cue\":\"前方首選朗豪坊停車場\"}]}"
