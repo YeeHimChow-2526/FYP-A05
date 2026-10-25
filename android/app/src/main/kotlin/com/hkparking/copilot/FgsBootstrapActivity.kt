@@ -189,6 +189,12 @@ class FgsBootstrapActivity : android.app.Activity {
     if (fgsStartedReceived || bootstrapTimedOut) return false
     bootstrapTimedOut = true
     failureReason = FGS_BOOTSTRAP_TIMEOUT
+    runCatching {
+      android.util.Log.w(
+        "FgsBootstrapActivity",
+        "bootstrap timeout reason=FGS_BOOTSTRAP_TIMEOUT limitMs=${NativeConfig.FGS_BOOTSTRAP_TIMEOUT_MS} service=${if (service != null) "bound" else "none"}",
+      )
+    }
     isFinished = true
     service?.onBootstrapTimedOut()
     return true
