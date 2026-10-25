@@ -126,6 +126,9 @@ interface ApiTransport {
 // debug sim/：SimVoiceInput + SimLocationSource（搖桿／GPX 寫入）+ FixtureApiTransport
 ```
 
+- `startListening(hotword=true)` 開熱詞待命並保持至行程拆除（`setUtteranceListener(null)` 時清除）；`stopListening()` 只結束本次聆聽窗；INJECT_UTTERANCE 喺待命或聆聽窗中都會送達，兩者皆無時丟棄並記 `Utterance dropped: not listening`。
+- 模擬器簡化：待命狀態下注入短句毋須喚醒詞前綴；實機熱詞待命只認喚醒詞，短句只於聆聽窗內有效。
+
 **綁定（`di/Bindings.kt`）**：同名檔 `di/Bindings.kt`（`object Bindings`，兩份 API 相同）分別位於：
 
 - `android/app/src/debug/kotlin/com/hkparking/copilot/di/Bindings.kt` → 綁 `SimVoiceInput`、`SimLocationSource`、`FixtureApiTransport`

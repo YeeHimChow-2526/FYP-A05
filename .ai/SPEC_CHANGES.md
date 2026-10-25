@@ -98,3 +98,13 @@
 - 影響任務編號／常數名／檔案：`FixtureApiTransport.kt`、`SimEventReceiver.kt`、`recommend_scarcity_expanded.json`、`ZhHkTemplates.NO_MORE_OPTIONS`、`docs/specs/04_mock_and_sim_shell.md`
 - 類別：規格缺漏
 - 狀態：待處理
+
+### SC-008
+- 日期：2026-10-25
+- 來源：Pi
+- 裝置（如適用）：不適用
+- 發現：熱詞待命與單次聆聽窗未分離。`stopListening()` 應只收本次聆聽窗；`startListening(hotword=true)` 開啟的待命保持至行程拆除。`setUtteranceListener(null)` 與 `onDestroy` 要清 ports。pending 答完即收窗。原因：Step 2.2 smoke 收音卡死。SimShellTest 一個測試開頭補 `Bindings.clearPorts()`，隔離全局 voiceInput 待命狀態。
+- 建議改動：規格明文寫低熱詞待命與聆聽窗分離、答完收窗，以及拆除時清除待命。
+- 影響任務編號／常數名／檔案：`SimVoiceInput.kt`、`SttVoiceInput`、`FloatingBubbleService.kt`、`docs/specs/04_mock_and_sim_shell.md`
+- 類別：規格缺漏
+- 狀態：待處理

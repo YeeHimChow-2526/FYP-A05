@@ -73,6 +73,7 @@ class SimShellTest {
 
   @Test
   fun pausedLocationDoesNotJitUntilResumeAndVoiceInjectionParses() {
+    com.hkparking.copilot.di.Bindings.clearPorts()
     val machine = startedMachine(destinationName = "朗豪坊")
     assertEquals(TripState.CRUISING, machine.state)
     assertFalse(machine.jitTriggered)

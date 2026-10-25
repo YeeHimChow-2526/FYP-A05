@@ -115,6 +115,7 @@ class FloatingBubbleService : android.app.Service {
   }
 
   override fun onDestroy() {
+    if (portsWired) { portsWired = false; com.hkparking.copilot.di.Bindings.clearPorts() }
     com.hkparking.copilot.di.Bindings.detachService(this)
     detachCapsuleWindow()
     isFgsRunning = false
@@ -440,6 +441,7 @@ class FloatingBubbleService : android.app.Service {
   }
 
   private fun onUtterance(text: String, confidence: Double?) {
+    if (!isFgsRunning) { runCatching { android.util.Log.i("FloatingBubbleService", "Utterance ignored: service not running") }; return }
     val parsed = CommandCodes.parse(
       text,
       ParseContext(
@@ -459,6 +461,7 @@ class FloatingBubbleService : android.app.Service {
         return
       }
       speechHeard = true
+      com.hkparking.copilot.di.Bindings.voiceInput.stopListening()
       when {
         parsed.code == CommandCode.CONFIRM_TARGET && parsed.confirmed -> {
           pendingQuestion = PendingQuestion.NONE

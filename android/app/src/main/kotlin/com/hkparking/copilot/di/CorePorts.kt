@@ -43,6 +43,7 @@ class SttVoiceInput : VoiceInput {
 
   override fun setUtteranceListener(listener: ((String, Double?) -> Unit)?) {
     this.listener = listener
+    if (listener == null) listening = false
   }
 
   override fun startListening(hotword: Boolean) {
@@ -51,7 +52,6 @@ class SttVoiceInput : VoiceInput {
 
   override fun stopListening() {
     listening = false
-    listener = null
   }
 }
 
