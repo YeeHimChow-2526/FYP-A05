@@ -42,7 +42,7 @@
 - [ ] W-A.4 軟件距離追蹤 — commit: 
 - [ ] W-A.5 在線即送 release — commit: 
 - [ ] W-A.17 到場雙態與今日確認 — commit: 
-- [ ] W-A.18 測試策略與量度 — commit: dff84d8
+- [ ] W-A.18 測試策略與量度 — Step 1 sim 範圍已完成（完整 Gate C：gateC6 @ 2201d2e）；真機量度／GPX／B-2 分享待 Step 2–3 及真機 — commit: dff84d8, 4af4c06, c4f9354, 10575c0, f9e101d, 5c76000, 86e7cd7, 2201d2e
 - [ ] W-B.4 sync/outbox 確認 — commit: 
 
 ### 19.3 Phase 2 — 行車交互精細化與香港特色場景（第 6–10 步）
@@ -90,6 +90,14 @@
 | Step 3 | `LocalPoiTrie.kt` 本地字典樹＋Google Maps 分享接盤＋`DistanceTracker.kt` 到場雙態＋Flutter 今日行程 | 由 Gemini 指定 |
 
 - [x] Step 1 必做：原生 sim/ 模擬殼＋mock/*.json fixtures＋注入事件（屬 W-A.18；規格 docs/specs/04_mock_and_sim_shell.md），Step 1 完成前交付 — commit: dff84d8, 97bb2e6
+
+**Step 1 遺留（轉 Step 2/3）**：
+- Step 2：B-1 (c)「聽唔到目的地，請再講一次」同現場即泊 GPS 失敗「暫時搵唔到你位置，請稍後再講一次」只計 cue，未經 TtsService 口播
+- Step 2：ALERT／NO_MIC 追問口播（含「請拍一拍膠囊答我」後綴）只計 cue，未經 TtsService 口播
+- Step 2：`await_voice_reply` → expand_scarcity 重發
+- Step 3：`TRIE_MISS_RESOLVE_OK`／`TRIE_MISS_NETWORK_FAIL`（未口播「網絡唔順，遲啲再試」）／`TRIE_MISS_AMBIGUOUS` 接真 LocalPoiTrie／B-2
+- Step 3 開工前裁決：含糊地名口播 02 L110「去邊度？請拍一拍膠囊答我」vs 代碼 `PLACE_CLARIFY`「邊一區？」vs 03 L111「純語音反問」
+- 真機：FGS 真實 2s 逾時 `FgsBootstrapActivity` Log.w 記錄（模擬器無法觸發）
 
 ## 待真機驗證
 
