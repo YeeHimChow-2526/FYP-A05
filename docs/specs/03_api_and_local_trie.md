@@ -48,6 +48,13 @@
 | `speech_locale` | string；實際使用之語言（`spoken_cue` 按該語言模板輸出，本版只有 zh-HK） |
 | `speech_locale_fallback` | bool；送出不支援之值時伺服器明確回退 zh-HK 並置 true |
 
+**客戶端解析（SC-009）**
+
+1. 回應用完整 JSON 解析（共用 net/ApiResponses.kt，debug fixture 同 release 用同一套），未知欄位一律忽略。
+2. recommend 回 2xx，但 body 唔係合法 JSON 物件、缺非空 `status`、`cards` 唔係陣列或者有非物件元素 → 當網絡失敗處理（分級重試再 GREY），禁止當 SUCCESS。
+3. 缺省值：`await_voice_reply` false、`source_status` "ok"、`vacancies` -1（禁止當 0）、`is_stale` false、`distance_meters` 0；卡嘅 `spoken_cue` 係空就用頂層 `spoken_cue`。
+4. 429 嘅等候秒數先用 `Retry-After` header，冇先用 body 嘅 `retry_after_seconds`；409 只讀頂層 `spoken_cue`。
+
 稀缺已滿：仍 `SUCCESS`，附 spoken_cue（擴大至約 3km 詢問）＋`await_voice_reply=true`。
 
 ### 2.2 `POST /v1/session/commit`

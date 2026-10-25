@@ -1,5 +1,7 @@
 package com.hkparking.copilot.sim
 
+import com.hkparking.copilot.net.ApiClient
+import com.hkparking.copilot.net.ApiResponses
 import com.hkparking.copilot.net.ApiTransport
 import com.hkparking.copilot.net.HttpResult
 import com.hkparking.copilot.net.RecommendResponse
@@ -88,12 +90,12 @@ class FixtureApiTransport(
       remaining429Count -= 1
       val raw = fixtureLoader(RATE_LIMIT_FIXTURE)
       val body = raw ?: RATE_LIMIT_BODY
-      return HttpResult(statusCode = 429, bodyJson = body, retryAfterSeconds = parseRetryAfterSeconds(body))
+      return ApiResponses.buildResult(path, 429, body, emptyMap())
     }
     if (lockFullArmed && path.contains("commit")) {
       lockFullArmed = false
       val raw = fixtureLoader(LOCK_FULL_FIXTURE).orEmpty()
-      return HttpResult(statusCode = 409, bodyJson = raw, spokenCue = stringField(raw, "spoken_cue"))
+      return ApiResponses.buildResult(path, 409, raw, emptyMap())
     }
     val override = recommendOverride
     if (override != null && path.contains("recommend")) {
@@ -120,10 +122,7 @@ class FixtureApiTransport(
   }
 
   private fun responseFor(name: String): HttpResult {
-    val raw = fixtureLoader(name).orEmpty()
-    val response = parseRecommend(raw)
-    val cue = response.cards.firstOrNull()?.spokenCue ?: stringField(raw, "spoken_cue")
-    return HttpResult(statusCode = 200, bodyJson = raw, recommendResponse = response, spokenCue = cue)
+    return ApiResponses.buildResult(ApiClient.RECOMMEND, 200, fixtureLoader(name).orEmpty(), emptyMap())
   }
 
   companion object {
@@ -161,29 +160,6 @@ class FixtureApiTransport(
 
     fun intField(json: String, key: String): Int? {
       return Regex(""""$key"\s*:\s*(-?\d+)""").find(json)?.groupValues?.get(1)?.toIntOrNull()
-    }
-
-    fun parseRecommend(body: String): RecommendResponse {
-      val cards = Regex("""\{[^{}]*\}""").findAll(body).map { it.value }.filter {
-        it.contains("\"type\"") || it.contains("\"carpark_id\"")
-      }.map { card ->
-        RecommendationCard(
-          carparkId = stringField(card, "carpark_id") ?: "",
-          name = stringField(card, "name") ?: "",
-          type = stringField(card, "type") ?: "",
-          vacancies = intField(card, "vacancies") ?: 0,
-          distanceMeters = intField(card, "distance_meters") ?: 0,
-          feeSummary = stringField(card, "fee_summary") ?: "",
-          spokenCue = stringField(card, "spoken_cue") ?: stringField(body, "spoken_cue") ?: "",
-          isStale = Regex(""""is_stale"\s*:\s*true""").containsMatchIn(card),
-        )
-      }.toList()
-      return RecommendResponse(
-        status = stringField(body, "status") ?: "SUCCESS",
-        sourceStatus = stringField(body, "source_status") ?: "ok",
-        cards = cards,
-        awaitVoiceReply = Regex(""""await_voice_reply"\s*:\s*true""").containsMatchIn(body),
-      )
     }
 
     fun langhamResponse(): RecommendResponse = RecommendResponse(

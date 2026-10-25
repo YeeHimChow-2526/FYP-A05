@@ -1,6 +1,8 @@
 package com.hkparking.copilot.di
 
 import com.hkparking.copilot.NativeConfig
+import com.hkparking.copilot.net.ApiClient
+import com.hkparking.copilot.net.ApiResponses
 import com.hkparking.copilot.net.ApiTransport
 import com.hkparking.copilot.net.HttpResult
 
@@ -81,22 +83,24 @@ class HttpApiTransport(
     }
     return runCatching {
       val connection = java.net.URL(baseUrl.trimEnd('/') + path).openConnection() as java.net.HttpURLConnection
-      connection.requestMethod = "POST"
-      connection.doOutput = true
-      connection.connectTimeout = NativeConfig.API_TIMEOUT_MS.toInt()
-      connection.readTimeout = NativeConfig.API_TIMEOUT_MS.toInt()
-      connection.setRequestProperty("Content-Type", "application/json")
-      connection.outputStream.use { stream -> stream.write(bodyJson.toByteArray()) }
-      val code = connection.responseCode
-      val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-      val body = stream?.bufferedReader()?.use { reader -> reader.readText() }.orEmpty()
-      val retryAfter = connection.getHeaderField("Retry-After")
-      HttpResult(
-        statusCode = code,
-        bodyJson = body,
-        headers = if (retryAfter == null) emptyMap() else mapOf("Retry-After" to retryAfter),
-        retryAfterSeconds = retryAfter?.toLongOrNull(),
-      )
+      try {
+        connection.requestMethod = "POST"
+        connection.doOutput = true
+        connection.connectTimeout = NativeConfig.API_TIMEOUT_MS.toInt()
+        connection.readTimeout = NativeConfig.API_TIMEOUT_MS.toInt()
+        connection.setRequestProperty(ApiClient.HEADER_API_KEY, ApiClient.INTERNAL_API_KEY)
+        connection.setRequestProperty(ApiClient.HEADER_CONTENT_TYPE, ApiClient.JSON_CONTENT_TYPE)
+        connection.setRequestProperty("Accept", "application/json")
+        connection.outputStream.use { stream -> stream.write(bodyJson.toByteArray(Charsets.UTF_8)) }
+        val code = connection.responseCode
+        val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+        val body = stream?.bufferedReader(Charsets.UTF_8)?.use { reader -> reader.readText() }.orEmpty()
+        val retryAfter = connection.getHeaderField("Retry-After")
+        val headers = if (retryAfter == null) emptyMap() else mapOf("Retry-After" to retryAfter)
+        ApiResponses.buildResult(path, code, body, headers)
+      } finally {
+        runCatching { connection.disconnect() }
+      }
     }.getOrElse { error ->
       val timedOut = error is java.net.SocketTimeoutException
       HttpResult(statusCode = 0, timedOut = timedOut, networkError = !timedOut)
