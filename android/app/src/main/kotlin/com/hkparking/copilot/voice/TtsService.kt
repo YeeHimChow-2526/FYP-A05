@@ -28,7 +28,7 @@ class TtsService(
   val spokenCues = ArrayDeque<String>()
 
   private var engine: TtsEngine? = engine
-  private val queue = ArrayDeque<String>()
+  private val queue = ArrayDeque<QueuedUtterance>()
   private var playbackEpoch: Int = 0
 
   init {
@@ -72,11 +72,7 @@ class TtsService(
     } else {
       first.spokenCue
     }
-    queue.addLast(text)
-    rememberCue(text)
-    if (!isSpeaking) {
-      playHead()
-    }
+    enqueue(text, null)
     return text
   }
 
@@ -85,6 +81,7 @@ class TtsService(
     voiceMode: TripVoiceMode,
     isApproachMuted: Boolean,
     driverAsked: Boolean = false,
+    onFinished: ((played: Boolean) -> Unit)? = null,
   ): String? {
     if (voiceMode == TripVoiceMode.MANUAL_ONLY) {
       logManualSkip()
@@ -103,11 +100,7 @@ class TtsService(
       logEngineFailure("empty")
       return null
     }
-    queue.addLast(text)
-    rememberCue(text)
-    if (!isSpeaking) {
-      playHead()
-    }
+    enqueue(text, onFinished)
     return text
   }
 
@@ -119,9 +112,19 @@ class TtsService(
 
   fun interrupt() {
     playbackEpoch += 1
+    val pending = queue.toList()
     queue.clear()
     isSpeaking = false
+    pending.forEach { finishOnce(it, false) }
     engine?.stop()
+  }
+
+  private fun enqueue(text: String, onFinished: ((Boolean) -> Unit)?) {
+    queue.addLast(QueuedUtterance(text, onFinished))
+    rememberCue(text)
+    if (!isSpeaking) {
+      playHead()
+    }
   }
 
   private fun firstCueOf(cards: List<RecommendationCard>, sourceStatus: String): String? {
@@ -160,52 +163,57 @@ class TtsService(
   }
 
   private fun playHead() {
-    val headText = queue.firstOrNull() ?: return
+    val head = queue.firstOrNull() ?: return
     playbackEpoch += 1
     val epoch = playbackEpoch
     isSpeaking = true
     val active = engine
     if (active == null) {
       logEngineFailure("engine_missing")
-      onCurrentUtteranceFailed()
+      settle(head, played = false, epoch = epoch)
       return
     }
     val played = runCatching {
       active.speak(
-        headText,
-        onDone = { if (epoch == playbackEpoch) onCurrentUtteranceFinished() },
+        head.text,
+        onDone = { settle(head, played = true, epoch = epoch) },
         onError = {
-          if (epoch == playbackEpoch) {
-            logEngineFailure("engine_error")
-            onCurrentUtteranceFailed()
-          }
+          if (epoch == playbackEpoch) logEngineFailure("engine_error")
+          settle(head, played = false, epoch = epoch)
         },
       )
     }
     if (played.isFailure) {
       logEngineFailure("engine_throw")
-      onCurrentUtteranceFailed()
+      settle(head, played = false, epoch = epoch)
     }
   }
 
-  private fun onCurrentUtteranceFinished() {
-    advanceQueue()
-  }
-
-  private fun onCurrentUtteranceFailed() {
-    advanceQueue()
-  }
-
-  private fun advanceQueue() {
-    if (queue.isNotEmpty()) {
-      queue.removeFirst()
-    }
+  private fun settle(item: QueuedUtterance, played: Boolean, epoch: Int) {
+    if (item.finished) return
+    val accepted = epoch == playbackEpoch
+    queue.remove(item)
+    finishOnce(item, if (accepted) played else false)
+    if (!accepted) return
     if (queue.isNotEmpty()) {
       isSpeaking = true
       playHead()
     } else {
       isSpeaking = false
     }
+  }
+
+  private fun finishOnce(item: QueuedUtterance, played: Boolean) {
+    if (item.finished) return
+    item.finished = true
+    runCatching { item.onFinished?.invoke(played) }
+  }
+
+  private class QueuedUtterance(
+    val text: String,
+    val onFinished: ((Boolean) -> Unit)?,
+  ) {
+    var finished: Boolean = false
   }
 
   companion object {

@@ -77,6 +77,7 @@ class SimEventReceiver(
       }
       FORCE_LOW_WATERMARK -> armRecommend(FixtureApiTransport.LOW_WATERMARK_FIXTURE)
       FORCE_CROWD_FLAG -> armRecommend(FixtureApiTransport.CROWD_FLAG_FIXTURE)
+      FORCE_SCARCITY -> forceScarcity(event, intValue, stringValue)
       else -> ignore(event)
     }
     if (handled) onEventHandled()
@@ -183,6 +184,18 @@ class SimEventReceiver(
     return emit(event, intValue, stringValue?.trim())
   }
 
+  private fun forceScarcity(event: String, intValue: Int?, stringValue: String?): Boolean {
+    if (!stringValue.isNullOrEmpty()) return ignore(event)
+    if (intValue != null && intValue != 0 && intValue != 1) return ignore(event)
+    val expandFixture = if (intValue == 0) {
+      FixtureApiTransport.SCARCITY_EMPTY_FIXTURE
+    } else {
+      FixtureApiTransport.SCARCITY_EXPANDED_FIXTURE
+    }
+    Bindings.apiTransport.armScarcity(expandFixture)
+    return true
+  }
+
   private fun armRecommend(name: String): Boolean {
     Bindings.apiTransport.armRecommendFixture(name)
     return true
@@ -260,6 +273,7 @@ class SimEventReceiver(
     private const val FORCE_LOCK_FULL = "FORCE_LOCK_FULL"
     private const val FORCE_LOW_WATERMARK = "FORCE_LOW_WATERMARK"
     private const val FORCE_CROWD_FLAG = "FORCE_CROWD_FLAG"
+    private const val FORCE_SCARCITY = "FORCE_SCARCITY"
     private const val FULL_VOICE = "FULL_VOICE"
     private const val ANNOUNCE_MANUAL = "ANNOUNCE_MANUAL"
     private const val MANUAL_ONLY = "MANUAL_ONLY"

@@ -1,0 +1,19 @@
+{
+  "status": "SUCCESS",
+  "speech_locale": "zh-HK",
+  "source_status": "ok",
+  "await_voice_reply": true,
+  "spoken_cue": "該區僅有一場，目前已滿。要唔要幫你搵遠少少、大概三公里外嘅場？",
+  "cards": [
+    {
+      "carpark_id": "CP_SCARCE_ONLY",
+      "name": "該區唯一停車場",
+      "type": "INDOOR",
+      "vacancies": 0,
+      "distance_meters": 150,
+      "fee_summary": "",
+      "spoken_cue": "該區僅有一場，目前已滿。要唔要幫你搵遠少少、大概三公里外嘅場？",
+      "is_stale": false
+    }
+  ]
+}

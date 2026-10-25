@@ -1,0 +1,18 @@
+{
+  "status": "SUCCESS",
+  "speech_locale": "zh-HK",
+  "source_status": "ok",
+  "await_voice_reply": false,
+  "cards": [
+    {
+      "carpark_id": "CP_SCARCE_EXPANDED",
+      "name": "擴大範圍後備停車場",
+      "type": "INDOOR",
+      "vacancies": 8,
+      "distance_meters": 2800,
+      "fee_summary": "",
+      "spoken_cue": "擴大範圍後，最近有位係後備停車場，兩公里八，剩八個位。",
+      "is_stale": false
+    }
+  ]
+}

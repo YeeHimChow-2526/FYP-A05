@@ -29,6 +29,7 @@ android/app/src/debug/assets/mock/
   recommend_success_langham.json
   recommend_scarcity_await_reply.json
   recommend_empty_expand.json
+  recommend_scarcity_expanded.json
   recommend_low_watermark.json    # 有效空位 ≤3；spoken_cue「APM 只剩兩個位，隨時會滿，後備可以去 XX 停車場。」
   recommend_crowd_yellow_flag.json # ≥2 來源：排序封頂＋「近期有司機回報疑似霸位，請留意現場」
   recommend_meter_stale.json      # 咪錶卡 is_stale=true、vacancies=-1、spoken_cue 保守講法
@@ -85,6 +86,7 @@ debug 建置提供虛擬搖桿 overlay／adb broadcast 注入事件（指令格�
 | `FORCE_RATE_LIMIT` | 下一次 recommend 回 429 fixture（`recommend_rate_limited_429.json`）；`value` = 2 → 首次嘗試及單次重試皆回 429 |
 | `FORCE_LOCK_FULL` | 下一次 commit 回 409 LOCK_FULL |
 | `FORCE_LOW_WATERMARK` / `FORCE_CROWD_FLAG` | 下一次 recommend 回低水位／黃旗 fixture |
+| `FORCE_SCARCITY` | 之後 recommend 回稀缺已滿（`await_voice_reply=true`）；帶 `expand_scarcity=true` 之重發回擴大結果：無 `value` 或 `value` 1 → 有位，`value` 0 → 擴大後仍無位 |
 
 ### 3.1 注入指令格式（adb broadcast）
 
@@ -171,7 +173,7 @@ interface ApiTransport {
 - [ ] `INJECT_TTS_ECHO` → TTS 播放期間之「好」不確認
 - [ ] 「好」逾時／取消／候選變更後失效
 - [ ] 中英雙語導航通知（Maps 中文／英文）→ 指路詞過濾、解析未中不清除終點
-- [ ] `await_voice_reply` → expand_scarcity 重發
+- [ ] `await_voice_reply` → expand_scarcity 重發（`FORCE_SCARCITY`；value 0 → 「暫時冇其他選擇」）
 - [ ] `ARRIVE_CORE` → APPROACH_MUTED（只靜音、行程繼續、鎖未釋放）；`LEAVE_TARGET` → 退回巡航
 - [ ] 目標範圍內 `ENGINE_SHUTDOWN` → PARKED_CONFIRMED 候選＋release；離線即放棄 release
 - [ ] `DRIVER_CONFIRM` 在線 → ratable = true、開放 3 格反饋；離線 → 本機保留，`NETWORK_OK` 自動送出；`CLOCK_HKT_MIDNIGHT` → 清除

@@ -86,3 +86,15 @@
 - 影響任務編號／常數名／檔案：W-A.1；`jitTriggered`；`TripStateMachine.kt`；`NativeConfig.TRIGGER_DISTANCE_M`
 - 類別：規格缺漏
 - 狀態：待決
+
+### SC-007
+- 日期：2026-10-25
+- 來源：Pi
+- 裝置（如適用）：不適用
+- 發現：
+  1. `sim` 事件表缺 `FORCE_SCARCITY` 同擴大後有位 fixture `recommend_scarcity_expanded.json`。
+  2. 規格冇定義「擴大後仍無位」點讀，現行實作用 `ZhHkTemplates.NO_MORE_OPTIONS`。
+- 建議改動：補 `FORCE_SCARCITY` 同 `recommend_scarcity_expanded.json`；明文定義擴大後仍無位嘅口播句。
+- 影響任務編號／常數名／檔案：`FixtureApiTransport.kt`、`SimEventReceiver.kt`、`recommend_scarcity_expanded.json`、`ZhHkTemplates.NO_MORE_OPTIONS`、`docs/specs/04_mock_and_sim_shell.md`
+- 類別：規格缺漏
+- 狀態：待處理

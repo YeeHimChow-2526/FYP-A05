@@ -17,10 +17,13 @@ class FixtureApiTransport(
     private set
   var lastPath: String = ""
     private set
+  internal val recommendBodies = mutableListOf<String>()
   private var networkFail = false
   private var remaining429Count: Int = 0
   private var recommendOverride: String? = null
   private var lockFullArmed: Boolean = false
+  private var scarcityArmed: Boolean = false
+  private var scarcityExpandFixture: String? = null
 
   fun setFixtureName(name: String) {
     fixtureName = name
@@ -42,7 +45,16 @@ class FixtureApiTransport(
 
   fun armRecommendFixture(name: String) {
     recommendOverride = name
+    scarcityArmed = false
+    scarcityExpandFixture = null
     fixtureName = name
+  }
+
+  fun armScarcity(expandFixture: String) {
+    recommendOverride = null
+    scarcityArmed = true
+    scarcityExpandFixture = expandFixture
+    fixtureName = SCARCITY_AWAIT_FIXTURE
   }
 
   fun armLockFull() {
@@ -58,12 +70,16 @@ class FixtureApiTransport(
     lastPath = ""
     recommendOverride = null
     lockFullArmed = false
+    scarcityArmed = false
+    scarcityExpandFixture = null
+    recommendBodies.clear()
     delayMs = {}
   }
 
   override suspend fun post(path: String, bodyJson: String): HttpResult {
     postCount += 1
     lastPath = path
+    if (path.contains("recommend")) recommendBodies += bodyJson
     if (networkFail) {
       delayMs(com.hkparking.copilot.NativeConfig.API_TIMEOUT_MS)
       return HttpResult(statusCode = 0, timedOut = true, networkError = true)
@@ -84,6 +100,16 @@ class FixtureApiTransport(
       recommendOverride = null
       fixtureName = DEFAULT_FIXTURE
       return responseFor(override)
+    }
+    if (scarcityArmed && path.contains("recommend")) {
+      if (!bodyJson.contains("\"expand_scarcity\":true")) {
+        return responseFor(SCARCITY_AWAIT_FIXTURE)
+      }
+      val expandFixture = scarcityExpandFixture ?: SCARCITY_EMPTY_FIXTURE
+      scarcityArmed = false
+      scarcityExpandFixture = null
+      fixtureName = DEFAULT_FIXTURE
+      return responseFor(expandFixture)
     }
     val raw = fixtureLoader(fixtureName)
     return HttpResult(
@@ -107,6 +133,9 @@ class FixtureApiTransport(
     const val DEGRADED_FIXTURE = "recommend_source_degraded.json"
     const val LOW_WATERMARK_FIXTURE = "recommend_low_watermark.json"
     const val CROWD_FLAG_FIXTURE = "recommend_crowd_yellow_flag.json"
+    const val SCARCITY_AWAIT_FIXTURE = "recommend_scarcity_await_reply.json"
+    const val SCARCITY_EXPANDED_FIXTURE = "recommend_scarcity_expanded.json"
+    const val SCARCITY_EMPTY_FIXTURE = "recommend_empty_expand.json"
     const val LOCK_FULL_FIXTURE = "commit_lock_full_409.json"
     private const val RATE_LIMIT_BODY = "{\"status\":\"RATE_LIMITED\"}"
     private const val LANGHAM_BODY =
@@ -153,6 +182,7 @@ class FixtureApiTransport(
         status = stringField(body, "status") ?: "SUCCESS",
         sourceStatus = stringField(body, "source_status") ?: "ok",
         cards = cards,
+        awaitVoiceReply = Regex(""""await_voice_reply"\s*:\s*true""").containsMatchIn(body),
       )
     }
 
