@@ -148,7 +148,7 @@
 - 裝置（如適用）：不適用
 - 發現：追問卡出卡、本地切卡、確認窗逾時後仍可確認、409 不收卡，未有客戶端契約。待同步 impl Doc。
 - 建議改動：客戶端追問卡（SC-011）：
-  1. `FloatingCardView` 只喺追問或手動降級拍膠囊時出；高度跟 `OVERLAY_MAX_CARD_HEIGHT_DP`／`OVERLAY_MAX_SCREEN_COVERAGE`；底色 `#121212` 約 80%；不設自動收起。
+  1. `FloatingCardView` 只喺追問或手動降級拍膠囊時出；高度跟 `OVERLAY_MAX_CARD_HEIGHT_DP`／`OVERLAY_MAX_SCREEN_COVERAGE`；底色 `#121212` 約 80%；不設自動收起。背景模糊用 window blur-behind（API 31+ 兼且裝置支援），否則用實色；唔准對卡本身用 RenderEffect。
   2. `EXPANDED` 燈 `GREY_STEADY`。到場取樣唔強制踢走 `EXPANDED`；非 EXPANDED 進入 `APPROACH_MUTED` 先收卡。收卡還原：仍符合到場 → `APPROACH_MUTED`；有推薦 → `NEARBY_READY`；否則 `CRUISING`。
   3. 卡可見或 `EXPANDED` 時，「好」經 parse 綁 `RECOMMENDATION_CONFIRM`（自聽／低信心唔確認）。逾時唔收卡。取消無論 pending／是否播緊都停口播並收卡。窗內「詳細啲／有冇第二個」先打斷再出卡／切卡。
   4. 已有滿鎖 id 時「下一個」立即過濾重查，唔本地翻頁、唔等 350ms。否則本地切卡，`CARD_PAGE_TRANSITION_MS` 前後對 epoch；收卡／取消／進 `APPROACH_MUTED`／commit 成功／熄匙拆除令 epoch 失效。

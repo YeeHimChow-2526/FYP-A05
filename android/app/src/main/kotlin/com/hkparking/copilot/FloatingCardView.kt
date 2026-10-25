@@ -88,7 +88,6 @@ class FloatingCardView(
       }
       root.addView(row)
     }
-    applyBlur(root, state.blurRadius)
     val params = android.view.WindowManager.LayoutParams(
       android.view.WindowManager.LayoutParams.MATCH_PARENT,
       cardHeightPx(context),
@@ -97,6 +96,12 @@ class FloatingCardView(
       android.graphics.PixelFormat.TRANSLUCENT,
     )
     params.gravity = android.view.Gravity.BOTTOM
+    runCatching {
+      if (android.os.Build.VERSION.SDK_INT >= 31 && wm.isCrossWindowBlurEnabled) {
+        params.flags = params.flags or android.view.WindowManager.LayoutParams.FLAG_BLUR_BEHIND
+        params.blurBehindRadius = state.blurRadius.toInt()
+      }
+    }
     runCatching { wm.addView(root, params) }.onSuccess { overlayView = root }
   }
 
@@ -105,20 +110,6 @@ class FloatingCardView(
       text = value
       setTextColor(android.graphics.Color.WHITE)
       textSize = sizeSp
-    }
-  }
-
-  private fun applyBlur(view: android.view.View, radius: Float) {
-    if (radius <= 0f) return
-    runCatching {
-      if (android.os.Build.VERSION.SDK_INT < 31) return
-      view.setRenderEffect(
-        android.graphics.RenderEffect.createBlurEffect(
-          radius,
-          radius,
-          android.graphics.Shader.TileMode.CLAMP,
-        ),
-      )
     }
   }
 
