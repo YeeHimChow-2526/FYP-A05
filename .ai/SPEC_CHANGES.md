@@ -194,3 +194,38 @@
 - 影響任務編號／常數名／檔案：Step 3.1；`LocalPoiTrie.kt`、`NativeConfig.TRIE_LOOKUP_BUDGET_MS`、`assets/hk_poi_master.json`、`tools/poi/*`、`docs/specs/03_api_and_local_trie.md`
 - 類別：規格缺漏
 - 狀態：待處理
+
+### SC-014
+- 日期：2026-10-26
+- 來源：評估（Step 3.1b 代碼預建，Pi 落地）；Gemini 紅隊 RT-1…RT-4
+- 裝置（如適用）：不適用
+- 發現：
+  1. 03 L123「Miss → 雲端 Geocoding（語音路徑即時）」——後端未有 geocode endpoint。
+  2. 03 L124 隱式回顯【】[] 係標記，唔應讀出。
+  3. 01 L36「每次只口播一次」對地名澄清唔合用：中途改終點再含糊要再問。
+- 建議改動：
+  1. 語音 SET_DESTINATION 經 LocalPoiTrie：Hit 鎖定＋坐標入 dest_lat/dest_lng；Ambiguous →「邊一區？」＋ALERT＋CLARIFY_DESTINATION（答案只按區短名，剝尾「區」；或答案 Hit 落候選區且該區候選唯一，RT-2）；「好」唔鎖；新 SET_DESTINATION 重新解析；其他忽略至逾時（LISTEN_OPENING_WAIT_S）。
+  2. Miss：用講嘅名鎖定、冇坐標（dest 0.0）、log TRIE_MISS、唔入 ALERT；全語音講 directLock(name)。待 geocode endpoint。
+  3. 回顯：完整 key → directLock(講嘅名)；prefix／澄清 →「收到，為你鎖定<區>區<全稱>，搜尋緊周邊車位。」（18 區只講全名）；只限全語音。
+  4. destinationName：Hit／Miss = 講嘅名；澄清解決 = 選中 POI 嘅 poi.zh；鎖定後唔即時 recommend。
+  5. **ALERT 每程一次嘅例外**：成功鎖定終點時移除 PLACE_CLARIFICATION（及 GREY 期間 deferred 嘅同一 cause，DP10b），之後再含糊會再問；未解決期間唔重複；其他 AlertCause 照舊每程一次。依據 01 L36「維持至設終點」。`destLat`／`destLng`／`destinationPoiId` 與 spokenAlerts／deferred 清理須在 NAV_TO_GATE early return 之前（RT-3）。
+  6. Trie provider 可注入；production 行程開始背景 pre-warm（thread `poi-trie-prewarm`），未好就同步載入；載入失敗 = 舊行為。
+  7. 資料：aliases_overlay 加 海港城／又一城／太古城；asset 153,525 bytes；擠走 北角匯一期、欣榮商場、喜盈商場。
+  8. clarify 期間：明確 FIND／CANCEL 會清 pending 再行今日路徑；其餘配唔到嘅回覆忽略至逾時且**唔**設 speechHeard（RT-4）；「好」唔鎖；澄清解決後 destinationName = 選中 POI 全稱（poi.zh）＋該 POI 坐標，Hit／Miss 仍用講嘅名。
+  9. **RT-1**：Ambiguous 後若非 ALERT_BREATHING 或因靜音 speakIfActive 返 null → 清 pending；若 ALERT 下僅因 PLACE_CLARIFICATION 已播過而抑制口播 → 保留 pending＋新候選並重開聆聽窗（T15）。
+  已接受、唔改代碼嘅遺留項（文件化）：
+  - 被大小上限擠走 3 個商場：北角匯一期（變 Ambiguous 東／離島）、欣榮商場、喜盈商場（Miss）
+  - 「太古城道」prefix-hit 太古城中心（之前 Miss）
+  - 又一城按區界多邊形落深水埗
+  - 最長前綴陷阱：「旺角朗豪坊」→ 旺角
+  - sim `TRIE_MISS_RESOLVE_OK`／`lockOrStartTrip` 鎖定都會重置 PLACE_CLARIFICATION
+  - APPROACH_MUTED 時唔播反問、唔開聆聽
+  遺留項：
+  - geocode endpoint（Miss 即時路徑）
+  - 動態澄清選項（「邊一區？灣仔定大埔？」）—— 延後到之後一個細 TASK
+  - B-2／TRIE_MISS_* sim hook 接真 trie（3.2）
+  - origin 坐標（originLat/Lng 仍 0.0）
+  - spec 02 L110「去邊度？請拍一拍膠囊答我」同 PLACE_CLARIFY 統一（承 SC-012 #3）
+- 影響任務編號／常數名／檔案：Step 3.1b；FloatingBubbleService.kt、TripStateMachine.kt、CommandCodes.kt（ZhHkTemplates.implicitLockEcho）、poi/PoiTrieProvider.kt、assets/hk_poi_master.json、tools/poi/aliases_overlay.json、tools/poi/SOURCES.md
+- 類別：規格缺漏
+- 狀態：待處理

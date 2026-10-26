@@ -1,7 +1,7 @@
 # hk_poi_master.json — 資料來源（Step 3.1）
 
 產生：`py tools/poi/build_poi_master.py --raw ../poi_raw`（Python 3.11+，只用標準庫；TLS 必驗證）。
-輸出：`android/app/src/main/assets/hk_poi_master.json`（built 2026-10-26，153,534 bytes ≤ 153,600）。
+輸出：`android/app/src/main/assets/hk_poi_master.json`（built 2026-10-26，153,525 bytes ≤ 153,600）。
 下載日期：2026-10-26（香港時間）。全部座標 WGS84。
 
 | # | 資料 | 檔名（--raw 內） | URL | sha256 | 記錄數 | 取用 |
@@ -16,6 +16,7 @@
 - 地名：Village（1,299）、Hill、Bay、Island 等非 Area/Town 類；Alias 名。
 - 屋邨（房委會／房協）資料集、非運輸署停車場（私人停車場、咪錶）未收錄。
 - iGeoCom 無中文名之商場 2 個（ig:21212774、ig:21116399）因 normalize(zh) < 2 字被剔除。
+- 裁剪（Step 3.1b 資料補丁）：`aliases_overlay.json` 新增 海港城（ig:530031）、又一城（ig:530276）、太古城→太古城中心（ig:533687）三行，令三個商場成為 alias 目標、最後先裁；代價係改為裁走 北角匯一期（ig:21143902）、欣榮商場（ig:21146118）、喜盈商場（ig:21146629）。
 
 ## TLS 注意
 `open.hkmapservice.gov.hk` 伺服器漏送中間證書「Hongkong Post e-Cert SSL CA 3 - 17」，Python／curl 預設會報

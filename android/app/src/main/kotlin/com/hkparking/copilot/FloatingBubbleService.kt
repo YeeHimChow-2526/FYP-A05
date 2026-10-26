@@ -3,6 +3,11 @@ package com.hkparking.copilot
 import com.hkparking.copilot.di.NetworkStatusProvider
 import com.hkparking.copilot.net.QueryTriggerMode
 import com.hkparking.copilot.net.RecommendRequest
+import com.hkparking.copilot.poi.AssetPoiTrieProvider
+import com.hkparking.copilot.poi.LocalPoiTrie
+import com.hkparking.copilot.poi.Poi
+import com.hkparking.copilot.poi.PoiTrieProvider
+import com.hkparking.copilot.poi.TrieResult
 import com.hkparking.copilot.voice.CapabilitySnapshot
 import com.hkparking.copilot.voice.CapabilityStatus
 import com.hkparking.copilot.voice.CommandCode
@@ -33,7 +38,11 @@ class FloatingBubbleService : android.app.Service {
   private val networkStatus: NetworkStatusProvider
   private val apiClient: com.hkparking.copilot.net.ApiClient
 
-  constructor() : this(defaultDelayMs())
+  constructor() : this(defaultDelayMs()) {
+    poiTrieProvider = AssetPoiTrieProvider {
+      assets.open("hk_poi_master.json").bufferedReader(Charsets.UTF_8).use { it.readText() }
+    }
+  }
 
   constructor(delayMs: suspend (Long) -> Unit) : this(
     VoiceCapabilityChecker(AndroidSpeechProbe()),
@@ -169,8 +178,12 @@ class FloatingBubbleService : android.app.Service {
   private var speechHeard: Boolean = false
   private var pendingQuestion: PendingQuestion = PendingQuestion.NONE
   private var listenEpoch: Int = 0
+  var poiTrieProvider: PoiTrieProvider? = null
+  private var clarifyCandidates: List<Poi> = emptyList()
   internal val currentPendingQuestion: PendingQuestion
     get() = pendingQuestion
+  internal val currentClarifyCandidates: List<Poi>
+    get() = clarifyCandidates
   internal val launchedRecommendModes = mutableListOf<QueryTriggerMode>()
   internal var capsuleSnapshot: String = ""
     private set
@@ -249,6 +262,7 @@ class FloatingBubbleService : android.app.Service {
     }
     worker.isDaemon = true
     worker.start()
+    (poiTrieProvider as? AssetPoiTrieProvider)?.prewarm()
     if (!tripStateMachine.fgsStartAccepted) {
       val outcome = tripStateMachine.requestStart(
         entry = entry,
@@ -462,11 +476,14 @@ class FloatingBubbleService : android.app.Service {
     publishJitEdge(wasJitTriggered)
   }
 
-  fun lockDestination(destinationName: String) {
+  fun lockDestination(destinationName: String, poi: Poi? = null) {
     val wasJitTriggered = tripStateMachine.jitTriggered
     tripStateMachine.onDestinationSet(
       distanceToDestinationM = distanceForDestinationLock(),
       destinationName = destinationName,
+      destLat = poi?.lat,
+      destLng = poi?.lng,
+      destinationPoiId = poi?.id,
     )
     publishJitEdge(wasJitTriggered)
   }
@@ -506,6 +523,9 @@ class FloatingBubbleService : android.app.Service {
         invalidatePendingQuestion(PendingInvalidation.DIALOGUE_INTERRUPTED)
       }
       return
+    }
+    if (pendingQuestion == PendingQuestion.CLARIFY_DESTINATION) {
+      if (handleClarifyAnswer(text, parsed)) return
     }
     if (effectivePending == PendingQuestion.RECOMMENDATION_CONFIRM) {
       if (parsed.blockedAsSelfHearing) {
@@ -586,7 +606,7 @@ class FloatingBubbleService : android.app.Service {
       }
     }
     if (parsed.code == CommandCode.SET_DESTINATION && !parsed.destinationName.isNullOrBlank()) {
-      lockDestination(parsed.destinationName)
+      resolveSpokenDestination(parsed.destinationName)
     }
     if (parsed.code == CommandCode.FIND_PARKING) {
       launchRecommend(QueryTriggerMode.DRIVER_ACTIVE)
@@ -794,6 +814,167 @@ class FloatingBubbleService : android.app.Service {
     shutdownResultDropped = true
     logInfo("Result dropped: shutdown")
     return true
+  }
+
+
+  private fun resolveSpokenDestination(name: String) {
+    val trie = runCatching { poiTrieProvider?.get() }.getOrNull()
+    if (trie == null) {
+      clearClarifyState()
+      lockDestination(name)
+      return
+    }
+    val startedNs = System.nanoTime()
+    val result = trie.lookup(name)
+    val elapsedMs = (System.nanoTime() - startedNs) / 1_000_000L
+    if (elapsedMs > NativeConfig.TRIE_LOOKUP_BUDGET_MS) {
+      runCatching {
+        android.util.Log.i("FloatingBubbleService", "TRIE_SLOW name=$name ms=$elapsedMs")
+      }
+    }
+    when (result) {
+      is TrieResult.Hit -> {
+        clearClarifyState()
+        lockDestination(name, result.poi)
+        speakDestinationLock(name, result.poi, fullKey = isFullKey(name, result.poi))
+      }
+      is TrieResult.Ambiguous -> {
+        clarifyCandidates = result.candidates
+        val mode = tripStateMachine.tripVoiceMode
+        if (mode == TripVoiceMode.FULL_VOICE) {
+          pendingQuestion = PendingQuestion.CLARIFY_DESTINATION
+          listenEpoch += 1
+          val spokenCountBefore = lastSpokenAlertCount
+          tripStateMachine.onPlaceClarificationNeeded()
+          // RT-1: distinguish mute/GREY clear vs duplicate PLACE_CLARIFICATION suppress (T15)
+          when {
+            tripStateMachine.state != TripState.ALERT_BREATHING -> {
+              pendingQuestion = PendingQuestion.NONE
+              clarifyCandidates = emptyList()
+            }
+            pendingQuestion == PendingQuestion.NONE -> {
+              // already cleared by speakNewAlertCue mute path
+            }
+            lastSpokenAlertCount == spokenCountBefore -> {
+              // suppressed: keep pending + new candidates; reopen timer
+              if (isMicActive && !ttsService.isSpeaking) {
+                startOpeningWaitTimer(PendingQuestion.CLARIFY_DESTINATION)
+              }
+            }
+          }
+        } else {
+          tripStateMachine.onPlaceClarificationNeeded()
+        }
+      }
+      TrieResult.Miss -> {
+        clearClarifyState()
+        lockDestination(name)
+        runCatching {
+          android.util.Log.i("FloatingBubbleService", "TRIE_MISS name=$name")
+        }
+        if (tripStateMachine.tripVoiceMode == TripVoiceMode.FULL_VOICE) {
+          speakIfActive(
+            ZhHkTemplates.directLock(name),
+            tripStateMachine.tripVoiceMode,
+            isApproachMuted = tripStateMachine.state == TripState.APPROACH_MUTED,
+          )
+        }
+      }
+    }
+  }
+
+  private fun handleClarifyAnswer(text: String, parsed: com.hkparking.copilot.voice.ParseResult): Boolean {
+    if (parsed.blockedAsSelfHearing) {
+      // RT-4: ignore without speechHeard / mic / listenEpoch
+      return true
+    }
+    when {
+      parsed.code == CommandCode.FIND_PARKING -> {
+        speechHeard = true
+        com.hkparking.copilot.di.Bindings.voiceInput.stopListening()
+        invalidatePendingQuestion(PendingInvalidation.DESTINATION_OR_CANDIDATE_CHANGED)
+        return false
+      }
+      parsed.code == CommandCode.SET_DESTINATION && !parsed.destinationName.isNullOrBlank() -> {
+        speechHeard = true
+        com.hkparking.copilot.di.Bindings.voiceInput.stopListening()
+        invalidatePendingQuestion(PendingInvalidation.DESTINATION_OR_CANDIDATE_CHANGED)
+        return false
+      }
+      parsed.code == CommandCode.CONFIRM_TARGET -> {
+        // 「好」 never locks (DP2 / RT-4)
+        return true
+      }
+      parsed.code == CommandCode.SHOW_DETAILS || parsed.code == CommandCode.NEXT_OPTION -> {
+        return true
+      }
+      else -> {
+        val match = clarifyDistrictMatch(text)
+        if (match == null) {
+          // unmatched / UNKNOWN — RT-4 ignore
+          return true
+        }
+        speechHeard = true
+        com.hkparking.copilot.di.Bindings.voiceInput.stopListening()
+        pendingQuestion = PendingQuestion.NONE
+        listenEpoch += 1
+        clarifyCandidates = emptyList()
+        lockDestination(match.zh, match)
+        val districtShort = if (match.type == 'D') null else match.district
+        if (tripStateMachine.tripVoiceMode == TripVoiceMode.FULL_VOICE) {
+          speakIfActive(
+            ZhHkTemplates.implicitLockEcho(districtShort, match.zh),
+            tripStateMachine.tripVoiceMode,
+            isApproachMuted = tripStateMachine.state == TripState.APPROACH_MUTED,
+          )
+        }
+        return true
+      }
+    }
+  }
+
+  private fun clarifyDistrictMatch(answer: String): Poi? {
+    var a = LocalPoiTrie.normalize(answer)
+    if (a.length > 1 && a.endsWith("區")) {
+      a = a.dropLast(1)
+    }
+    if (a.isNotEmpty()) {
+      val byDistrict = clarifyCandidates.singleOrNull { it.district == a }
+      if (byDistrict != null) return byDistrict
+    }
+    val trie = runCatching { poiTrieProvider?.get() }.getOrNull() ?: return null
+    val hit = trie.lookup(answer) as? TrieResult.Hit ?: return null
+    // RT-2: same uniqueness as step (a)
+    return clarifyCandidates.singleOrNull { it.district == hit.poi.district }
+  }
+
+  private fun isFullKey(query: String, poi: Poi): Boolean {
+    val nq = LocalPoiTrie.normalize(query)
+    val keys = (listOf(poi.zh, poi.en) + poi.aliases).map { LocalPoiTrie.normalize(it) }.filter { it.isNotEmpty() }
+    return nq in keys
+  }
+
+  private fun speakDestinationLock(spokenName: String, poi: Poi, fullKey: Boolean) {
+    if (tripStateMachine.tripVoiceMode != TripVoiceMode.FULL_VOICE) return
+    val cue = if (fullKey) {
+      ZhHkTemplates.directLock(spokenName)
+    } else {
+      val districtShort = if (poi.type == 'D') null else poi.district
+      ZhHkTemplates.implicitLockEcho(districtShort, poi.zh)
+    }
+    speakIfActive(
+      cue,
+      tripStateMachine.tripVoiceMode,
+      isApproachMuted = tripStateMachine.state == TripState.APPROACH_MUTED,
+    )
+  }
+
+  private fun clearClarifyState() {
+    if (pendingQuestion == PendingQuestion.CLARIFY_DESTINATION) {
+      pendingQuestion = PendingQuestion.NONE
+      listenEpoch += 1
+    }
+    clarifyCandidates = emptyList()
   }
 
   private fun speakIfActive(
@@ -1066,6 +1247,10 @@ class FloatingBubbleService : android.app.Service {
   }
 
   private fun startScarcityOpeningWaitTimer() {
+    startOpeningWaitTimer(PendingQuestion.SCARCITY_EXPAND)
+  }
+
+  private fun startOpeningWaitTimer(question: PendingQuestion) {
     if (shutdownInProgress) return
     com.hkparking.copilot.di.Bindings.voiceInput.startListening()
     speechHeard = false
@@ -1074,14 +1259,14 @@ class FloatingBubbleService : android.app.Service {
     runCatching {
       android.util.Log.i(
         "FloatingBubbleService",
-        "Listen opened: question=SCARCITY_EXPAND waitS=${NativeConfig.LISTEN_OPENING_WAIT_S}",
+        "Listen opened: question=$question waitS=${NativeConfig.LISTEN_OPENING_WAIT_S}",
       )
     }
     launchApi {
       delayMs((NativeConfig.LISTEN_OPENING_WAIT_S * 1000).toLong())
       if (
         listenEpoch == epoch &&
-        pendingQuestion == PendingQuestion.SCARCITY_EXPAND &&
+        pendingQuestion == question &&
         !speechHeard
       ) {
         onListenSilence(NativeConfig.LISTEN_OPENING_WAIT_S)
@@ -1097,6 +1282,9 @@ class FloatingBubbleService : android.app.Service {
     confirmListenArmed = false
     pendingQuestion = CommandCodes.invalidatePending(reason)
     lastPendingInvalidation = reason
+    if (question == PendingQuestion.CLARIFY_DESTINATION) {
+      clarifyCandidates = emptyList()
+    }
     runCatching {
       android.util.Log.i(
         "FloatingBubbleService",
@@ -1126,7 +1314,29 @@ class FloatingBubbleService : android.app.Service {
     val cue = tripStateMachine.lastSpokenCue
     if (cue.isNullOrBlank()) return
     logInfo("Alert cue speak: count=$count muted=$mutedBefore")
-    speakIfActive(cue, tripStateMachine.tripVoiceMode, isApproachMuted = mutedBefore)
+    val clarifyPending = pendingQuestion == PendingQuestion.CLARIFY_DESTINATION
+    val onFinished: ((Boolean) -> Unit)? = if (clarifyPending) {
+      { played ->
+        if (played && isMicActive) {
+          startOpeningWaitTimer(PendingQuestion.CLARIFY_DESTINATION)
+        } else if (!played) {
+          invalidatePendingQuestion(PendingInvalidation.TIMEOUT)
+        }
+      }
+    } else {
+      null
+    }
+    val spoken = speakIfActive(
+      cue,
+      tripStateMachine.tripVoiceMode,
+      isApproachMuted = mutedBefore,
+      onFinished = onFinished,
+    )
+    // RT-1: muted / speakIfActive null → cannot ask; clear pending
+    if (clarifyPending && spoken == null) {
+      pendingQuestion = PendingQuestion.NONE
+      clarifyCandidates = emptyList()
+    }
   }
 
   internal fun speakStartRejection(entry: StartupEntry, cue: String?) {
@@ -1169,8 +1379,8 @@ class FloatingBubbleService : android.app.Service {
       sessionId = tripStateMachine.sessionId ?: "",
       originLat = 0.0,
       originLng = 0.0,
-      destLat = 0.0,
-      destLng = 0.0,
+      destLat = tripStateMachine.destLat ?: 0.0,
+      destLng = tripStateMachine.destLng ?: 0.0,
       destName = tripStateMachine.destinationName ?: "",
       preference = "SMART_HYBRID",
       expandScarcity = expandScarcity,
@@ -1320,13 +1530,25 @@ class FloatingBubbleService : android.app.Service {
     }
     if (
       tripStateMachine.tripVoiceMode == TripVoiceMode.FULL_VOICE &&
+      pendingQuestion == PendingQuestion.CLARIFY_DESTINATION &&
+      !ttsService.isSpeaking
+    ) {
+      startOpeningWaitTimer(PendingQuestion.CLARIFY_DESTINATION)
+    }
+    if (
+      tripStateMachine.tripVoiceMode == TripVoiceMode.FULL_VOICE &&
       pendingQuestion == PendingQuestion.RECOMMENDATION_CONFIRM &&
       !ttsService.isSpeaking &&
       !confirmListenArmed
     ) {
       openConfirmListenWindow()
     }
-    if (!grey && pendingQuestion != PendingQuestion.SCARCITY_EXPAND && (!fullVoice || !micWasActive)) {
+    if (
+      !grey &&
+      pendingQuestion != PendingQuestion.SCARCITY_EXPAND &&
+      pendingQuestion != PendingQuestion.CLARIFY_DESTINATION &&
+      (!fullVoice || !micWasActive)
+    ) {
       presentManualCardFromTap(announce = tripStateMachine.tripVoiceMode == TripVoiceMode.ANNOUNCE_MANUAL)
     }
     return true
@@ -1352,6 +1574,7 @@ class FloatingBubbleService : android.app.Service {
     fullCarparkIds.clear()
     commitInFlight = false
     confirmListenArmed = false
+    clarifyCandidates = emptyList()
     invalidatePendingQuestion(PendingInvalidation.DIALOGUE_INTERRUPTED)
     ttsService.interrupt()
     detachCapsuleWindow()

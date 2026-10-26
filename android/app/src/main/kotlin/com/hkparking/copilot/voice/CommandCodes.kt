@@ -190,6 +190,10 @@ object ZhHkTemplates {
     return "收到，為你鎖定【$districtFeature】[$fullName]，搜尋緊周邊車位。"
   }
 
+  fun implicitLockEcho(districtShort: String?, fullName: String): String =
+    if (districtShort.isNullOrBlank()) "收到，為你鎖定$fullName，搜尋緊周邊車位。"
+    else "收到，為你鎖定${districtShort}區$fullName，搜尋緊周邊車位。"
+
   fun permissionRepair(missing: String): String {
     return "泊車副駕需要補授權：$missing。請泊好車後再處理。"
   }

@@ -36,7 +36,7 @@
 
 - [x] W-A.1 懸浮膠囊＋狀態機 — commit: 4ac4036, eaa4fc1, e8f00f7, a4b1944, 752de53
 - [ ] W-A.2 Maps 接盤與分享跳板 — commit: 
-- [ ] W-A.3 本機字典樹與常數檔 — 常數檔已落地（Step 1.1）；字典樹未做 — commit: 2fbf18b, c0c392c
+- [ ] W-A.3 本機字典樹與常數檔 — 常數檔已落地（Step 1.1）；字典樹已落地（3.1）並接駁語音終點（3.1b）；Miss 仍未有 geocode（SC-014）；TRIE_MISS_* sim hook 留 3.2 — commit: 2fbf18b, c0c392c, 0cc3bd9, <hash>
 - [x] W-A.15 session_id 生命週期 — commit: 4ac4036, e8f00f7, a4b1944
 - [x] W-A.16 FGS 啟動握手 — commit: a2017f5, 623c382, a03217f
 - [ ] W-A.4 軟件距離追蹤 — commit: 
@@ -96,8 +96,8 @@
 - Step 3：`TRIE_MISS_RESOLVE_OK`／`TRIE_MISS_NETWORK_FAIL`（未口播「網絡唔順，遲啲再試」）／`TRIE_MISS_AMBIGUOUS` 接真 LocalPoiTrie／B-2
 
 未完成：B-2 分享接盤、閘口座標、DistanceTracker、EngineShutdownReceiver（藍牙／車充）、單一 AudioRecord、STT 引擎、今日行程 Flutter。
-Step 3.1：LocalPoiTrie＋hk_poi_master.json（未接駁；tools/poi 建置）
-- Step 3 開工前裁決：含糊地名口播 02 L110「去邊度？請拍一拍膠囊答我」vs 代碼 `PLACE_CLARIFY`「邊一區？」vs 03 L111「純語音反問」
+Step 3.1：LocalPoiTrie＋hk_poi_master.json（tools/poi 建置）；Step 3.1b <hash>：語音 SET_DESTINATION 接 Trie（澄清／回顯／坐標；SC-014）；TRIE_MISS_* 未接（3.2）
+- Step 3 開工前裁決：含糊地名口播 02 L110「去邊度？請拍一拍膠囊答我」vs 代碼 `PLACE_CLARIFY`「邊一區？」vs 03 L125「純語音反問」
 - 真機：FGS 真實 2s 逾時 `FgsBootstrapActivity` Log.w 記錄（模擬器無法觸發）
 
 ## 待真機驗證

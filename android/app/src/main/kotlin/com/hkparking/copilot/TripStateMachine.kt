@@ -90,6 +90,12 @@ class TripStateMachine(
     private set
   var destinationName: String? = null
     private set
+  var destLat: Double? = null
+    private set
+  var destLng: Double? = null
+    private set
+  var destinationPoiId: String? = null
+    private set
   var isMicFgsActive: Boolean = false
     private set
   var voiceInputEnabled: Boolean = false
@@ -167,6 +173,9 @@ class TripStateMachine(
     this.destinationLocked = locked
     this.hasDestination = locked
     this.destinationName = if (namedDestination) destinationName else null
+    this.destLat = null
+    this.destLng = null
+    this.destinationPoiId = null
     this.distanceToDestinationM = distanceToDestinationM
     this.treatAsOnSite = onSite
     fgsStartAccepted = true
@@ -193,11 +202,24 @@ class TripStateMachine(
     )
   }
 
-  fun onDestinationSet(distanceToDestinationM: Int? = null, destinationName: String? = null) {
+  fun onDestinationSet(
+    distanceToDestinationM: Int? = null,
+    destinationName: String? = null,
+    destLat: Double? = null,
+    destLng: Double? = null,
+    destinationPoiId: String? = null,
+  ) {
     hasDestination = true
     destinationLocked = true
     if (!destinationName.isNullOrBlank()) {
       this.destinationName = destinationName
+    }
+    this.destLat = destLat
+    this.destLng = destLng
+    this.destinationPoiId = destinationPoiId
+    spokenAlerts.remove(AlertCause.PLACE_CLARIFICATION)
+    if (deferredAlert == AlertCause.PLACE_CLARIFICATION) {
+      deferredAlert = null
     }
     if (distanceToDestinationM != null) {
       this.distanceToDestinationM = distanceToDestinationM
@@ -576,6 +598,9 @@ class TripStateMachine(
     destinationLocked = false
     hasDestination = false
     destinationName = null
+    destLat = null
+    destLng = null
+    destinationPoiId = null
     isMicFgsActive = false
     treatAsOnSite = false
     networkDegraded = false
