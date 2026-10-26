@@ -137,6 +137,11 @@ class FloatingBubbleService : android.app.Service {
   internal fun restartTripFromEntry(entry: StartupEntry, hotwordEnabled: Boolean = true): Boolean {
     shutdownInProgress = false
     greyRetryInFlight = false
+    committedCarparkId = null
+    committedCarparkName = null
+    latestDistanceM = null
+    distanceTracker.reset()
+    engineShutdownDetector.reset()
     invalidatePendingQuestion(PendingInvalidation.DIALOGUE_INTERRUPTED)
     val recordAudioGranted = runCatching {
       checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
@@ -156,12 +161,14 @@ class FloatingBubbleService : android.app.Service {
       return false
     }
     reportFgsStarted()
+    com.hkparking.copilot.di.Bindings.locationSource.applySamplingTier(distanceTracker.tier)
     attachCapsuleWindow()
     updateCapsuleVisual()
     return true
   }
 
   override fun onDestroy() {
+    unregisterEngineReceiver()
     abandonCardOverlay()
     if (portsWired) { portsWired = false; com.hkparking.copilot.di.Bindings.clearPorts() }
     com.hkparking.copilot.di.Bindings.detachService(this)
@@ -248,6 +255,33 @@ class FloatingBubbleService : android.app.Service {
   internal var greyRetryInFlight: Boolean = false
   internal var lastPendingInvalidation: PendingInvalidation? = null
   internal var shutdownResultDropped: Boolean = false
+  internal val distanceTracker: DistanceTracker = DistanceTracker(
+    object : DistanceTracker.Listener {
+      override fun onSample(sample: DistanceSample) {
+        onTrackerSample(sample)
+      }
+      override fun onTierChanged(tier: SamplingTier) {
+        onSamplingTierChanged(tier)
+      }
+    },
+  )
+  internal val engineShutdownDetector: EngineShutdownDetector = EngineShutdownDetector()
+  private val engineShutdownReceiver: EngineShutdownReceiver = EngineShutdownReceiver(
+    EngineShutdownReceiver.Sink { signal, disconnected -> onEngineSignal(signal, disconnected) },
+  )
+  internal var bluetoothConnectGranted: () -> Boolean = {
+    runCatching {
+      checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) ==
+        android.content.pm.PackageManager.PERMISSION_GRANTED
+    }.getOrDefault(false)
+  }
+  var engineReceiverRegistered: Boolean = false
+    private set
+  var lastEngineSignalOutcome: String? = null
+    private set
+  private var committedCarparkId: String? = null
+  private var committedCarparkName: String? = null
+  private var latestDistanceM: Int? = null
   private var lastSpokenAlertCount: Int = 0
   private var alertCountSessionId: String? = null
 
@@ -281,6 +315,11 @@ class FloatingBubbleService : android.app.Service {
       pendingShareTitle = null
       b2NetworkCueSpoken = false
       lastShareOutcome = null
+      committedCarparkId = null
+      committedCarparkName = null
+      latestDistanceM = null
+      distanceTracker.reset()
+      engineShutdownDetector.reset()
     }
     val initial = capabilityChecker.startupSnapshot(recordAudioGranted, hotwordEnabled, entry)
     activeFgsType = if (entry == StartupEntry.B_2) {
@@ -349,6 +388,7 @@ class FloatingBubbleService : android.app.Service {
     onFgsStarted()
     dispatchFgsStarted(this)
     wirePorts()
+    registerEngineReceiver()
     updateCapsuleVisual()
   }
 
@@ -390,6 +430,13 @@ class FloatingBubbleService : android.app.Service {
     com.hkparking.copilot.di.Bindings.locationSource.setMotionListener { distanceMeters, speedKmh, fixAgeSeconds, lowSpeedHoldS, exitHoldS ->
       onMotionSample(distanceMeters, speedKmh, fixAgeSeconds, lowSpeedHoldS, exitHoldS)
     }
+    com.hkparking.copilot.di.Bindings.locationSource.setFixListener { fix ->
+      distanceTracker.onFix(fix)
+    }
+    com.hkparking.copilot.di.Bindings.locationSource.setTickListener { nowMs ->
+      distanceTracker.onTick(nowMs)
+    }
+    com.hkparking.copilot.di.Bindings.locationSource.applySamplingTier(distanceTracker.tier)
     com.hkparking.copilot.di.Bindings.voiceInput.setUtteranceListener { text, confidence ->
       onUtterance(text, confidence)
     }
@@ -403,6 +450,7 @@ class FloatingBubbleService : android.app.Service {
     exitHoldS: Int,
   ) {
     if (!isFgsRunning) return
+    latestDistanceM = distanceMeters
     tripStateMachine.onApproachSample(distanceMeters, speedKmh, lowSpeedHoldS, fixAgeSeconds, exitHoldS)
     updateCapsuleVisual()
     if (
@@ -416,6 +464,7 @@ class FloatingBubbleService : android.app.Service {
   }
 
   fun onEngineShutdown(withinTargetOrBasementLoss: Boolean) {
+    if (shutdownInProgress) return
     shutdownInProgress = true
     greyRetryInFlight = false
     abandonCardOverlay()
@@ -426,8 +475,12 @@ class FloatingBubbleService : android.app.Service {
     commitInFlight = false
     confirmListenArmed = false
     val sessionId = tripStateMachine.sessionId
-    val targetCarparkId = cachedCards.firstOrNull()?.carparkId ?: tripStateMachine.destinationName.orEmpty()
-    val targetName = cachedCards.firstOrNull()?.name ?: tripStateMachine.destinationName
+    val targetCarparkId = committedCarparkId
+      ?: cachedCards.firstOrNull()?.carparkId
+      ?: tripStateMachine.destinationName.orEmpty()
+    val targetName = committedCarparkName
+      ?: cachedCards.firstOrNull()?.name
+      ?: tripStateMachine.destinationName
     tripStateMachine.onEngineShutdown(withinTargetOrBasementLoss)
     tripEndedReason = if (withinTargetOrBasementLoss) "PARKED_CONFIRMED" else "ENGINE_SHUTDOWN"
     if (withinTargetOrBasementLoss && sessionId != null) {
@@ -503,6 +556,7 @@ class FloatingBubbleService : android.app.Service {
 
   private fun onLocationFix(distanceMeters: Int) {
     if (!isFgsRunning) return
+    latestDistanceM = distanceMeters
     if (
       tripStateMachine.state == TripState.APPROACH_MUTED ||
       tripStateMachine.state == TripState.PARKED_CONFIRMED ||
@@ -518,9 +572,12 @@ class FloatingBubbleService : android.app.Service {
   }
 
   fun lockDestination(destinationName: String, poi: Poi? = null) {
+    committedCarparkId = null
+    committedCarparkName = null
+    distanceTracker.setDestination(poi?.lat, poi?.lng)
     val wasJitTriggered = tripStateMachine.jitTriggered
     tripStateMachine.onDestinationSet(
-      distanceToDestinationM = distanceForDestinationLock(),
+      distanceToDestinationM = distanceTracker.distanceToDestinationM() ?: distanceForDestinationLock(),
       destinationName = destinationName,
       destLat = poi?.lat,
       destLng = poi?.lng,
@@ -530,9 +587,12 @@ class FloatingBubbleService : android.app.Service {
   }
 
   fun lockDestinationAt(destinationName: String, lat: Double, lng: Double, poiId: String? = null) {
+    committedCarparkId = null
+    committedCarparkName = null
+    distanceTracker.setDestination(lat, lng)
     val wasJitTriggered = tripStateMachine.jitTriggered
     tripStateMachine.onDestinationSet(
-      distanceToDestinationM = distanceForDestinationLock(),
+      distanceToDestinationM = distanceTracker.distanceToDestinationM() ?: distanceForDestinationLock(),
       destinationName = destinationName,
       destLat = lat,
       destLng = lng,
@@ -679,6 +739,7 @@ class FloatingBubbleService : android.app.Service {
     val next = tripStateMachine.state
     val previous = observedTripState
     observedTripState = next
+    distanceTracker.setApproachMuted(next == TripState.APPROACH_MUTED)
     if (
       next == TripState.APPROACH_MUTED &&
       previous != TripState.EXPANDED &&
@@ -1168,6 +1229,8 @@ class FloatingBubbleService : android.app.Service {
         val outcome = apiClient.commitSession(sessionId, card.carparkId)
         if (dropShutdownResult()) return@launchApi
         if (outcome.succeeded) {
+          committedCarparkId = card.carparkId
+          committedCarparkName = card.name
           abandonCardOverlay()
           tripStateMachine.onCommitSucceeded()
           com.hkparking.copilot.di.Bindings.navigation.launchGateNavigation(card.name.ifBlank { card.carparkId })
@@ -1633,7 +1696,116 @@ class FloatingBubbleService : android.app.Service {
     tripStateMachine.onOemKilled()
   }
 
+  internal fun onEngineSignal(signal: EngineShutdownDetector.Signal, disconnected: Boolean) {
+    if (!isFgsRunning || shutdownInProgress) {
+      lastEngineSignalOutcome = "IGNORED_NOT_RUNNING"
+      return
+    }
+    if (disconnected) {
+      val token = engineShutdownDetector.onDisconnected(signal) ?: return
+      launchApi {
+        delayMs(NativeConfig.ENGINE_OFF_DEBOUNCE_MS)
+        confirmEngineOff(token)
+      }
+    } else {
+      engineShutdownDetector.onReconnected(signal)
+      if (!engineShutdownDetector.isPending) {
+        lastEngineSignalOutcome = "CANCELLED"
+      }
+    }
+  }
+
+  internal fun shutdownVerdict(): Boolean {
+    if (tripStateMachine.state == TripState.APPROACH_MUTED) return true
+    val distance = distanceTracker.lastDistanceM ?: latestDistanceM ?: return false
+    return distance <= NativeConfig.APPROACH_RADIUS_M
+  }
+
+  private fun confirmEngineOff(token: Long) {
+    if (!isFgsRunning || shutdownInProgress) {
+      lastEngineSignalOutcome = "IGNORED_NOT_RUNNING"
+      return
+    }
+    if (!engineShutdownDetector.confirm(token)) return
+    val speed = distanceTracker.recentSpeedKmh()
+    if (speed != null && speed >= NativeConfig.ENGINE_OFF_MAX_SPEED_KMH) {
+      lastEngineSignalOutcome = "IGNORED_MOVING"
+      runCatching {
+        android.util.Log.i("FloatingBubbleService", "ENGINE_OFF_IGNORED reason=moving")
+      }
+      engineShutdownDetector.reset()
+      return
+    }
+    lastEngineSignalOutcome = "CONFIRMED"
+    onEngineShutdown(shutdownVerdict())
+  }
+
+  private fun onTrackerSample(sample: DistanceSample) {
+    if (!isFgsRunning) return
+    latestDistanceM = sample.distanceM
+    tripStateMachine.onApproachSample(
+      sample.distanceM,
+      sample.speedKmh,
+      sample.lowSpeedHoldS,
+      sample.fixAgeS,
+      sample.exitHoldS,
+    )
+    updateCapsuleVisual()
+    if (
+      tripStateMachine.state == TripState.APPROACH_MUTED ||
+      tripStateMachine.state == TripState.PARKED_CONFIRMED
+    ) {
+      return
+    }
+    if (sample.fresh) {
+      onLocationFix(sample.distanceM)
+    }
+  }
+
+  private fun onSamplingTierChanged(tier: SamplingTier) {
+    com.hkparking.copilot.di.Bindings.locationSource.applySamplingTier(tier)
+  }
+
+  private fun registerEngineReceiver() {
+    if (engineReceiverRegistered) return
+    val btGranted = bluetoothConnectGranted()
+    val actions = EngineShutdownReceiver.actionsFor(btGranted)
+    runCatching {
+      android.util.Log.i(
+        "FloatingBubbleService",
+        "ENGINE_RECEIVER bt=${if (btGranted) "on" else "off"}",
+      )
+    }
+    val ctx = runCatching { applicationContext }.getOrNull() ?: this
+    val result = runCatching {
+      EngineShutdownReceiver.registrar.register(ctx, engineShutdownReceiver, actions)
+    }
+    if (result.isSuccess) {
+      engineReceiverRegistered = true
+    } else {
+      runCatching {
+        android.util.Log.w(
+          "FloatingBubbleService",
+          "ENGINE_RECEIVER register failed reason=${result.exceptionOrNull()?.javaClass?.simpleName}",
+        )
+      }
+    }
+  }
+
+  private fun unregisterEngineReceiver() {
+    if (!engineReceiverRegistered) return
+    val ctx = runCatching { applicationContext }.getOrNull() ?: this
+    runCatching { EngineShutdownReceiver.registrar.unregister(ctx, engineShutdownReceiver) }
+    engineReceiverRegistered = false
+  }
+
   private fun finishTeardown(reason: String) {
+    unregisterEngineReceiver()
+    engineShutdownDetector.reset()
+    distanceTracker.reset()
+    committedCarparkId = null
+    committedCarparkName = null
+    latestDistanceM = null
     abandonCardOverlay()
     fullCarparkIds.clear()
     commitInFlight = false

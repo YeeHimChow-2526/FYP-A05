@@ -19,7 +19,7 @@ class ConnectivityNetworkStatus : NetworkStatusProvider {
 
 object Bindings {
   val voiceInput: VoiceInput = SttVoiceInput()
-  val locationSource: LocationSource = FusedLocationSource()
+  val locationSource: PlatformLocationSource = PlatformLocationSource()
   val apiTransport: ApiTransport = HttpApiTransport()
   val networkStatus: ConnectivityNetworkStatus = ConnectivityNetworkStatus()
   val b2MissResolver: B2MissResolver = B2MissResolvers.NAME_LOCK
@@ -30,6 +30,8 @@ object Bindings {
     val context = service.applicationContext
     networkStatus.context = context
     appContext = context
+    locationSource.attach(service)
+    locationSource.start()
   }
 
   fun detachService(service: com.hkparking.copilot.FloatingBubbleService) {
@@ -45,6 +47,10 @@ object Bindings {
     voiceInput.setUtteranceListener(null)
     locationSource.setLocationListener(null)
     locationSource.setMotionListener(null)
+    locationSource.setFixListener(null)
+    locationSource.setTickListener(null)
+    locationSource.stop()
+    locationSource.detach()
   }
 
   fun clearPendingStart() {}

@@ -255,3 +255,34 @@
 - 影響任務編號／常數名／檔案：Step 3.2；ShareIntentReceiverActivity.kt（新）、share/ShareIntake.kt（新）、FloatingBubbleService.kt、TripStateMachine.kt、debug/di/Bindings.kt、release/di/Bindings.kt、AndroidManifest.xml
 - 類別：規格缺漏
 - 狀態：待處理
+
+### SC-016
+- 日期：2026-10-26
+- 來源：評估（Step 3.3 代碼預建，Pi 落地）
+- 裝置（如適用）：不適用（藍牙 ACL 待真機）
+- 發現：
+  1. FusedLocationSource 係 stub，release 冇距離；DistanceTracker／EngineShutdownReceiver 未落地（SC-005 延後項）。
+  2. FBS onMotionSample `exitHoldS > 0` 即 return，真 GPS 會餓死 JIT。
+  3. 熄匙 release／候選用第一張卡，唔係已 commit 車場。
+  4. 熄匙冇去抖、冇行車防護、冇重入防護；NAV_TO_GATE 期間距離唔更新。
+  5. 01 L74「目標場」冇坐標可量；「地庫斷訊狀態」、DISTANCE_SANITY_TOLERANCE_MULTIPLIER 冇定義；04 L120 Flow port 同代碼唔一致；AG L411 同熄匙藍牙描述有出入。
+- 建議改動：
+  1. DistanceTracker（純 Kotlin）：haversine 量終點；三級採樣（150 入、200 出）；低速／退出持續秒數由 fix timestamp 計；精度 >VALID_FIX_MAX_ACCURACY_M 忽略；斷訊每段一次 stale sample。
+  2. EngineShutdownDetector＋EngineShutdownReceiver：FGS 期間動態註冊（RECEIVER_NOT_EXPORTED）；車充必聽、藍牙 ACL 只限有 BLUETOOTH_CONNECT 且 class 係 CAR_AUDIO／HANDSFREE；ENGINE_OFF_DEBOUNCE_MS 去抖；近期車速 ≥ENGINE_OFF_MAX_SPEED_KMH 忽略。
+  3. 熄匙判定 = APPROACH_MUTED 或最後已知距離 ≤150m；release／候選用已 commit 車場。
+  4. release 用 PlatformLocationSource（LocationManager，冇新依賴）。
+  已接受、唔改代碼嘅遺留項：
+  - 「目標場」以終點坐標代替（卡／commit 冇坐標）
+  - 候選只存記憶體（TodayTripStore 留 3.4）
+  - 紅燈停車拔線（範圍外）會結束本程
+  - debug build 冇真 GPS；GPX 回放要 release build
+  遺留項：
+  - 卡片／commit 帶車場 lat/lng，或閘口坐標
+  - 用 Flutter 頁面 6 配對車機 MAC 代替 device class
+  - A-1 ACL 連線 Heads-up
+  - DISTANCE_SANITY_TOLERANCE_MULTIPLIER 定義或刪除
+  - 04 L120-122 改成 listener 式 port；04 L41 release fixture
+  - 真機：去抖／速度門檻、藍牙熄匙、耗電 1–3%
+- 影響任務編號／常數名／檔案：Step 3.3；W-A.4／W-A.9／W-A.17；VALID_FIX_MAX_ACCURACY_M、DISTANCE_TICK_MS、ENGINE_OFF_DEBOUNCE_MS、ENGINE_OFF_MAX_SPEED_KMH；DistanceTracker.kt（新）、EngineShutdownDetector.kt（新）、EngineShutdownReceiver.kt（新）、FloatingBubbleService.kt、NativeConfig.kt、di/CorePorts.kt、debug/di/Bindings.kt、debug/sim/SimLocationSource.kt、debug/sim/FixtureApiTransport.kt、release/di/Bindings.kt
+- 類別：規格缺漏
+- 狀態：待處理

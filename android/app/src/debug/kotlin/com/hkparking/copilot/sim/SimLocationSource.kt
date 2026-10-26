@@ -1,5 +1,7 @@
 package com.hkparking.copilot.sim
 
+import com.hkparking.copilot.SamplingTier
+import com.hkparking.copilot.di.LocFix
 import com.hkparking.copilot.di.LocationSource
 
 // SIM: debug source set only
@@ -16,9 +18,12 @@ class SimLocationSource : LocationSource {
     private set
   var exitHoldS: Int = 0
     private set
+  val appliedTiers: MutableList<SamplingTier> = mutableListOf()
 
   private var listener: ((Int, Double, Int) -> Unit)? = null
   private var motionListener: ((Int, Double, Int, Int, Int) -> Unit)? = null
+  private var fixListener: ((LocFix) -> Unit)? = null
+  private var tickListener: ((Long) -> Unit)? = null
   private var started = false
   private var hasSample = false
 
@@ -30,6 +35,18 @@ class SimLocationSource : LocationSource {
     listener: ((distanceMeters: Int, speedKmh: Double, fixAgeSeconds: Int, lowSpeedHoldS: Int, exitHoldS: Int) -> Unit)?,
   ) {
     motionListener = listener
+  }
+
+  override fun setFixListener(listener: ((LocFix) -> Unit)?) {
+    fixListener = listener
+  }
+
+  override fun setTickListener(listener: ((nowMs: Long) -> Unit)?) {
+    tickListener = listener
+  }
+
+  override fun applySamplingTier(tier: SamplingTier) {
+    appliedTiers += tier
   }
 
   override fun start() {
@@ -80,6 +97,18 @@ class SimLocationSource : LocationSource {
     dispatchMotion()
   }
 
+  fun injectFix(fix: LocFix) {
+    if (!started || isPaused) {
+      fixListener?.invoke(fix)
+      return
+    }
+    fixListener?.invoke(fix)
+  }
+
+  fun injectTick(nowMs: Long) {
+    tickListener?.invoke(nowMs)
+  }
+
   fun pause() {
     isPaused = true
   }
@@ -103,6 +132,9 @@ class SimLocationSource : LocationSource {
     started = false
     listener = null
     motionListener = null
+    fixListener = null
+    tickListener = null
+    appliedTiers.clear()
   }
 
   private fun dispatch() {

@@ -119,6 +119,8 @@ object Bindings {
   fun clearPorts() {
     locationSource.setLocationListener(null)
     locationSource.setMotionListener(null)
+    locationSource.setFixListener(null)
+    locationSource.setTickListener(null)
     voiceInput.setUtteranceListener(null)
     navigation.reset()
     SimJoystickOverlay.hide()
@@ -186,7 +188,7 @@ object Bindings {
         val within = when (intValue) {
           1 -> true
           0 -> false
-          else -> service.lastDistanceMeters() <= NativeConfig.APPROACH_RADIUS_M
+          else -> service.shutdownVerdict()
         }
         val sessionId = service.tripStateMachine.sessionId
         service.onEngineShutdown(within)

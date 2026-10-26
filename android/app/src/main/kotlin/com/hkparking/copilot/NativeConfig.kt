@@ -43,6 +43,9 @@ object NativeConfig {
   const val HIGH_FREQ_EXIT_RADIUS_M = 200               // 高頻採樣退出半徑：持續至行程結束，或距離回退 > 此值
   const val RADAR_MUTE_SPEED_KMH = 8                    // 避讓倒車雷達強制靜音車速門檻
   const val TEARDOWN_FADE_MS = 500                      // 熄匙：完成到場判定與今日行程寫入後，淡出並停止 FGS 之時長
+  // --- 距離追蹤（W-A.4／W-A.17，Step 3.3）---
+  const val VALID_FIX_MAX_ACCURACY_M = 100   // 有效 fix 水平精度上限（米）；超過當冇收到 fix、唔刷新 fix 年齡；起始值同 ON_SITE_GPS_ACCURACY_MAX_M，真機調校
+  const val DISTANCE_TICK_MS = 1000L         // fix 年齡檢查節拍（只計時、唔開 GPS）；用嚟判斷 GPS_FIX_STALE_S 地庫斷訊
 
   // --- 分級定位採樣 (FGS 運行期間；省電 vs 精度) ---
   // >1km：BALANCED，約每 30s；≤1km：BALANCED，約每 5s；≤150m：HIGH_ACCURACY，1Hz
@@ -53,6 +56,9 @@ object NativeConfig {
   const val LOC_PRIORITY_FAR = "BALANCED"
   const val LOC_PRIORITY_NEAR = "BALANCED"
   const val LOC_PRIORITY_APPROACH = "HIGH_ACCURACY"
+  // --- 熄匙（W-A.9，Step 3.3）---
+  const val ENGINE_OFF_DEBOUNCE_MS = 2000L   // 車充／車載藍牙斷開後等此毫秒先當熄匙；期間恢復即作廢（防接觸不良、點火瞬斷）；熄匙後口播最多延長此時長；起始值，真機調校
+  const val ENGINE_OFF_MAX_SPEED_KMH = 8     // 熄匙只喺近期 fix 車速低於此值（或冇近期 fix／地庫）先接納；行車中拔線／藍牙跳線唔當熄匙；真機調校
 
   // --- 打分權重（與雲端 .env W_DIST / W_VAC / D_MAX_METERS 對齊；客戶端僅作文件單一事實源備查）---
   const val SCORE_WEIGHT_DIST = 50.0                    // W_dist

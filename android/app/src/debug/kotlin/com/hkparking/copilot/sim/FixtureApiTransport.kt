@@ -20,6 +20,7 @@ class FixtureApiTransport(
   var lastPath: String = ""
     private set
   internal val recommendBodies = mutableListOf<String>()
+  internal val postBodies = mutableListOf<Pair<String, String>>()
   private var networkFail = false
   private var remaining429Count: Int = 0
   private var recommendOverride: String? = null
@@ -75,12 +76,14 @@ class FixtureApiTransport(
     scarcityArmed = false
     scarcityExpandFixture = null
     recommendBodies.clear()
+    postBodies.clear()
     delayMs = {}
   }
 
   override suspend fun post(path: String, bodyJson: String): HttpResult {
     postCount += 1
     lastPath = path
+    postBodies += path to bodyJson
     if (path.contains("recommend")) recommendBodies += bodyJson
     if (networkFail) {
       delayMs(com.hkparking.copilot.NativeConfig.API_TIMEOUT_MS)
