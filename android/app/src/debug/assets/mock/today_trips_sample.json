@@ -1,0 +1,20 @@
+[
+  {
+    "sessionId": "sess-new",
+    "carparkId": "cp_b",
+    "carparkName": "第二室內場",
+    "parkedAtEpochMs": 1761444000000,
+    "status": "CANDIDATE",
+    "confirmSyncPending": false,
+    "feedbackSubmitted": false
+  },
+  {
+    "sessionId": "sess-old",
+    "carparkId": "cp_a",
+    "carparkName": "朗豪坊",
+    "parkedAtEpochMs": 1761440000000,
+    "status": "CONFIRMED",
+    "confirmSyncPending": false,
+    "feedbackSubmitted": false
+  }
+]

@@ -1,6 +1,12 @@
 package com.hkparking.copilot.di
 
+import com.hkparking.copilot.net.ApiClient
 import com.hkparking.copilot.net.ApiTransport
+import com.hkparking.copilot.trip.ApiClientSyncApi
+import com.hkparking.copilot.trip.SharedPrefsPort
+import com.hkparking.copilot.trip.TodayTripStore
+import com.hkparking.copilot.trip.TodayTripSync
+import com.hkparking.copilot.NativeConfig
 import com.hkparking.copilot.share.B2MissResolver
 import com.hkparking.copilot.share.B2MissResolvers
 
@@ -25,6 +31,11 @@ object Bindings {
   val b2MissResolver: B2MissResolver = B2MissResolvers.NAME_LOCK
   private var appContext: android.content.Context? = null
   val navigation: NavigationPort = IntentNavigationPort { appContext }
+  var todayTripStore: TodayTripStore? = null
+    private set
+  var todayTripSync: TodayTripSync? = null
+    private set
+  var todayTripsChangedEmitter: (() -> Unit)? = null
 
   fun attachService(service: com.hkparking.copilot.FloatingBubbleService) {
     val context = service.applicationContext
@@ -32,6 +43,25 @@ object Bindings {
     appContext = context
     locationSource.attach(service)
     locationSource.start()
+    val prefs = SharedPrefsPort(
+      context.getSharedPreferences(NativeConfig.TODAY_TRIPS_PREFS_NAME, android.content.Context.MODE_PRIVATE),
+    )
+    val store = TodayTripStore(
+      prefs = prefs,
+      listener = TodayTripStore.Listener { todayTripsChangedEmitter?.invoke() },
+    )
+    val sync = TodayTripSync(
+      store = store,
+      api = ApiClientSyncApi(ApiClient(apiTransport)),
+      network = networkStatus,
+      networkExecutor = java.util.concurrent.Executor { runnable ->
+        Thread(runnable, "today-trip-sync").start()
+      },
+    )
+    todayTripStore = store
+    todayTripSync = sync
+    service.todayTripStore = store
+    service.todayTripSync = sync
   }
 
   fun detachService(service: com.hkparking.copilot.FloatingBubbleService) {
@@ -51,6 +81,8 @@ object Bindings {
     locationSource.setTickListener(null)
     locationSource.stop()
     locationSource.detach()
+    todayTripStore = null
+    todayTripSync = null
   }
 
   fun clearPendingStart() {}

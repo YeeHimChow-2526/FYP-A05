@@ -286,3 +286,27 @@
 - 影響任務編號／常數名／檔案：Step 3.3；W-A.4／W-A.9／W-A.17；VALID_FIX_MAX_ACCURACY_M、DISTANCE_TICK_MS、ENGINE_OFF_DEBOUNCE_MS、ENGINE_OFF_MAX_SPEED_KMH；DistanceTracker.kt（新）、EngineShutdownDetector.kt（新）、EngineShutdownReceiver.kt（新）、FloatingBubbleService.kt、NativeConfig.kt、di/CorePorts.kt、debug/di/Bindings.kt、debug/sim/SimLocationSource.kt、debug/sim/FixtureApiTransport.kt、release/di/Bindings.kt
 - 類別：規格缺漏
 - 狀態：待處理
+
+### SC-017
+- 日期：2026-10-26
+- 來源：評估（Step 3.4 代碼預建，Pi 落地）
+- 裝置（如適用）：不適用
+- 發現：
+  1. PARKED_CONFIRMED 候選只寫 FBS 記憶體（parkedCandidate*），TodayTripStore／SharedPreferences 未落地（SC-016 故意延後）。
+  2. AndroidOverlayHost.todayTrips() 恒 emptyList；confirm／submitTripReport 唔打 API；activeService() 恒 null。
+  3. FBS.confirmParkedCandidate 無離線閘、timestamp 固定 0；Bindings CLOCK_HKT 只改旗標。
+  4. Flutter 無 trip_history／quick_feedback_bar；Ignition 無入口。
+  5. 04 列嘅 sync／trip-report／today_trips fixtures 未入 assets；Chip 枚舉同「網絡恢復」無 WorkManager 時點觸發未寫死。
+- 建議改動：
+  1. TodayTripStore（SP）＋TodayTripSync：候選寫入、確認、待確認 flush、HKT 懶清除、trip-report 閘。
+  2. FBS within 熄匙寫 store；host bridge 接真；sim DRIVER_CONFIRM／NETWORK_OK／CLOCK_HKT 接 store（相容 SimShellTest）。
+  3. Flutter TodayTripScreen＋QuickFeedbackBar＋Ignition 入口；MethodChannel 合約不變。
+  已接受、唔改代碼嘅遺留項：
+  - 無 WorkManager：殺進程後待確認延至下次開 App 先 flush
+  - 3.4 不做相片上傳
+  - Chip 枚舉採 GOOD／OK／BAD 同 VALID／INVALID／NONE（除非紅隊改）
+  遺留項（承 SC-016／其他）：
+  - 車場／閘口坐標；藍牙 MAC 配對頁；短網址／geocode；release／commit_ok fixtures；6 頁 onboarding；單一 AudioRecord／STT
+- 影響任務編號／常數名／檔案：Step 3.4；W-A.11／W-A.17／W-A.5（確認路徑）；TODAY_TRIPS_*；TodayTripStore.kt、TodayTripSync.kt、FloatingBubbleService.kt、MainActivity.kt、debug/di/Bindings.kt、FixtureApiTransport.kt、mock/sync_*.json、lib/features/trip_history/*、app_config.dart、IgnitionScreen
+- 類別：規格延後項落地＋缺漏補齊
+- 狀態：待處理

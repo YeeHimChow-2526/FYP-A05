@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:copilot/core/constants/app_colors.dart';
 import 'package:copilot/core/platform/overlay_channel.dart';
 import 'package:copilot/core/preferences/preference_manager.dart';
+import 'package:copilot/features/trip_history/today_trip_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -178,6 +179,18 @@ class _IgnitionScreenState extends State<IgnitionScreen> {
                 unawaited(_startFromGesture());
               },
               child: const Text('現場即泊'),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton(
+              key: const ValueKey('open_today_trips'),
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const TodayTripScreen(),
+                  ),
+                );
+              },
+              child: const Text('今日行程'),
             ),
             const SizedBox(height: 32),
             Text(

@@ -31,6 +31,10 @@ import kotlin.coroutines.Continuation
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.resume
 import kotlin.coroutines.startCoroutine
+import com.hkparking.copilot.trip.ApiClientSyncApi
+import com.hkparking.copilot.trip.SharedPrefsPort
+import com.hkparking.copilot.trip.TodayTripStore
+import com.hkparking.copilot.trip.TodayTripSync
 import kotlin.coroutines.suspendCoroutine
 
 data class MicSessionEvent(val isActive: Boolean, val reason: String)
@@ -251,6 +255,8 @@ class FloatingBubbleService : android.app.Service {
     private set
   var parkedCandidateName: String? = null
     private set
+  internal var todayTripStore: TodayTripStore? = null
+  internal var todayTripSync: TodayTripSync? = null
   internal var shutdownInProgress: Boolean = false
   internal var greyRetryInFlight: Boolean = false
   internal var lastPendingInvalidation: PendingInvalidation? = null
@@ -486,6 +492,12 @@ class FloatingBubbleService : android.app.Service {
     if (withinTargetOrBasementLoss && sessionId != null) {
       parkedCandidateSessionId = sessionId
       parkedCandidateName = targetName
+      writeParkedCandidateToStore(
+        sessionId = sessionId,
+        carparkId = targetCarparkId,
+        carparkName = targetName.orEmpty(),
+        parkedAtEpochMs = System.currentTimeMillis(),
+      )
       runCatching {
         android.util.Log.i("FloatingBubbleService", "Parked candidate written: sessionId=$sessionId")
       }
@@ -732,7 +744,47 @@ class FloatingBubbleService : android.app.Service {
   }
 
   fun confirmParkedCandidate(sessionId: String) {
-    launchApi { apiClient.syncDriverConfirmed(sessionId, 0L) }
+    val sync = ensureTodayTripSync()
+    sync.confirm(sessionId)
+  }
+
+  private fun writeParkedCandidateToStore(
+    sessionId: String,
+    carparkId: String,
+    carparkName: String,
+    parkedAtEpochMs: Long,
+  ) {
+    ensureTodayTripStore().upsertCandidate(sessionId, carparkId, carparkName, parkedAtEpochMs)
+  }
+
+  private fun ensureTodayTripStore(): TodayTripStore {
+    todayTripStore?.let { return it }
+    val sp = runCatching {
+      getSharedPreferences(NativeConfig.TODAY_TRIPS_PREFS_NAME, android.content.Context.MODE_PRIVATE)
+    }.getOrNull()
+    val prefs = if (sp != null) {
+      SharedPrefsPort(sp)
+    } else {
+      com.hkparking.copilot.trip.MemoryPrefsPort()
+    }
+    val store = TodayTripStore(prefs = prefs)
+    todayTripStore = store
+    return store
+  }
+
+  private fun ensureTodayTripSync(): TodayTripSync {
+    todayTripSync?.let { return it }
+    val store = ensureTodayTripStore()
+    val sync = TodayTripSync(
+      store = store,
+      api = ApiClientSyncApi(apiClient),
+      network = networkStatus,
+      networkExecutor = java.util.concurrent.Executor { runnable ->
+        Thread(runnable, "today-trip-sync").start()
+      },
+    )
+    todayTripSync = sync
+    return sync
   }
 
   private fun onTripStateChanged() {

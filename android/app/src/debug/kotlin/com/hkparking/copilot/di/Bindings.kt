@@ -17,6 +17,11 @@ import com.hkparking.copilot.voice.CommandCodes
 import com.hkparking.copilot.voice.ParseContext
 import com.hkparking.copilot.voice.PendingQuestion
 import com.hkparking.copilot.voice.TripVoiceMode
+import com.hkparking.copilot.trip.ApiClientSyncApi
+import com.hkparking.copilot.trip.MemoryPrefsPort
+import com.hkparking.copilot.trip.TodayTripStore
+import com.hkparking.copilot.trip.TodayTripSync
+import com.hkparking.copilot.net.ApiClient
 import com.hkparking.copilot.voice.VoiceCapabilityChecker
 
 fun interface FgsStarter {
@@ -54,6 +59,11 @@ object Bindings {
     private set
   private var pendingConfirmSessionId: String? = null
   private var networkFailed: Boolean = false
+  var todayTripStore: TodayTripStore? = null
+    private set
+  var todayTripSync: TodayTripSync? = null
+    private set
+  var todayTripsChangedEmitter: (() -> Unit)? = null
 
   fun attachService(service: com.hkparking.copilot.FloatingBubbleService) {
     activeService = service
@@ -65,6 +75,28 @@ object Bindings {
     pendingConfirmSessionId = null
     networkFailed = false
     networkStatus.online = true
+    // RT-4: fresh in-memory Prefs+Store+Sync shared by service and Bindings each attach.
+    val prefs = MemoryPrefsPort()
+    val store = TodayTripStore(
+      prefs = prefs,
+      listener = TodayTripStore.Listener { todayTripsChangedEmitter?.invoke() },
+    )
+    val syncApi = ApiClientSyncApi(
+      ApiClient(
+        transport = apiTransport,
+        delayMs = service.delayMs,
+      ),
+    )
+    val sync = TodayTripSync(
+      store = store,
+      api = syncApi,
+      network = networkStatus,
+      networkExecutor = java.util.concurrent.Executor { it.run() },
+    )
+    todayTripStore = store
+    todayTripSync = sync
+    service.todayTripStore = store
+    service.todayTripSync = sync
     voiceInput.setSimControlListener { event, intValue, stringValue ->
       dispatchSim(service, event, intValue, stringValue)
     }
@@ -124,6 +156,9 @@ object Bindings {
     voiceInput.setUtteranceListener(null)
     navigation.reset()
     SimJoystickOverlay.hide()
+    // RT-4: drop shared refs so next attachService is isolated; do not clearAll (T16).
+    todayTripStore = null
+    todayTripSync = null
   }
 
   fun clearPendingStart() {
@@ -204,11 +239,14 @@ object Bindings {
         networkFailed = false
         networkStatus.online = true
         flushDriverConfirm(service)
+        (service.todayTripSync ?: todayTripSync)?.flushPendingConfirms()
       }
       "CLOCK_HKT_MIDNIGHT" -> {
         todayTripsCleared = true
         pendingDriverConfirm = false
         pendingConfirmSessionId = null
+        todayTripStore?.clearAll()
+        service.todayTripStore?.clearAll()
       }
       "NO_MIC" -> {
         service.onVoiceCapabilityApplied(voiceSnapshot(TripVoiceMode.FULL_VOICE), micFgsActive = false)
@@ -292,10 +330,16 @@ object Bindings {
 
   private fun flushDriverConfirm(service: com.hkparking.copilot.FloatingBubbleService) {
     val sessionId = pendingConfirmSessionId
-    if (!pendingDriverConfirm || networkFailed || todayTripsCleared || sessionId == null) return
+    if (!pendingDriverConfirm || todayTripsCleared || sessionId == null) return
+    val sync = service.todayTripSync ?: todayTripSync
+    if (networkFailed) {
+      // Offline DRIVER_CONFIRM: mark store CONFIRMED+pending; keep Bindings.pending for NETWORK_OK.
+      if (sync != null) sync.confirm(sessionId) else service.confirmParkedCandidate(sessionId)
+      return
+    }
     pendingDriverConfirm = false
     driverConfirmSent = true
-    service.confirmParkedCandidate(sessionId)
+    if (sync != null) sync.confirm(sessionId) else service.confirmParkedCandidate(sessionId)
   }
 
   private fun confidenceOf(intValue: Int?, stringValue: String?): Double? {

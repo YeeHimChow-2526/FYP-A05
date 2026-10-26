@@ -27,6 +27,7 @@ class FixtureApiTransport(
   private var lockFullArmed: Boolean = false
   private var scarcityArmed: Boolean = false
   private var scarcityExpandFixture: String? = null
+  private var tripReportUnconfirmedArmed: Boolean = false
 
   fun setFixtureName(name: String) {
     fixtureName = name
@@ -65,6 +66,10 @@ class FixtureApiTransport(
     fixtureName = LOCK_FULL_FIXTURE
   }
 
+  fun armTripReportUnconfirmed() {
+    tripReportUnconfirmedArmed = true
+  }
+
   fun reset() {
     fixtureName = DEFAULT_FIXTURE
     networkFail = false
@@ -75,6 +80,7 @@ class FixtureApiTransport(
     lockFullArmed = false
     scarcityArmed = false
     scarcityExpandFixture = null
+    tripReportUnconfirmedArmed = false
     recommendBodies.clear()
     postBodies.clear()
     delayMs = {}
@@ -116,6 +122,20 @@ class FixtureApiTransport(
       fixtureName = DEFAULT_FIXTURE
       return responseFor(expandFixture)
     }
+    if (path.contains("sync/outbox") || path.contains("/sync/")) {
+      val raw = fixtureLoader(SYNC_CONFIRMED_FIXTURE) ?: """{"status":"OK","ratable":true}"""
+      return HttpResult(statusCode = 200, bodyJson = raw)
+    }
+    if (path.contains("trip-report")) {
+      if (tripReportUnconfirmedArmed) {
+        tripReportUnconfirmedArmed = false
+        val raw = fixtureLoader(TRIP_REPORT_409_FIXTURE)
+          ?: """{"status":"CONFLICT","reason":"NOT_RATABLE"}"""
+        return HttpResult(statusCode = 409, bodyJson = raw)
+      }
+      val raw = fixtureLoader(TRIP_REPORT_OK_FIXTURE) ?: """{"status":"OK"}"""
+      return HttpResult(statusCode = 200, bodyJson = raw)
+    }
     val raw = fixtureLoader(fixtureName)
     return HttpResult(
       statusCode = 200,
@@ -139,6 +159,9 @@ class FixtureApiTransport(
     const val SCARCITY_EXPANDED_FIXTURE = "recommend_scarcity_expanded.json"
     const val SCARCITY_EMPTY_FIXTURE = "recommend_empty_expand.json"
     const val LOCK_FULL_FIXTURE = "commit_lock_full_409.json"
+    const val SYNC_CONFIRMED_FIXTURE = "sync_driver_confirmed.json"
+    const val TRIP_REPORT_409_FIXTURE = "trip_report_409_unconfirmed.json"
+    const val TRIP_REPORT_OK_FIXTURE = "sync_driver_confirmed.json"
     const val TWO_INDOOR_FIXTURE = "recommend_success_two_indoor.json"
     private const val RATE_LIMIT_BODY = "{\"status\":\"RATE_LIMITED\"}"
     private const val LANGHAM_BODY =

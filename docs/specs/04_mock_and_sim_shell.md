@@ -182,8 +182,8 @@ interface ApiTransport {
 - [ ] `await_voice_reply` → expand_scarcity 重發（`FORCE_SCARCITY`；value 0 → 「暫時冇其他選擇」）
 - [x] `ARRIVE_CORE` → APPROACH_MUTED（只靜音、行程繼續、鎖未釋放）；`LEAVE_TARGET` → 退回巡航
 - [x] 目標範圍內 `ENGINE_SHUTDOWN` → PARKED_CONFIRMED 候選＋release；離線即放棄 release
-- [ ] `DRIVER_CONFIRM` 在線 → ratable = true、開放 3 格反饋；離線 → 本機保留，`NETWORK_OK` 自動送出；`CLOCK_HKT_MIDNIGHT` → 清除
-- [ ] 未確認行程 trip-report → 409 靜默
+- [x] `DRIVER_CONFIRM` 在線 → ratable = true、開放 3 格反饋；離線 → 本機保留，`NETWORK_OK` 自動送出；`CLOCK_HKT_MIDNIGHT` → 清除
+- [x] 未確認行程 trip-report → 409 靜默
 - [ ] `FORCE_LOW_WATERMARK` → 口播只點名一個後備
 - [ ] `FORCE_CROWD_FLAG` → 照播黃旗句、選項仍保留
 - [ ] `FORCE_STALE`／`FORCE_DEGRADED` → 咪錶卡「咪錶資料暫時未更新」、無數字；室內場照常

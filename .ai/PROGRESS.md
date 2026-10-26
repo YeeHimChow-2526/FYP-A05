@@ -40,8 +40,8 @@
 - [x] W-A.15 session_id 生命週期 — commit: 4ac4036, e8f00f7, a4b1944
 - [x] W-A.16 FGS 啟動握手 — commit: a2017f5, 623c382, a03217f
 - [ ] W-A.4 軟件距離追蹤 — DistanceTracker＋PlatformLocationSource 已落地（3.3）；真機耗電／GPS 漂移未驗 — SC-016 — commit: 
-- [ ] W-A.5 在線即送 release — 熄匙 release 用已 commit 車場（3.3）— commit: 
-- [ ] W-A.17 到場雙態與今日確認 — 到場雙態 native 已落地（3.3）；今日確認 UI 待 3.4 — commit: 
+- [ ] W-A.5 在線即送 release — 熄匙 release 用已 commit 車場（3.3）；確認 sync／待確認保留（3.4）— commit: 
+- [ ] W-A.17 到場雙態與今日確認 — 到場雙態 native（3.3）＋今日確認 UI／Store（3.4）已落地；真機藍牙仍 SC-016 — commit: 
 - [ ] W-A.18 測試策略與量度 — Step 1 sim 範圍已完成（完整 Gate C：gateC6 @ 2201d2e）；B-2 分享 sim／單元測試已覆蓋（3.2），真機 Maps 分享待測 — commit: dff84d8, 4af4c06, c4f9354, 10575c0, f9e101d, 5c76000, 86e7cd7, 2201d2e
 - [ ] W-B.4 sync/outbox 確認 — commit: 
 
@@ -66,7 +66,7 @@
 - [ ] W-B.8 稀缺區保底 — commit: 
 - [ ] W-B.9 慣性霸位黑點 — commit: 
 - [ ] W-B.11 低水位提示 — commit: 
-- [ ] W-A.11 今日行程與反饋 — commit: 
+- [x] W-A.11 今日行程與反饋 — TodayTripStore＋Flutter 今日行程／3 格（3.4）— commit: 
 - [ ] W-B.5 crowd-report — commit: 
 - [ ] W-B.10 trip-report 補評 — commit: 
 
@@ -87,7 +87,7 @@
 |---|---|---|
 | Step 1 | 雙層骨架＋FGS 握手＋P 膠囊燈號＋`sim/` 殼與 fixtures＋`ApiClient` 分級重試＋三種行程語音模式與能力檢查＋粵語 TTS 口播首選 | Step 1.1：W-A.6；W-A.3 常數檔。Step 1.2：W-A.15；W-A.1 狀態機。Step 1.3：W-A.19、W-A.21；W-A.7 首選口播。Step 1.4：W-A.12。Step 1.5：W-A.16。Step 1.6：W-A.1 |
 | Step 2 | 語音追問閉環＋`FloatingCardView` 追問出卡＋手動模式卡片按鈕＋Intent 喚醒 Google Maps 導航 | W-A.7；W-A.12（含 cc1a27c）。W-A.9 只完成 sim 口播即停 |
-| Step 3 | `LocalPoiTrie.kt`＋B-2 分享接盤＋`DistanceTracker`＋`EngineShutdownReceiver`（3.3／SC-016）＋Flutter 今日行程（待 3.4） | 3.1／3.1b／3.2／3.3 |
+| Step 3 | `LocalPoiTrie.kt`＋B-2 分享接盤＋`DistanceTracker`＋`EngineShutdownReceiver`（3.3／SC-016）＋Flutter 今日行程（3.4） | 3.1／3.1b／3.2／3.3／3.4 |
 
 - [x] Step 1 必做：原生 sim/ 模擬殼＋mock/*.json fixtures＋注入事件（屬 W-A.18；規格 docs/specs/04_mock_and_sim_shell.md），Step 1 完成前交付 — commit: dff84d8, 97bb2e6
 
@@ -95,7 +95,7 @@
 - Step 2 已做：B-1／現場即泊失敗口播、ALERT／NO_MIC 口播（72ae56a）；`await_voice_reply` 重發（ee0f7b3, 73760f4）
 - Step 3：`TRIE_MISS_RESOLVE_OK`（經 LocalPoiTrie）／`TRIE_MISS_NETWORK_FAIL`（GREY＋口播一次）／`TRIE_MISS_AMBIGUOUS`（ALERT）已接；B-2 分享接盤 3.2 — SC-015
 
-未完成：B-2 短網址展開／雲端 Geocoding（待後端 endpoint，見 SC-015）、閘口座標、TodayTripStore（3.4）、車場坐標（SC-016）、單一 AudioRecord、STT 引擎、今日行程 Flutter。
+未完成：B-2 短網址展開／雲端 Geocoding（待後端 endpoint，見 SC-015）、閘口座標、車場坐標（SC-016）、單一 AudioRecord、STT 引擎。
 Step 3.1：LocalPoiTrie＋hk_poi_master.json（tools/poi 建置）；Step 3.1b b3702a6：語音 SET_DESTINATION 接 Trie（澄清／回顯／坐標；SC-014）；TRIE_MISS_* 未接（3.2）
 - Step 3 開工前裁決：含糊地名口播 02 L110「去邊度？請拍一拍膠囊答我」vs 代碼 `PLACE_CLARIFY`「邊一區？」vs 03 L125「純語音反問」
 - 真機：FGS 真實 2s 逾時 `FgsBootstrapActivity` Log.w 記錄（模擬器無法觸發）

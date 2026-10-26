@@ -1,6 +1,12 @@
 package com.hkparking.copilot
 
 import android.content.Intent
+import com.hkparking.copilot.di.Bindings
+import com.hkparking.copilot.net.ApiClient
+import com.hkparking.copilot.trip.ApiClientSyncApi
+import com.hkparking.copilot.trip.SharedPrefsPort
+import com.hkparking.copilot.trip.TodayTripStore
+import com.hkparking.copilot.trip.TodayTripSync
 import com.hkparking.copilot.voice.AndroidSpeechProbe
 import com.hkparking.copilot.voice.TripVoiceMode
 import com.hkparking.copilot.voice.VoiceCapabilityChecker
@@ -16,6 +22,9 @@ class MainActivity : FlutterActivity() {
     val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, OverlayBridge.CHANNEL_NAME)
     host.channelMounted = true
     host.emitter = { method, args -> channel.invokeMethod(method, args) }
+    Bindings.todayTripsChangedEmitter = {
+      if (host.channelMounted) host.emit("onTodayTripsChanged", emptyMap())
+    }
     val bridge = OverlayBridge(host)
     channel.setMethodCallHandler { call, result ->
       val args = when (val raw = call.arguments) {
@@ -192,6 +201,25 @@ private class AndroidOverlayHost(private val activity: MainActivity) : OverlayHo
   override val tripStateMachine: TripStateMachine = TripStateMachine()
   private val confirmed = mutableListOf<String>()
   private val reports = mutableListOf<String>()
+  private val localStore: TodayTripStore by lazy {
+    TodayTripStore(
+      prefs = SharedPrefsPort(prefs()),
+      listener = TodayTripStore.Listener {
+        if (channelMounted) emit("onTodayTripsChanged", emptyMap())
+      },
+    )
+  }
+  private val localSync: TodayTripSync by lazy {
+    TodayTripSync(
+      store = tripStore(),
+      api = ApiClientSyncApi(ApiClient(Bindings.apiTransport)),
+      network = Bindings.networkStatus,
+      networkExecutor = java.util.concurrent.Executor { it.run() },
+    )
+  }
+
+  private fun tripStore(): TodayTripStore = Bindings.todayTripStore ?: localStore
+  private fun tripSync(): TodayTripSync = Bindings.todayTripSync ?: localSync
 
   override fun permissionInput(): PermissionCheckInput {
     val fine = granted(android.Manifest.permission.ACCESS_FINE_LOCATION)
@@ -232,14 +260,21 @@ private class AndroidOverlayHost(private val activity: MainActivity) : OverlayHo
     prefs().edit().putBoolean(key, value).apply()
   }
 
-  override fun todayTrips(): List<Map<String, Any?>> = emptyList()
+  override fun todayTrips(): List<Map<String, Any?>> {
+    if (Bindings.networkStatus.isOnline()) {
+      runCatching { tripSync().flushPendingConfirms() }
+    }
+    return tripStore().asBridgeMaps(System.currentTimeMillis())
+  }
 
   override fun confirmParkedCandidate(sessionId: String) {
     confirmed += sessionId
+    tripSync().confirm(sessionId)
   }
 
   override fun submitTripReport(payloadJson: String) {
     reports += payloadJson
+    tripSync().submitReport(payloadJson)
   }
 
   override fun activeService(): FloatingBubbleService? = null

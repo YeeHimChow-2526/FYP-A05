@@ -60,6 +60,12 @@ object NativeConfig {
   const val ENGINE_OFF_DEBOUNCE_MS = 2000L   // 車充／車載藍牙斷開後等此毫秒先當熄匙；期間恢復即作廢（防接觸不良、點火瞬斷）；熄匙後口播最多延長此時長；起始值，真機調校
   const val ENGINE_OFF_MAX_SPEED_KMH = 8     // 熄匙只喺近期 fix 車速低於此值（或冇近期 fix／地庫）先接納；行車中拔線／藍牙跳線唔當熄匙；真機調校
 
+  // --- 今日行程（W-A.11／W-A.17，Step 3.4）---
+  const val TODAY_TRIPS_PREFS_NAME = "hkparking_copilot"  // 同偏好／熱詞；TodayTripStore 用呢個檔
+  const val TODAY_TRIPS_JSON_KEY = "today_trips_json"     // JSON 陣列（當日候選／已確認／待送出）
+  const val TODAY_TRIPS_HKT_DATE_KEY = "today_trips_hkt_date" // yyyy-MM-dd（Asia/Hong_Kong）；轉日即清
+  const val TODAY_TRIP_NOTES_MAX_CHARS = 140              // perk_notes 上限；超長截斷
+
   // --- 打分權重（與雲端 .env W_DIST / W_VAC / D_MAX_METERS 對齊；客戶端僅作文件單一事實源備查）---
   const val SCORE_WEIGHT_DIST = 50.0                    // W_dist
   const val SCORE_WEIGHT_VAC = 40.0                     // W_vac

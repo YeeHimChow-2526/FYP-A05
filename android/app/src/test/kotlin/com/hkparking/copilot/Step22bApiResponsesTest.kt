@@ -24,7 +24,8 @@ class Step22bApiResponsesTest {
   fun step22b_allRecommendFixturesParseWithExpectedFields() {
     val dir = mockDir()
     val jsonFiles = dir.listFiles { file -> file.isFile && file.name.endsWith(".json") }?.toList().orEmpty()
-    assertEquals(11, jsonFiles.size)
+    // Step 3.4 added sync_driver_confirmed / trip_report_409_unconfirmed / today_trips_sample (+3).
+    assertEquals(14, jsonFiles.size)
     val recommend = jsonFiles.map { it.name }.filter { it.startsWith("recommend_") && !it.contains("429") }.sorted()
     assertEquals(9, recommend.size)
     val counts = mapOf(
