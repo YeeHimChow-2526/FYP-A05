@@ -229,3 +229,29 @@
 - 影響任務編號／常數名／檔案：Step 3.1b；FloatingBubbleService.kt、TripStateMachine.kt、CommandCodes.kt（ZhHkTemplates.implicitLockEcho）、poi/PoiTrieProvider.kt、assets/hk_poi_master.json、tools/poi/aliases_overlay.json、tools/poi/SOURCES.md
 - 類別：規格缺漏
 - 狀態：待處理
+
+### SC-015
+- 日期：2026-10-26
+- 來源：評估（Step 3.2 代碼預建，Pi 落地）
+- 裝置（如適用）：不適用
+- 發現：
+  1. ARCH §5.4／03 L123 要 B-2 Miss 背景 Geocoding＋短網址展開，後端冇 endpoint。
+  2. FBS onStartCommand 一律重開程，行程中再分享會斷 session。
+  3. sim TRIE_MISS_NETWORK_FAIL 未口播「網絡唔順，遲啲再試」（PROGRESS L96）。
+- 建議改動：
+  1. ShareIntentReceiverActivity：SEND text/plain；權限閘（B_2 外部入口）；同 FgsBootstrapActivity 握手；空文字唔開 FGS（SHARE_EMPTY）。
+  2. 標題（第一行，去 URL／坐標；後備 EXTRA_SUBJECT）經 LocalPoiTrie；掉針 Regex（≥3 位小數、合法經緯度）有坐標即鎖，唔理 trie。
+  3. 分享 Hit 於 FULL_VOICE 口播 `directLock`／`implicitLockEcho`；掉針與 Miss 名鎖靜默；Ambiguous 重用 3.1b 澄清；純 URL／冇標題 → ALERT（PLACE_CLARIFY）。
+  4. Miss：AMBER＋B2MissResolver——production 即刻名鎖（坐標 null，唔 ALERT）；debug 等 TRIE_MISS_*。
+  5. TRIE_MISS_RESOLVE_OK 經 trie（stringValue → 待解析標題 → destinationName → 朗豪坊）；NETWORK_FAIL → GREY＋口播一次（守 APPROACH_MUTED／MANUAL_ONLY）、拍膠囊重試解析；AMBIGUOUS → ALERT、唔設澄清 pending。
+  6. 行程中分享：同 session 改終點，唔重開程。
+  已接受、唔改代碼嘅遺留項：
+  - 唔展開短網址、唔 geocode（DP4）
+  - 掉針唔限香港範圍
+  遺留項：
+  - geocode／短網址 endpoint 同 ApiClient B2_RESOLUTION 實際 caller（3×2.5s＋2×1s）
+  - spec 02 L110「去邊度？請拍一拍膠囊答我」同 PLACE_CLARIFY 統一（承 SC-012 #3／SC-014）
+  - 真機 Maps 分享文字格式實測（標題抽取、掉針格式）
+- 影響任務編號／常數名／檔案：Step 3.2；ShareIntentReceiverActivity.kt（新）、share/ShareIntake.kt（新）、FloatingBubbleService.kt、TripStateMachine.kt、debug/di/Bindings.kt、release/di/Bindings.kt、AndroidManifest.xml
+- 類別：規格缺漏
+- 狀態：待處理

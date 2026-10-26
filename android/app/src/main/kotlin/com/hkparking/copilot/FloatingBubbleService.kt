@@ -8,6 +8,11 @@ import com.hkparking.copilot.poi.LocalPoiTrie
 import com.hkparking.copilot.poi.Poi
 import com.hkparking.copilot.poi.PoiTrieProvider
 import com.hkparking.copilot.poi.TrieResult
+import com.hkparking.copilot.share.B2Begin
+import com.hkparking.copilot.share.B2MissResolver
+import com.hkparking.copilot.share.B2MissResolvers
+import com.hkparking.copilot.share.ShareIntake
+import com.hkparking.copilot.share.ShareOutcome
 import com.hkparking.copilot.voice.CapabilitySnapshot
 import com.hkparking.copilot.voice.CapabilityStatus
 import com.hkparking.copilot.voice.CommandCode
@@ -100,6 +105,31 @@ class FloatingBubbleService : android.app.Service {
     val entryName = intent?.getStringExtra(EXTRA_ENTRY)
     val entry = entryName?.let { runCatching { StartupEntry.valueOf(it) }.getOrNull() } ?: StartupEntry.A_1
     val hotwordEnabled = intent?.getBooleanExtra(EXTRA_HOTWORD, true) ?: true
+    val hasShare = intent?.hasExtra(EXTRA_SHARE_HAS_URL) == true
+    if (entry == StartupEntry.B_2 && hasShare) {
+      val intake = ShareIntake(
+        title = intent?.getStringExtra(EXTRA_SHARE_TITLE),
+        lat = if (intent?.hasExtra(EXTRA_SHARE_LAT) == true) intent.getDoubleExtra(EXTRA_SHARE_LAT, 0.0) else null,
+        lng = if (intent?.hasExtra(EXTRA_SHARE_LNG) == true) intent.getDoubleExtra(EXTRA_SHARE_LNG, 0.0) else null,
+        hasUrl = intent?.getBooleanExtra(EXTRA_SHARE_HAS_URL, false) ?: false,
+      )
+      if (isFgsRunning) {
+        // D1 / RT-6: mid-trip share — re-enterForeground keeping activeFgsType; no restartTripFromEntry.
+        if (!enterForeground()) {
+          logInfo("SHARE_DROPPED reason=fgs_timeout")
+          return START_NOT_STICKY
+        }
+        dispatchFgsStarted(this)
+        onShareIntake(intake)
+      } else {
+        if (restartTripFromEntry(entry, hotwordEnabled)) {
+          onShareIntake(intake)
+        } else {
+          logInfo("SHARE_DROPPED reason=fgs_timeout")
+        }
+      }
+      return START_NOT_STICKY
+    }
     restartTripFromEntry(entry, hotwordEnabled)
     return START_NOT_STICKY
   }
@@ -221,6 +251,14 @@ class FloatingBubbleService : android.app.Service {
   private var lastSpokenAlertCount: Int = 0
   private var alertCountSessionId: String? = null
 
+  var b2MissResolver: B2MissResolver = com.hkparking.copilot.di.Bindings.b2MissResolver
+  var lastShareOutcome: ShareOutcome? = null
+    private set
+  val pendingShareTitleForTest: String?
+    get() = pendingShareTitle
+  private var pendingShareTitle: String? = null
+  private var b2NetworkCueSpoken: Boolean = false
+
   fun onColdBubbleTap(): Boolean {
     if (!isFgsRunning) return false
     return false
@@ -240,6 +278,9 @@ class FloatingBubbleService : android.app.Service {
     if (!isFgsRunning) {
       lastDistanceMeters = 0
       hasDistanceFix = false
+      pendingShareTitle = null
+      b2NetworkCueSpoken = false
+      lastShareOutcome = null
     }
     val initial = capabilityChecker.startupSnapshot(recordAudioGranted, hotwordEnabled, entry)
     activeFgsType = if (entry == StartupEntry.B_2) {
@@ -484,6 +525,18 @@ class FloatingBubbleService : android.app.Service {
       destLat = poi?.lat,
       destLng = poi?.lng,
       destinationPoiId = poi?.id,
+    )
+    publishJitEdge(wasJitTriggered)
+  }
+
+  fun lockDestinationAt(destinationName: String, lat: Double, lng: Double, poiId: String? = null) {
+    val wasJitTriggered = tripStateMachine.jitTriggered
+    tripStateMachine.onDestinationSet(
+      distanceToDestinationM = distanceForDestinationLock(),
+      destinationName = destinationName,
+      destLat = lat,
+      destLng = lng,
+      destinationPoiId = poiId,
     )
     publishJitEdge(wasJitTriggered)
   }
@@ -818,6 +871,8 @@ class FloatingBubbleService : android.app.Service {
 
 
   private fun resolveSpokenDestination(name: String) {
+    // RT-2: clear prior B-2 pending residue before voice resolve.
+    clearPendingShareResidue()
     val trie = runCatching { poiTrieProvider?.get() }.getOrNull()
     if (trie == null) {
       clearClarifyState()
@@ -839,32 +894,7 @@ class FloatingBubbleService : android.app.Service {
         speakDestinationLock(name, result.poi, fullKey = isFullKey(name, result.poi))
       }
       is TrieResult.Ambiguous -> {
-        clarifyCandidates = result.candidates
-        val mode = tripStateMachine.tripVoiceMode
-        if (mode == TripVoiceMode.FULL_VOICE) {
-          pendingQuestion = PendingQuestion.CLARIFY_DESTINATION
-          listenEpoch += 1
-          val spokenCountBefore = lastSpokenAlertCount
-          tripStateMachine.onPlaceClarificationNeeded()
-          // RT-1: distinguish mute/GREY clear vs duplicate PLACE_CLARIFICATION suppress (T15)
-          when {
-            tripStateMachine.state != TripState.ALERT_BREATHING -> {
-              pendingQuestion = PendingQuestion.NONE
-              clarifyCandidates = emptyList()
-            }
-            pendingQuestion == PendingQuestion.NONE -> {
-              // already cleared by speakNewAlertCue mute path
-            }
-            lastSpokenAlertCount == spokenCountBefore -> {
-              // suppressed: keep pending + new candidates; reopen timer
-              if (isMicActive && !ttsService.isSpeaking) {
-                startOpeningWaitTimer(PendingQuestion.CLARIFY_DESTINATION)
-              }
-            }
-          }
-        } else {
-          tripStateMachine.onPlaceClarificationNeeded()
-        }
+        beginDestinationClarify(result.candidates)
       }
       TrieResult.Miss -> {
         clearClarifyState()
@@ -880,6 +910,35 @@ class FloatingBubbleService : android.app.Service {
           )
         }
       }
+    }
+  }
+
+  private fun beginDestinationClarify(candidates: List<Poi>) {
+    clarifyCandidates = candidates
+    val mode = tripStateMachine.tripVoiceMode
+    if (mode == TripVoiceMode.FULL_VOICE) {
+      pendingQuestion = PendingQuestion.CLARIFY_DESTINATION
+      listenEpoch += 1
+      val spokenCountBefore = lastSpokenAlertCount
+      tripStateMachine.onPlaceClarificationNeeded()
+      // RT-1: distinguish mute/GREY clear vs duplicate PLACE_CLARIFICATION suppress (T15)
+      when {
+        tripStateMachine.state != TripState.ALERT_BREATHING -> {
+          pendingQuestion = PendingQuestion.NONE
+          clarifyCandidates = emptyList()
+        }
+        pendingQuestion == PendingQuestion.NONE -> {
+          // already cleared by speakNewAlertCue mute path
+        }
+        lastSpokenAlertCount == spokenCountBefore -> {
+          // suppressed: keep pending + new candidates; reopen timer
+          if (isMicActive && !ttsService.isSpeaking) {
+            startOpeningWaitTimer(PendingQuestion.CLARIFY_DESTINATION)
+          }
+        }
+      }
+    } else {
+      tripStateMachine.onPlaceClarificationNeeded()
     }
   }
 
@@ -1500,8 +1559,13 @@ class FloatingBubbleService : android.app.Service {
     if (grey) {
       manualRetryRequested = true
       if (!greyRetryInFlight && !shutdownInProgress) {
-        greyRetryInFlight = true
-        launchRecommend(QueryTriggerMode.DRIVER_ACTIVE)
+        if (pendingShareTitle != null) {
+          // D11: retry B-2 share resolve instead of recommend.
+          retryShareResolve()
+        } else {
+          greyRetryInFlight = true
+          launchRecommend(QueryTriggerMode.DRIVER_ACTIVE)
+        }
       }
     }
     val fullVoice = capabilityChecker.tripVoiceMode == TripVoiceMode.FULL_VOICE
@@ -1575,6 +1639,9 @@ class FloatingBubbleService : android.app.Service {
     commitInFlight = false
     confirmListenArmed = false
     clarifyCandidates = emptyList()
+    pendingShareTitle = null
+    b2NetworkCueSpoken = false
+    lastShareOutcome = null
     invalidatePendingQuestion(PendingInvalidation.DIALOGUE_INTERRUPTED)
     ttsService.interrupt()
     detachCapsuleWindow()
@@ -1608,6 +1675,206 @@ class FloatingBubbleService : android.app.Service {
     }
   }
 
+
+  fun onShareIntake(intake: ShareIntake) {
+    if (!isFgsRunning) {
+      logInfo("SHARE_DROPPED reason=not_running")
+      return
+    }
+    // RT-2: clear prior B-2 residue before handling the new share.
+    clearPendingShareResidue()
+    b2NetworkCueSpoken = false
+
+    val title = intake.title?.takeIf { it.isNotBlank() }
+    val hasPin = intake.hasPin
+    val validShare = title != null || hasPin || intake.hasUrl
+    if (validShare && pendingQuestion != PendingQuestion.NONE) {
+      // RT-3: destination/candidate changed — invalidate old voice question.
+      invalidatePendingQuestion(PendingInvalidation.DESTINATION_OR_CANDIDATE_CHANGED)
+    }
+
+    if (hasPin) {
+      clearClarifyState()
+      val lat = intake.lat!!
+      val lng = intake.lng!!
+      val name = title ?: "$lat,$lng"
+      var poiId: String? = null
+      if (title != null) {
+        val trie = runCatching { poiTrieProvider?.get() }.getOrNull()
+        if (trie != null) {
+          val startedNs = System.nanoTime()
+          val result = trie.lookup(title)
+          val elapsedMs = (System.nanoTime() - startedNs) / 1_000_000L
+          if (elapsedMs > NativeConfig.TRIE_LOOKUP_BUDGET_MS) {
+            logInfo("TRIE_SLOW name=$title ms=$elapsedMs")
+          }
+          if (result is TrieResult.Hit) {
+            poiId = result.poi.id
+          }
+        }
+      }
+      lockDestinationAt(name, lat, lng, poiId)
+      lastShareOutcome = ShareOutcome.PIN
+      updateCapsuleVisual()
+      return
+    }
+
+    if (title == null) {
+      // #6 pure URL / no title / unresolvable
+      tripStateMachine.onPlaceClarificationNeeded()
+      lastShareOutcome = ShareOutcome.NO_TITLE
+      logInfo("SHARE_NO_TITLE hasUrl=${intake.hasUrl}")
+      updateCapsuleVisual()
+      return
+    }
+
+    val trie = runCatching { poiTrieProvider?.get() }.getOrNull()
+    if (trie == null) {
+      startShareMiss(title)
+      return
+    }
+    val startedNs = System.nanoTime()
+    val result = trie.lookup(title)
+    val elapsedMs = (System.nanoTime() - startedNs) / 1_000_000L
+    if (elapsedMs > NativeConfig.TRIE_LOOKUP_BUDGET_MS) {
+      logInfo("TRIE_SLOW name=$title ms=$elapsedMs")
+    }
+    when (result) {
+      is TrieResult.Hit -> {
+        clearClarifyState()
+        lockDestination(title, result.poi)
+        lastShareOutcome = ShareOutcome.HIT
+        speakDestinationLock(title, result.poi, fullKey = isFullKey(title, result.poi))
+        updateCapsuleVisual()
+      }
+      is TrieResult.Ambiguous -> {
+        lastShareOutcome = ShareOutcome.AMBIGUOUS
+        beginDestinationClarify(result.candidates)
+        updateCapsuleVisual()
+      }
+      TrieResult.Miss -> {
+        startShareMiss(title)
+      }
+    }
+  }
+
+  private fun startShareMiss(title: String) {
+    when (b2MissResolver.begin(title)) {
+      B2Begin.NAME_LOCK_NOW -> {
+        tripStateMachine.onBackgroundResolveStarted()
+        clearClarifyState()
+        lockDestination(title)
+        logInfo("TRIE_MISS name=$title source=B_2")
+        tripStateMachine.onBackgroundResolveEnded()
+        pendingShareTitle = null
+        lastShareOutcome = ShareOutcome.MISS_NAME_LOCKED
+        updateCapsuleVisual()
+      }
+      B2Begin.AWAIT_EVENT -> {
+        tripStateMachine.onBackgroundResolveStarted()
+        pendingShareTitle = title
+        lastShareOutcome = ShareOutcome.MISS_PENDING
+        logInfo("B2_PENDING title=$title")
+        updateCapsuleVisual()
+      }
+    }
+  }
+
+  private fun retryShareResolve() {
+    val title = pendingShareTitle ?: return
+    logInfo("B2_RETRY title=$title")
+    when (b2MissResolver.begin(title)) {
+      B2Begin.AWAIT_EVENT -> {
+        // Keep GREY; wait for the next TRIE_MISS_* event.
+        updateCapsuleVisual()
+      }
+      B2Begin.NAME_LOCK_NOW -> {
+        clearClarifyState()
+        lockDestination(title)
+        logInfo("TRIE_MISS name=$title source=B_2")
+        pendingShareTitle = null
+        lastShareOutcome = ShareOutcome.MISS_NAME_LOCKED
+        tripStateMachine.onBackgroundResolveEnded()
+        if (tripStateMachine.networkDegraded) {
+          tripStateMachine.onRequestSuccess()
+        }
+        updateCapsuleVisual()
+      }
+    }
+  }
+
+  fun onB2ResolveOk(name: String?) {
+    val query = name?.takeIf { it.isNotBlank() }
+      ?: pendingShareTitle
+      ?: tripStateMachine.destinationName
+      ?: "朗豪坊"
+    val trie = runCatching { poiTrieProvider?.get() }.getOrNull()
+    var locked = false
+    if (trie != null) {
+      val startedNs = System.nanoTime()
+      val result = trie.lookup(query)
+      val elapsedMs = (System.nanoTime() - startedNs) / 1_000_000L
+      if (elapsedMs > NativeConfig.TRIE_LOOKUP_BUDGET_MS) {
+        logInfo("TRIE_SLOW name=$query ms=$elapsedMs")
+      }
+      when (result) {
+        is TrieResult.Hit -> {
+          clearClarifyState()
+          lockDestination(query, result.poi)
+          locked = true
+        }
+        is TrieResult.Ambiguous, TrieResult.Miss -> {
+          // D9: Ambiguous under RESOLVE_OK treated as Miss name-lock.
+          clearClarifyState()
+          lockDestination(query)
+          locked = true
+        }
+      }
+    }
+    if (!locked) {
+      clearClarifyState()
+      lockDestination(query)
+    }
+    pendingShareTitle = null
+    // RT-4: end background resolve before onRequestSuccess so GREY recovers in one hop.
+    tripStateMachine.onBackgroundResolveEnded()
+    if (tripStateMachine.networkDegraded) {
+      tripStateMachine.onRequestSuccess()
+    }
+    updateCapsuleVisual()
+  }
+
+  fun onB2NetworkFail() {
+    val mutedBefore = tripStateMachine.state == TripState.APPROACH_MUTED
+    tripStateMachine.onNetworkFailure()
+    if (tripStateMachine.fgsRunning && !b2NetworkCueSpoken) {
+      speakIfActive(
+        ZhHkTemplates.NETWORK_FAILED,
+        tripStateMachine.tripVoiceMode,
+        isApproachMuted = mutedBefore,
+        driverAsked = false,
+      )
+      b2NetworkCueSpoken = true
+    }
+    // Keep pendingShareTitle + backgroundResolvePending for D11 capsule-tap retry.
+    updateCapsuleVisual()
+  }
+
+  fun onB2Ambiguous() {
+    tripStateMachine.onPlaceClarificationNeeded()
+    pendingShareTitle = null
+    tripStateMachine.onBackgroundResolveEnded()
+    updateCapsuleVisual()
+  }
+
+  private fun clearPendingShareResidue() {
+    pendingShareTitle = null
+    b2NetworkCueSpoken = false
+    if (tripStateMachine.backgroundResolvePending) {
+      tripStateMachine.onBackgroundResolveEnded()
+    }
+  }
+
   companion object {
     const val NOTIFICATION_TAP = "NOTIFICATION_TAP"
     const val MIC_FAILED = "MIC_FAILED"
@@ -1618,6 +1885,10 @@ class FloatingBubbleService : android.app.Service {
     const val ABANDONED_OEM_KILL = "ABANDONED_OEM_KILL"
     const val EXTRA_ENTRY = "entry"
     const val EXTRA_HOTWORD = "hotwordEnabled"
+    const val EXTRA_SHARE_TITLE = "shareTitle"
+    const val EXTRA_SHARE_LAT = "shareLat"
+    const val EXTRA_SHARE_LNG = "shareLng"
+    const val EXTRA_SHARE_HAS_URL = "shareHasUrl"
     const val CHANNEL_ID = "hkparking_copilot_fgs"
     const val CHANNEL_NAME = "泊車副駕"
     const val CAPSULE_MARK = "P"

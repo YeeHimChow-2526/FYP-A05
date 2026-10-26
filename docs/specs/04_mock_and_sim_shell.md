@@ -167,8 +167,8 @@ interface ApiTransport {
 - [ ] B-1 (a) 有地名 → 開程
 - [ ] B-1 (b) 「附近／呢度／而家位置」→ 現場即泊
 - [ ] B-1 (c) 失敗 → 不開 FGS＋TTS 再講一次
-- [ ] B-2 Trie Miss 網絡失敗 → GREY＋拍膠囊重試
-- [ ] B-2 含糊 → ALERT＋「請拍一拍膠囊答我」
+- [x] B-2 Trie Miss 網絡失敗 → GREY＋拍膠囊重試
+- [x] B-2 含糊 → ALERT＋「請拍一拍膠囊答我」
 - [ ] 無 mic 澄清口播 → 句尾後綴
 - [ ] `MIC_FAIL` → 只停用語音輸入、TTS 照常；`FGS_START_TIMEOUT` → finish()＋記錄原因
 - [ ] `SET_VOICE_MODE` 三模式：全語音開 mic；播報＋手動／純手動只 location、無 RECORD_AUDIO 要求；手動卡「下一個／確認／取消」

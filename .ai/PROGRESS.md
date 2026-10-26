@@ -35,14 +35,14 @@
 ### 19.2 Phase 1 — 垂直骨幹與端雲閉環（第 4–5 步）
 
 - [x] W-A.1 懸浮膠囊＋狀態機 — commit: 4ac4036, eaa4fc1, e8f00f7, a4b1944, 752de53
-- [ ] W-A.2 Maps 接盤與分享跳板 — commit: 
+- [ ] W-A.2 Maps 接盤與分享跳板 — 分享跳板 ShareIntentReceiverActivity＋B-2 標題／掉針解析已落地（3.2）；短網址／geocode 未做（SC-015） — commit: 
 - [ ] W-A.3 本機字典樹與常數檔 — 常數檔已落地（Step 1.1）；字典樹已落地（3.1）並接駁語音終點（3.1b）；Miss 仍未有 geocode（SC-014）；TRIE_MISS_* sim hook 留 3.2 — commit: 2fbf18b, c0c392c, 0cc3bd9, b3702a6
 - [x] W-A.15 session_id 生命週期 — commit: 4ac4036, e8f00f7, a4b1944
 - [x] W-A.16 FGS 啟動握手 — commit: a2017f5, 623c382, a03217f
 - [ ] W-A.4 軟件距離追蹤 — commit: 
 - [ ] W-A.5 在線即送 release — commit: 
 - [ ] W-A.17 到場雙態與今日確認 — commit: 
-- [ ] W-A.18 測試策略與量度 — Step 1 sim 範圍已完成（完整 Gate C：gateC6 @ 2201d2e）；真機量度／GPX／B-2 分享待 Step 2–3 及真機 — commit: dff84d8, 4af4c06, c4f9354, 10575c0, f9e101d, 5c76000, 86e7cd7, 2201d2e
+- [ ] W-A.18 測試策略與量度 — Step 1 sim 範圍已完成（完整 Gate C：gateC6 @ 2201d2e）；B-2 分享 sim／單元測試已覆蓋（3.2），真機 Maps 分享待測 — commit: dff84d8, 4af4c06, c4f9354, 10575c0, f9e101d, 5c76000, 86e7cd7, 2201d2e
 - [ ] W-B.4 sync/outbox 確認 — commit: 
 
 ### 19.3 Phase 2 — 行車交互精細化與香港特色場景（第 6–10 步）
@@ -93,9 +93,9 @@
 
 **Step 1 遺留（轉 Step 2/3）**：
 - Step 2 已做：B-1／現場即泊失敗口播、ALERT／NO_MIC 口播（72ae56a）；`await_voice_reply` 重發（ee0f7b3, 73760f4）
-- Step 3：`TRIE_MISS_RESOLVE_OK`／`TRIE_MISS_NETWORK_FAIL`（未口播「網絡唔順，遲啲再試」）／`TRIE_MISS_AMBIGUOUS` 接真 LocalPoiTrie／B-2
+- Step 3：`TRIE_MISS_RESOLVE_OK`（經 LocalPoiTrie）／`TRIE_MISS_NETWORK_FAIL`（GREY＋口播一次）／`TRIE_MISS_AMBIGUOUS`（ALERT）已接；B-2 分享接盤 3.2 — SC-015
 
-未完成：B-2 分享接盤、閘口座標、DistanceTracker、EngineShutdownReceiver（藍牙／車充）、單一 AudioRecord、STT 引擎、今日行程 Flutter。
+未完成：B-2 短網址展開／雲端 Geocoding（待後端 endpoint，見 SC-015）、閘口座標、DistanceTracker、EngineShutdownReceiver（藍牙／車充）、單一 AudioRecord、STT 引擎、今日行程 Flutter。
 Step 3.1：LocalPoiTrie＋hk_poi_master.json（tools/poi 建置）；Step 3.1b b3702a6：語音 SET_DESTINATION 接 Trie（澄清／回顯／坐標；SC-014）；TRIE_MISS_* 未接（3.2）
 - Step 3 開工前裁決：含糊地名口播 02 L110「去邊度？請拍一拍膠囊答我」vs 代碼 `PLACE_CLARIFY`「邊一區？」vs 03 L125「純語音反問」
 - 真機：FGS 真實 2s 逾時 `FgsBootstrapActivity` Log.w 記錄（模擬器無法觸發）

@@ -1,6 +1,8 @@
 package com.hkparking.copilot.di
 
 import com.hkparking.copilot.net.ApiTransport
+import com.hkparking.copilot.share.B2MissResolver
+import com.hkparking.copilot.share.B2MissResolvers
 
 class ConnectivityNetworkStatus : NetworkStatusProvider {
   var context: android.content.Context? = null
@@ -20,6 +22,7 @@ object Bindings {
   val locationSource: LocationSource = FusedLocationSource()
   val apiTransport: ApiTransport = HttpApiTransport()
   val networkStatus: ConnectivityNetworkStatus = ConnectivityNetworkStatus()
+  val b2MissResolver: B2MissResolver = B2MissResolvers.NAME_LOCK
   private var appContext: android.content.Context? = null
   val navigation: NavigationPort = IntentNavigationPort { appContext }
 

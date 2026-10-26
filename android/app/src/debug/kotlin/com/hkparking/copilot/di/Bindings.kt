@@ -2,6 +2,8 @@ package com.hkparking.copilot.di
 
 import com.hkparking.copilot.NativeConfig
 import com.hkparking.copilot.StartupEntry
+import com.hkparking.copilot.share.B2MissResolver
+import com.hkparking.copilot.share.B2MissResolvers
 import com.hkparking.copilot.sim.FixtureApiTransport
 import com.hkparking.copilot.sim.FixtureNetworkStatus
 import com.hkparking.copilot.sim.SimEventReceiver
@@ -27,6 +29,7 @@ object Bindings {
   val apiTransport: FixtureApiTransport = FixtureApiTransport()
   val networkStatus: FixtureNetworkStatus = FixtureNetworkStatus()
   val navigation: SimNavigationLauncher = SimNavigationLauncher()
+  val b2MissResolver: B2MissResolver = B2MissResolvers.AWAIT_EVENT
   var activeReceiver: SimEventReceiver? = null
   var pendingStartDestination: String? = null
   var fgsStarter: FgsStarter = FgsStarter { context ->
@@ -259,16 +262,13 @@ object Bindings {
       "CARD_CONFIRM" -> service.floatingCard.performManualConfirm()
       "CARD_CANCEL" -> service.floatingCard.performManualCancel()
       "TRIE_MISS_RESOLVE_OK" -> {
-        val name = stringValue?.takeIf { it.isNotBlank() } ?: service.tripStateMachine.destinationName ?: "朗豪坊"
-        service.lockDestination(name)
+        service.onB2ResolveOk(stringValue)
       }
       "TRIE_MISS_NETWORK_FAIL" -> {
-        service.tripStateMachine.onNetworkFailure()
-        service.updateCapsuleVisual()
+        service.onB2NetworkFail()
       }
       "TRIE_MISS_AMBIGUOUS" -> {
-        service.tripStateMachine.onPlaceClarificationNeeded()
-        service.updateCapsuleVisual()
+        service.onB2Ambiguous()
       }
       "GPS_BAD_ACCURACY" -> {
         val accuracy = intValue?.toDouble()

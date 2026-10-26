@@ -109,6 +109,8 @@ class TripStateMachine(
   var onAlertCueReady: ((mutedBefore: Boolean) -> Unit)? = null
   var networkDegraded: Boolean = false
     private set
+  var backgroundResolvePending: Boolean = false
+    private set
 
   private var distanceToDestinationM: Int? = null
   private var lastApproachDistanceM: Int? = null
@@ -185,6 +187,7 @@ class TripStateMachine(
     assignStatusPip(StatusPip.NONE)
     isMicFgsActive = false
     networkDegraded = false
+    backgroundResolvePending = false
     deferredAlert = null
     spokenAlerts.clear()
     alertSpeakCount = 0
@@ -217,6 +220,8 @@ class TripStateMachine(
     this.destLat = destLat
     this.destLng = destLng
     this.destinationPoiId = destinationPoiId
+    // RT-2: locking a destination ends any in-flight B-2 background resolve.
+    backgroundResolvePending = false
     spokenAlerts.remove(AlertCause.PLACE_CLARIFICATION)
     if (deferredAlert == AlertCause.PLACE_CLARIFICATION) {
       deferredAlert = null
@@ -236,6 +241,10 @@ class TripStateMachine(
         enter(TripState.CRUISING)
       }
       return
+    }
+    // RT-2: leave AMBER held only for B-2 resolve when destination is set and JIT not armed.
+    if (state == TripState.AMBER_STEADY && !jitTriggered) {
+      enter(if (statusPip != StatusPip.NONE) TripState.NEARBY_READY else TripState.CRUISING)
     }
     armBackgroundPrefetch(distance)
   }
@@ -372,7 +381,8 @@ class TripStateMachine(
       raiseAlert(pending)
       return
     }
-    if (jitRequested && statusPip == StatusPip.NONE) {
+    // RT-4: keep AMBER while B-2 background resolve is still pending (or JIT armed).
+    if ((jitTriggered || backgroundResolvePending) && statusPip == StatusPip.NONE) {
       enter(TripState.AMBER_STEADY)
     } else if (statusPip != StatusPip.NONE) {
       enter(TripState.NEARBY_READY)
@@ -425,6 +435,22 @@ class TripStateMachine(
       return
     }
     raiseAlert(AlertCause.PLACE_CLARIFICATION)
+  }
+
+  fun onBackgroundResolveStarted() {
+    if (!fgsRunning) return
+    backgroundResolvePending = true
+    // D14: only promote CRUISING / NEARBY_READY into AMBER; keep higher-priority lights.
+    if (state == TripState.CRUISING || state == TripState.NEARBY_READY) {
+      enter(TripState.AMBER_STEADY)
+    }
+  }
+
+  fun onBackgroundResolveEnded() {
+    backgroundResolvePending = false
+    if (state == TripState.AMBER_STEADY && !jitTriggered) {
+      enter(if (statusPip != StatusPip.NONE) TripState.NEARBY_READY else TripState.CRUISING)
+    }
   }
 
   fun onDriverActionFailed(networkCause: Boolean) {
@@ -604,6 +630,7 @@ class TripStateMachine(
     isMicFgsActive = false
     treatAsOnSite = false
     networkDegraded = false
+    backgroundResolvePending = false
     deferredAlert = null
     voiceInputEnabled = false
     distanceToDestinationM = null
