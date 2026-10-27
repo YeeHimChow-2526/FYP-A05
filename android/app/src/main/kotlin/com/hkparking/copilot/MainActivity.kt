@@ -16,12 +16,26 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
+  private var overlayHost: AndroidOverlayHost? = null
+
   override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
     super.configureFlutterEngine(flutterEngine)
     val host = AndroidOverlayHost(this)
+    overlayHost = host
     val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, OverlayBridge.CHANNEL_NAME)
     host.channelMounted = true
-    host.emitter = { method, args -> channel.invokeMethod(method, args) }
+    // Step 3.5: sync may finish on a background thread; MethodChannel must be called on the main thread.
+    val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    host.emitter = { method, args ->
+      // RT-6：主線回呼落地時再檢查 channelMounted，避免 Activity onDestroy 後仍 emit。
+      if (android.os.Looper.myLooper() === android.os.Looper.getMainLooper()) {
+        if (host.channelMounted) channel.invokeMethod(method, args)
+      } else {
+        mainHandler.post {
+          if (host.channelMounted) channel.invokeMethod(method, args)
+        }
+      }
+    }
     Bindings.todayTripsChangedEmitter = {
       if (host.channelMounted) host.emit("onTodayTripsChanged", emptyMap())
     }
@@ -38,6 +52,15 @@ class MainActivity : FlutterActivity() {
         result.error(outcome.errorCode ?: "ERROR", outcome.message, outcome.details)
       }
     }
+  }
+
+  override fun onDestroy() {
+    // RT-6：卸 channel；背景 sync 完成後主線回呼見 channelMounted=false 就唔 emit。
+    // today-trip-host-sync 已係 daemon 單線程 Executor，唔強制 shutdown 以免截斷 in-flight。
+    overlayHost?.channelMounted = false
+    Bindings.todayTripsChangedEmitter = null
+    overlayHost = null
+    super.onDestroy()
   }
 }
 
@@ -212,11 +235,17 @@ private class AndroidOverlayHost(private val activity: MainActivity) : OverlayHo
   private val localSync: TodayTripSync by lazy {
     TodayTripSync(
       store = tripStore(),
-      api = ApiClientSyncApi(ApiClient(Bindings.apiTransport)),
+      api = ApiClientSyncApi(ApiClient(Bindings.activeApiTransport)),
       network = Bindings.networkStatus,
-      networkExecutor = java.util.concurrent.Executor { it.run() },
+      networkExecutor = syncExecutor,
     )
   }
+
+  // Step 3.5: real HTTP must not block the main thread (bridge calls arrive on main).
+  private val syncExecutor: java.util.concurrent.ExecutorService =
+    java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
+      Thread(runnable, "today-trip-host-sync").apply { isDaemon = true }
+    }
 
   private fun tripStore(): TodayTripStore = Bindings.todayTripStore ?: localStore
   private fun tripSync(): TodayTripSync = Bindings.todayTripSync ?: localSync
@@ -262,7 +291,8 @@ private class AndroidOverlayHost(private val activity: MainActivity) : OverlayHo
 
   override fun todayTrips(): List<Map<String, Any?>> {
     if (Bindings.networkStatus.isOnline()) {
-      runCatching { tripSync().flushPendingConfirms() }
+      val sync = tripSync()
+      syncExecutor.execute { runCatching { sync.flushPendingConfirms() } }
     }
     return tripStore().asBridgeMaps(System.currentTimeMillis())
   }
@@ -274,7 +304,8 @@ private class AndroidOverlayHost(private val activity: MainActivity) : OverlayHo
 
   override fun submitTripReport(payloadJson: String) {
     reports += payloadJson
-    tripSync().submitReport(payloadJson)
+    val sync = tripSync()
+    syncExecutor.execute { runCatching { sync.submitReport(payloadJson) } }
   }
 
   override fun activeService(): FloatingBubbleService? = null

@@ -5,6 +5,7 @@
 ## 1. 通用 Header
 
 - `X-Internal-API-Key: <INTERNAL_API_KEY>`（APK 內打包，只作基本識別）
+  - Base URL／key 由建置設定 `HKP_API_BASE_URL`／`HKP_API_KEY` 提供（`local.properties`／`-P`／環境變數，絕不入庫）；只准 `https://`（debug 另准 localhost／127.0.0.1／10.0.2.2 嘅 http）；URL 或 key 空 → 當離線；唔跟 redirect；每次請求總時限 `API_TIMEOUT_MS`（SC-018）。範例見 `docs/api/`。
 - `Content-Type: application/json`
 - 入口限流由 Cloud Armor 處理；客戶端遇逾時／5xx 走分級重試（§4）。
 - **429（Cloud Armor 超限）單獨處理，唔即時重試、唔計入分級重試**：回應帶 `Retry-After`（秒）即等候該秒數（上限 `RATE_LIMIT_MAX_WAIT_MS`）；冇 `Retry-After` 即等候 `RATE_LIMIT_RETRY_DELAY_MS`；之後**只重試一次**。該次仍失敗（再 429、逾時或其他錯誤）→ 膠囊 `GREY_BREATHING`，同網絡失敗分支，等司機拍膠囊重試；口播沿用 GREY 分支，唔另加句子。

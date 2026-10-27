@@ -80,7 +80,7 @@ object ApiResponses {
 
   private fun headerRetrySeconds(headers: Map<String, String>): Long? {
     val raw = headers.entries.firstOrNull { it.key.equals("Retry-After", ignoreCase = true) }?.value ?: return null
-    return raw.trim().toLongOrNull()?.takeIf { it >= 0L }
+    return raw.trim().toLongOrNull()  // RT-7：負數交 ApiClient.rateLimitWaitMs coerceIn(1,10)
   }
 
   private fun bodyRetrySeconds(body: String): Long? {
@@ -90,7 +90,7 @@ object ApiResponses {
       is Double -> if (value.isFinite() && value % 1.0 == 0.0) value.toLong() else return null
       else -> return null
     }
-    return seconds.takeIf { it >= 0L }
+    return seconds  // RT-7：負數交 coerceIn
   }
 
   private fun nonBlankString(value: Any?): String? = (value as? String)?.takeIf { it.isNotBlank() }

@@ -1,0 +1,199 @@
+# 最少限度 OpenAPI（Step 3.5／SC-018）：只列 App 真係送／讀嘅欄位；以 docs/specs/03 為準。
+# spec 未定嘅嘢標 OPEN QUESTION，唔好當合約。
+openapi: 3.0.3
+info:
+  title: 泊車副駕 客戶端 REST（Cloud Run）
+  version: "0.3.5"
+  description: >
+    由 Android 原生 net/ApiClient.kt 呼叫。成功＝HTTP 200。逾時 2500ms／次；
+    逾時、網絡錯誤、5xx 分級重試最多 3 次（間隔 1s）；429 等 Retry-After（上限 10s，冇就 5s）後只重試一次。
+servers:
+  - url: "{baseUrl}"
+    variables:
+      baseUrl:
+        default: https://example.invalid
+        description: 建置設定 HKP_API_BASE_URL；必須 https
+security:
+  - InternalApiKey: []
+components:
+  securitySchemes:
+    InternalApiKey:
+      type: apiKey
+      in: header
+      name: X-Internal-API-Key
+  headers:
+    RetryAfter:
+      description: 秒數（整數）。HTTP-date 格式 App 唔識，會退用 body retry_after_seconds 或 5s。
+      schema: { type: integer, minimum: 0 }
+  schemas:
+    RecommendRequest:
+      type: object
+      required: [session_id, origin_lat, origin_lng, dest_lat, dest_lng, dest_name, preference]
+      properties:
+        session_id: { type: string }
+        origin_lat: { type: number, format: double }
+        origin_lng: { type: number, format: double }
+        dest_lat: { type: number, format: double }
+        dest_lng: { type: number, format: double }
+        dest_name: { type: string }
+        preference: { type: string, enum: [INDOOR_ONLY, SMART_HYBRID, METERS_FOCUS] }
+        expand_scarcity: { type: boolean, default: false }
+        speech_locale: { type: string, default: zh-HK }
+    Card:
+      type: object
+      properties:
+        carpark_id: { type: string }
+        name: { type: string }
+        type: { type: string, example: INDOOR }
+        vacancies: { type: integer, description: "-1＝未知；唔好用 null", default: -1 }
+        distance_meters: { type: integer, default: 0 }
+        fee_summary: { type: string }
+        spoken_cue: { type: string, description: 空就用頂層 spoken_cue }
+        is_stale: { type: boolean, default: false }
+    RecommendResponse:
+      type: object
+      required: [status, cards]
+      properties:
+        status: { type: string, example: SUCCESS }
+        source_status: { type: string, enum: [ok, degraded], default: ok }
+        source_snapshot_ts: { type: string, description: "OPEN QUESTION：spec 03 寫 int（Unix 秒），App parser 讀字串（mock 用 ISO-8601）" }
+        processed_at: { type: string, description: 同上 OPEN QUESTION }
+        server_now: { type: string, description: 同上 OPEN QUESTION }
+        data_age_seconds: { type: integer }
+        cards: { type: array, items: { $ref: "#/components/schemas/Card" } }
+        await_voice_reply: { type: boolean, default: false }
+        speech_locale: { type: string, default: zh-HK }
+        speech_locale_fallback: { type: boolean, default: false }
+        spoken_cue: { type: string }
+    CommitRequest:
+      type: object
+      required: [session_id, target_carpark_id]
+      properties:
+        session_id: { type: string }
+        target_carpark_id: { type: string }
+    LockFull:
+      type: object
+      properties:
+        status: { type: string, example: LOCK_FULL }
+        spoken_cue: { type: string, description: App 照播 }
+    ReleaseRequest:
+      type: object
+      required: [session_id, target_carpark_id, reason]
+      properties:
+        session_id: { type: string }
+        target_carpark_id: { type: string }
+        reason: { type: string, enum: [PARKED_CONFIRMED] }
+    SyncRequest:
+      type: object
+      required: [session_id, event_type, timestamp]
+      properties:
+        session_id: { type: string }
+        event_type: { type: string, enum: [DRIVER_CONFIRMED] }
+        timestamp: { type: integer, format: int64, description: Unix 秒 }
+    CrowdReportRequest:
+      type: object
+      required: [session_id]
+      properties:
+        session_id: { type: string }
+        carpark_id: { type: string }
+        report_type: { type: string, description: "OPEN QUESTION：值未定義；App 本版冇呼叫" }
+        client_timestamp: { type: integer, format: int64, description: Unix 秒 }
+    TripReportRequest:
+      type: object
+      required: [session_id, carpark_id, rating_tag, perk_status_tag, trip_timestamp]
+      properties:
+        carpark_id: { type: string }
+        rating_tag: { type: string, enum: [GOOD, OK, BAD] }
+        perk_status_tag: { type: string, enum: [VALID, INVALID, NONE] }
+        perk_notes: { type: string }
+        session_id: { type: string }
+        trip_timestamp: { type: integer, format: int64, description: Unix 秒 }
+        photo_url: { type: string, description: App 本版唔會送 }
+    StatusOnly:
+      type: object
+      description: "OPEN QUESTION：spec 冇定 body；App 只睇 HTTP status"
+      properties:
+        status: { type: string, example: OK }
+  responses:
+    RateLimited:
+      description: Cloud Armor 超限；App 等候後只重試一次
+      headers:
+        Retry-After: { $ref: "#/components/headers/RetryAfter" }
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              status: { type: string, example: RATE_LIMITED }
+              retry_after_seconds: { type: integer }
+    ServerError:
+      description: 5xx；App 分級重試，仍敗 → GREY_BREATHING
+paths:
+  /v1/recommend-and-route:
+    post:
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/RecommendRequest" } } }
+      responses:
+        "200":
+          description: 推薦結果（body 唔合法 → App 當網絡失敗）
+          content: { application/json: { schema: { $ref: "#/components/schemas/RecommendResponse" } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "5XX": { $ref: "#/components/responses/ServerError" }
+  /v1/session/commit:
+    post:
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/CommitRequest" } } }
+      responses:
+        "200":
+          description: 虛擬鎖建立；App 開 Google Maps 導航
+          content: { application/json: { schema: { $ref: "#/components/schemas/StatusOnly" } } }
+        "409":
+          description: LOCK_FULL；App 照播 spoken_cue，唔導航
+          content: { application/json: { schema: { $ref: "#/components/schemas/LockFull" } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "5XX": { $ref: "#/components/responses/ServerError" }
+  /v1/session/release:
+    post:
+      description: 唔做分級重試；離線即放棄
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ReleaseRequest" } } }
+      responses:
+        "200":
+          description: 刪鎖，session 標 PARKED_CONFIRMED、ratable=false
+          content: { application/json: { schema: { $ref: "#/components/schemas/StatusOnly" } } }
+  /v1/sync/outbox:
+    post:
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/SyncRequest" } } }
+      responses:
+        "200":
+          description: ratable=true；天然等冪
+          content: { application/json: { schema: { $ref: "#/components/schemas/StatusOnly" } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "5XX": { $ref: "#/components/responses/ServerError" }
+  /v1/feedback/crowd-report:
+    post:
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/CrowdReportRequest" } } }
+      responses:
+        "200":
+          description: OPEN QUESTION（App 本版冇呼叫）
+          content: { application/json: { schema: { $ref: "#/components/schemas/StatusOnly" } } }
+  /v1/feedback/trip-report:
+    post:
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/TripReportRequest" } } }
+      responses:
+        "200":
+          description: 收到反饋
+          content: { application/json: { schema: { $ref: "#/components/schemas/StatusOnly" } } }
+        "404": { description: 未知 session；App 靜默 }
+        "409": { description: 未確認（ratable=false）；App 靜默 }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "5XX": { $ref: "#/components/responses/ServerError" }

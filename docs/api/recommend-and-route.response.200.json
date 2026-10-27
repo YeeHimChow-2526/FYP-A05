@@ -1,0 +1,21 @@
+{
+  "status": "SUCCESS",
+  "speech_locale": "zh-HK",
+  "source_status": "ok",
+  "source_snapshot_ts": "2026-10-18T14:20:00+08:00",
+  "processed_at": "2026-10-18T14:20:41+08:00",
+  "server_now": "2026-10-18T14:21:30+08:00",
+  "data_age_seconds": 90,
+  "cards": [
+    {
+      "carpark_id": "CP_LANGHAM",
+      "name": "朗豪坊商場停車場",
+      "type": "INDOOR",
+      "vacancies": 12,
+      "distance_meters": 180,
+      "fee_summary": "首小時 $32 / 消費滿 $200 免 1 小時",
+      "spoken_cue": "前方首選朗豪坊停車場，一百八十米，剩十二個位，首小時三十二蚊。",
+      "is_stale": false
+    }
+  ]
+}

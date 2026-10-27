@@ -22,6 +22,7 @@ import com.hkparking.copilot.trip.MemoryPrefsPort
 import com.hkparking.copilot.trip.TodayTripStore
 import com.hkparking.copilot.trip.TodayTripSync
 import com.hkparking.copilot.net.ApiClient
+import com.hkparking.copilot.net.ApiTransport
 import com.hkparking.copilot.voice.VoiceCapabilityChecker
 
 fun interface FgsStarter {
@@ -32,8 +33,36 @@ object Bindings {
   val voiceInput: SimVoiceInput = SimVoiceInput()
   val locationSource: SimLocationSource = SimLocationSource()
   val apiTransport: FixtureApiTransport = FixtureApiTransport()
+  // Step 3.5（SC-018／RT-2）：debug 預設用 fixture；建置時 HKP_USE_REAL_API=true 先改打真 HTTP。
+  // 冇 runtime 產品開關；但 JVM 單測（attachService baseContext==null／clearPorts）強制重置為 false，
+  // 避免本機 local.properties 殘留 HKP_USE_REAL_*=true 污染 testDebugUnitTest。
+  @Volatile var useRealApi: Boolean = com.hkparking.copilot.BuildConfig.HKP_USE_REAL_API
+    private set
+  val realApiTransport: HttpApiTransport by lazy {
+    HttpApiTransport(
+      baseUrl = com.hkparking.copilot.BuildConfig.HKP_API_BASE_URL,
+      apiKey = com.hkparking.copilot.BuildConfig.HKP_API_KEY,
+      allowLocalCleartext = true,
+    )
+  }
+  val activeApiTransport: ApiTransport get() = if (useRealApi) realApiTransport else apiTransport
   val networkStatus: FixtureNetworkStatus = FixtureNetworkStatus()
   val navigation: SimNavigationLauncher = SimNavigationLauncher()
+  // Step 3.5（SC-018／RT-2）：debug 預設 SimNavigationLauncher；HKP_USE_REAL_NAVIGATION=true 先用 IntentNavigationPort。
+  // 同樣喺 JVM 單測環境強制重置，唔跟 local.properties。
+  @Volatile var useRealNavigation: Boolean = com.hkparking.copilot.BuildConfig.HKP_USE_REAL_NAVIGATION
+    private set
+  val realNavigation: IntentNavigationPort by lazy {
+    IntentNavigationPort { runCatching { activeService?.applicationContext }.getOrNull() }
+  }
+  internal fun selectNavigation(useReal: Boolean): NavigationPort = if (useReal) realNavigation else navigation
+  val activeNavigation: NavigationPort get() = selectNavigation(useRealNavigation)
+
+  /** 測試專用：模擬 BuildConfig 開咗真通道，之後 attachService／clearPorts 應強制拉返 false。 */
+  internal fun simulateBuildConfigRealSwitchesForTest(api: Boolean, navigation: Boolean) {
+    useRealApi = api
+    useRealNavigation = navigation
+  }
   val b2MissResolver: B2MissResolver = B2MissResolvers.AWAIT_EVENT
   var activeReceiver: SimEventReceiver? = null
   var pendingStartDestination: String? = null
@@ -66,6 +95,16 @@ object Bindings {
   var todayTripsChangedEmitter: (() -> Unit)? = null
 
   fun attachService(service: com.hkparking.copilot.FloatingBubbleService) {
+    // RT-2：JVM 單元測試（Robolectric 以外、service.baseContext == null）強制 fixture／sim，
+    // 唔受本機 local.properties HKP_USE_REAL_* 污染；真機／模擬器則跟返 BuildConfig。
+    val jvmUnitTest = runCatching { service.baseContext }.getOrNull() == null
+    if (jvmUnitTest) {
+      useRealApi = false
+      useRealNavigation = false
+    } else {
+      useRealApi = com.hkparking.copilot.BuildConfig.HKP_USE_REAL_API
+      useRealNavigation = com.hkparking.copilot.BuildConfig.HKP_USE_REAL_NAVIGATION
+    }
     activeService = service
     capabilityCheckTimedOut = false
     todayTripsCleared = false
@@ -83,7 +122,7 @@ object Bindings {
     )
     val syncApi = ApiClientSyncApi(
       ApiClient(
-        transport = apiTransport,
+        transport = activeApiTransport,
         delayMs = service.delayMs,
       ),
     )
@@ -91,7 +130,12 @@ object Bindings {
       store = store,
       api = syncApi,
       network = networkStatus,
-      networkExecutor = java.util.concurrent.Executor { it.run() },
+      // Step 3.5: real HTTP must not block the main thread; fixture keeps inline order for sim tests.
+      networkExecutor = if (useRealApi) {
+        java.util.concurrent.Executor { runnable -> Thread(runnable, "today-trip-sync").start() }
+      } else {
+        java.util.concurrent.Executor { it.run() }
+      },
     )
     todayTripStore = store
     todayTripSync = sync
@@ -149,6 +193,9 @@ object Bindings {
   }
 
   fun clearPorts() {
+    // RT-2：每次清 port 都強制拉返 fixture／sim，避免上一輪測試／local.properties 殘留真通道。
+    useRealApi = false
+    useRealNavigation = false
     locationSource.setLocationListener(null)
     locationSource.setMotionListener(null)
     locationSource.setFixListener(null)
@@ -239,7 +286,12 @@ object Bindings {
         networkFailed = false
         networkStatus.online = true
         flushDriverConfirm(service)
-        (service.todayTripSync ?: todayTripSync)?.flushPendingConfirms()
+        val sync = service.todayTripSync ?: todayTripSync
+        if (useRealApi) {
+          Thread({ runCatching { sync?.flushPendingConfirms() } }, "today-trip-flush").start()
+        } else {
+          sync?.flushPendingConfirms()
+        }
       }
       "CLOCK_HKT_MIDNIGHT" -> {
         todayTripsCleared = true

@@ -220,6 +220,7 @@ class ApiClient(
     val status = when {
       result.statusCode == HTTP_TOO_MANY -> "RATE_LIMITED"
       result.statusCode == HTTP_CONFLICT -> "CONFLICT"
+      result.statusCode in 300..399 -> "HTTP_REDIRECT_BLOCKED"
       result.timedOut -> "TIMEOUT"
       result.networkError -> "NETWORK_ERROR"
       isOk(result) -> "SUCCESS"
@@ -232,12 +233,19 @@ class ApiClient(
   }
 
   private fun rateLimitWaitMs(retryAfterSeconds: Long?): Long {
-    if (retryAfterSeconds != null && retryAfterSeconds > 0L) return minOf(retryAfterSeconds * MS_PER_SECOND, NativeConfig.RATE_LIMIT_MAX_WAIT_MS)
+    // RT-7：有 Retry-After 就 coerceIn(1, 10) 秒；缺失先用預設 5s。每次請求最多只等一次（finishRateLimit）。
+    if (retryAfterSeconds != null) {
+      val seconds = retryAfterSeconds.coerceIn(
+        NativeConfig.RATE_LIMIT_RETRY_AFTER_MIN_S,
+        NativeConfig.RATE_LIMIT_RETRY_AFTER_MAX_S,
+      )
+      return seconds * MS_PER_SECOND
+    }
     return NativeConfig.RATE_LIMIT_RETRY_DELAY_MS
   }
 
   private fun sanitize(response: RecommendResponse?): RecommendResponse? = response?.copy(cards = response.sanitizedCards())
-  private fun isOk(result: HttpResult): Boolean = result.statusCode == HTTP_OK && !result.timedOut && !result.networkError
+  private fun isOk(result: HttpResult): Boolean = result.statusCode in HTTP_OK..HTTP_OK_MAX && !result.timedOut && !result.networkError
   private fun isGradedFailure(result: HttpResult): Boolean = result.timedOut || result.networkError || result.statusCode >= HTTP_SERVER_ERROR
   private fun isConflict(result: HttpResult, conflictCue: Boolean, silentConflict: Boolean): Boolean = result.statusCode == HTTP_CONFLICT && (conflictCue || silentConflict)
 
@@ -253,6 +261,7 @@ class ApiClient(
 
   companion object {
     const val HEADER_API_KEY = "X-Internal-API-Key"
+    // 佔位字串（測試用）；真 key 由 BuildConfig.HKP_API_KEY 經 Bindings 傳入 HttpApiTransport（SC-018），絕不入庫。
     const val INTERNAL_API_KEY = "<INTERNAL_API_KEY>"
     const val HEADER_CONTENT_TYPE = "Content-Type"
     const val JSON_CONTENT_TYPE = "application/json"
@@ -272,6 +281,7 @@ private const val METER = "METER"
 private const val DEGRADED = "degraded"
 private const val UNKNOWN_VACANCIES = -1
 private const val HTTP_OK = 200
+private const val HTTP_OK_MAX = 299
 private const val HTTP_CONFLICT = 409
 private const val HTTP_TOO_MANY = 429
 private const val HTTP_SERVER_ERROR = 500

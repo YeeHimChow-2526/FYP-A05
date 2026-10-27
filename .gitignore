@@ -55,4 +55,17 @@ repomix-output*
 repomix*.xml
 repomix*.md
 .ai/.last_report_head
-.ai/.last_report_head
+
+# Python（tools/stub_server 等本地工具）
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 日誌與落地包（*_drop/、*_drop.zip 只喺本機用，唔入庫）
+*.log
+*_drop/
+*_drop.zip
+
+# Widget Preview related
+.widget_preview/

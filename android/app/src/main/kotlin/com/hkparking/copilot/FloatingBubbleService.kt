@@ -71,7 +71,7 @@ class FloatingBubbleService : android.app.Service {
     this.networkStatus = networkStatus
     this.ttsService = TtsService(null, capabilityChecker)
     this.apiClient = com.hkparking.copilot.net.ApiClient(
-      com.hkparking.copilot.di.Bindings.apiTransport,
+      com.hkparking.copilot.di.Bindings.activeApiTransport,
       tripStateMachine,
       this::onAttemptFailed,
       delayMs,
@@ -258,6 +258,8 @@ class FloatingBubbleService : android.app.Service {
   internal var todayTripStore: TodayTripStore? = null
   internal var todayTripSync: TodayTripSync? = null
   internal var shutdownInProgress: Boolean = false
+  /** RT-1：終點變更計數；launchApi 捕捉，MainLooperResume 落地時核對，防舊請求覆蓋。 */
+  private var destinationEpoch: Int = 0
   internal var greyRetryInFlight: Boolean = false
   internal var lastPendingInvalidation: PendingInvalidation? = null
   internal var shutdownResultDropped: Boolean = false
@@ -584,6 +586,7 @@ class FloatingBubbleService : android.app.Service {
   }
 
   fun lockDestination(destinationName: String, poi: Poi? = null) {
+    destinationEpoch += 1
     committedCarparkId = null
     committedCarparkName = null
     distanceTracker.setDestination(poi?.lat, poi?.lng)
@@ -599,6 +602,7 @@ class FloatingBubbleService : android.app.Service {
   }
 
   fun lockDestinationAt(destinationName: String, lat: Double, lng: Double, poiId: String? = null) {
+    destinationEpoch += 1
     committedCarparkId = null
     committedCarparkName = null
     distanceTracker.setDestination(lat, lng)
@@ -975,11 +979,21 @@ class FloatingBubbleService : android.app.Service {
     floatingCard.hide()
   }
 
-  private fun dropShutdownResult(): Boolean {
-    if (!shutdownInProgress) return false
-    shutdownResultDropped = true
-    logInfo("Result dropped: shutdown")
-    return true
+  private suspend fun dropShutdownResult(): Boolean {
+    if (shutdownInProgress) {
+      shutdownResultDropped = true
+      logInfo("Result dropped: shutdown")
+      return true
+    }
+    // RT-1：主線落地時若 FGS 已停、session 已換、或終點已改 → 丟棄，嚴禁改狀態。
+    val guard = kotlin.coroutines.coroutineContext[ApiLaunchGuard]
+    val sessionChanged = guard != null && tripStateMachine.sessionId != guard.sessionId
+    val destChanged = guard != null && destinationEpoch != guard.destEpoch
+    if (!isFgsRunning || sessionChanged || destChanged) {
+      logInfo("Result dropped: stale_session_or_dest")
+      return true
+    }
+    return false
   }
 
 
@@ -1285,7 +1299,7 @@ class FloatingBubbleService : android.app.Service {
           committedCarparkName = card.name
           abandonCardOverlay()
           tripStateMachine.onCommitSucceeded()
-          com.hkparking.copilot.di.Bindings.navigation.launchGateNavigation(card.name.ifBlank { card.carparkId })
+          com.hkparking.copilot.di.Bindings.activeNavigation.launchGateNavigation(card.name.ifBlank { card.carparkId })
           updateCapsuleVisual()
         } else if (outcome.httpStatus == 409) {
           fullCarparkIds += card.carparkId
@@ -1317,7 +1331,8 @@ class FloatingBubbleService : android.app.Service {
 
   private fun speakDriverFirstChoice(cards: List<RecommendationCard>) {
     if (shutdownInProgress) {
-      dropShutdownResult()
+      shutdownResultDropped = true
+      logInfo("Result dropped: shutdown")
       return
     }
     val fullVoice = tripStateMachine.tripVoiceMode == TripVoiceMode.FULL_VOICE
@@ -1562,7 +1577,23 @@ class FloatingBubbleService : android.app.Service {
   }
 
   private fun launchApi(block: suspend () -> Unit) {
-    block.startCoroutine(Continuation(EmptyCoroutineContext) { })
+    // RT-1：捕捉發起時 session／終點 epoch；MainLooperResume 落地時經 dropShutdownResult 核對。
+    val guard = ApiLaunchGuard(
+      sessionId = tripStateMachine.sessionId,
+      destEpoch = destinationEpoch,
+    )
+    val context = MainLooperResume + guard
+    val start = {
+      block.startCoroutine(Continuation(context) { })
+    }
+    // RT-1：真 Android（有 MainLooper）整段 ApiClient（含重試 sleep）放背景執行緒，完成後先經 MainLooperResume 返主線改狀態；
+    // 純 JVM 單測（getMainLooper()==null）維持呼叫執行緒同步直行，現有 ~277 測試零改動。
+    val main = runCatching { android.os.Looper.getMainLooper() }.getOrNull()
+    if (main != null) {
+      API_LAUNCH_EXECUTOR.execute(start)
+    } else {
+      start()
+    }
   }
 
   fun updateCapsuleVisual() {
@@ -2164,4 +2195,41 @@ private fun defaultDelayMs(): suspend (Long) -> Unit = { ms ->
   }
 }
 
+/**
+ * RT-1：launchApi 發起時捕捉嘅 session／終點 epoch，經 CoroutineContext 帶到 MainLooperResume 落地檢查。
+ */
+private data class ApiLaunchGuard(
+  val sessionId: String?,
+  val destEpoch: Int,
+) : kotlin.coroutines.AbstractCoroutineContextElement(ApiLaunchGuard) {
+  companion object Key : kotlin.coroutines.CoroutineContext.Key<ApiLaunchGuard>
+}
 
+/** RT-1：真機 launchApi 背景池（daemon）；JVM 測試唔用。 */
+private val API_LAUNCH_EXECUTOR: java.util.concurrent.Executor =
+  java.util.concurrent.Executors.newCachedThreadPool { runnable ->
+    Thread(runnable, "hkp-api-launch").apply { isDaemon = true }
+  }
+
+/**
+ * Step 3.5／RT-1: resumes FBS coroutines on the main looper when they are resumed from another thread
+ * (HttpApiTransport worker / hkp-api-launch). No looper (JVM tests) or already on main → resume inline.
+ */
+private object MainLooperResume :
+  kotlin.coroutines.AbstractCoroutineContextElement(kotlin.coroutines.ContinuationInterceptor),
+  kotlin.coroutines.ContinuationInterceptor {
+  override fun <T> interceptContinuation(continuation: Continuation<T>): Continuation<T> =
+    object : Continuation<T> {
+      override val context = continuation.context
+
+      override fun resumeWith(result: Result<T>) {
+        val main = runCatching { android.os.Looper.getMainLooper() }.getOrNull()
+        val current = runCatching { android.os.Looper.myLooper() }.getOrNull()
+        if (main == null || current === main) {
+          continuation.resumeWith(result)
+        } else {
+          android.os.Handler(main).post { continuation.resumeWith(result) }
+        }
+      }
+    }
+}

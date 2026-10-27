@@ -1,0 +1,11 @@
+{
+  "session_id": "sess-demo-0001",
+  "origin_lat": 22.3193,
+  "origin_lng": 114.1694,
+  "dest_lat": 22.3186,
+  "dest_lng": 114.1685,
+  "dest_name": "朗豪坊",
+  "preference": "SMART_HYBRID",
+  "expand_scarcity": false,
+  "speech_locale": "zh-HK"
+}

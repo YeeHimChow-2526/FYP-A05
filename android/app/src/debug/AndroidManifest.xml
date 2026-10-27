@@ -4,4 +4,6 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Step 3.5（SC-018）：debug 准本機 http 去 stub server；release 唔受影響。 -->
+    <application android:networkSecurityConfig="@xml/network_security_config" />
 </manifest>

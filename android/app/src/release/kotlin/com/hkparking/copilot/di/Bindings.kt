@@ -26,11 +26,20 @@ class ConnectivityNetworkStatus : NetworkStatusProvider {
 object Bindings {
   val voiceInput: VoiceInput = SttVoiceInput()
   val locationSource: PlatformLocationSource = PlatformLocationSource()
-  val apiTransport: ApiTransport = HttpApiTransport()
+  // Step 3.5（SC-018）：release 一律打真雲端；URL／key 由建置設定注入（android/local.properties／-P／環境變數）。
+  // 未設定或唔合規 → HttpApiTransport 回 networkError（離線分支），唔 crash；release 唔准 http。
+  val apiTransport: ApiTransport = HttpApiTransport(
+    baseUrl = com.hkparking.copilot.BuildConfig.HKP_API_BASE_URL,
+    apiKey = com.hkparking.copilot.BuildConfig.HKP_API_KEY,
+    allowLocalCleartext = false,
+  )
+  val activeApiTransport: ApiTransport get() = apiTransport
   val networkStatus: ConnectivityNetworkStatus = ConnectivityNetworkStatus()
   val b2MissResolver: B2MissResolver = B2MissResolvers.NAME_LOCK
   private var appContext: android.content.Context? = null
   val navigation: NavigationPort = IntentNavigationPort { appContext }
+  // Step 3.5（SC-018）：同 debug 對齊；release 永遠用真 Intent 導航。
+  val activeNavigation: NavigationPort get() = navigation
   var todayTripStore: TodayTripStore? = null
     private set
   var todayTripSync: TodayTripSync? = null

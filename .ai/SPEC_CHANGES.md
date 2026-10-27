@@ -310,3 +310,62 @@
 - 影響任務編號／常數名／檔案：Step 3.4；W-A.11／W-A.17／W-A.5（確認路徑）；TODAY_TRIPS_*；TodayTripStore.kt、TodayTripSync.kt、FloatingBubbleService.kt、MainActivity.kt、debug/di/Bindings.kt、FixtureApiTransport.kt、mock/sync_*.json、lib/features/trip_history/*、app_config.dart、IgnitionScreen
 - 類別：規格延後項落地＋缺漏補齊
 - 狀態：待處理
+
+### SC-018
+- 日期：2026-10-26
+- 來源：評估（Step 3.5 代碼預建，Pi 落地）
+- 裝置（如適用）：不適用（真機驗收見 `DEVICE_ACCEPTANCE.md`）
+- 發現：
+  1. release `HttpApiTransport` 無 base URL／key 來源；空殼一律 networkError，release 從未打過真 HTTP。
+  2. 真 HTTP 會喺呼叫線程（FBS launchApi＝main）做 I/O，會 NetworkOnMainThreadException；TodayTripSync 嘅 latch 喺 main 上等會死鎖。
+  3. debug 只有 fixture，冇辦法喺真機試真網絡；debug `navigation` 係 SimNavigationLauncher（只記 URI），commit 200 後真機唔會開 Google Maps。
+  4. spec 冇寫 https 要求、redirect、逾時係單次總時限定連線時限、key 點樣入 build。
+- 裁決（spec 冇講嘅地方揀保守做法）：
+  1. Base URL／key 來自建置設定 `HKP_API_BASE_URL`／`HKP_API_KEY`；次序 `-P` Gradle property → `local.properties`（已 gitignore）→ 環境變數 → 空字串。**絕不入庫**；`ApiClient.INTERNAL_API_KEY` 只係測試佔位字串。
+  2. 只准 `https://`；debug 額外准 `http://` 去 `localhost`／`127.0.0.1`／`10.0.2.2`（`ApiEndpointPolicy` 同 debug `network_security_config.xml` 兩重把關）。release 唔准任何 cleartext。絕不關 SSL 驗證、唔加 user CA。
+  3. URL 空／唔合法（冇 host、有 userinfo／query／fragment、其他 scheme）或 key 空 → 當離線：`networkError`，唔打伺服器、唔 crash；只 log 原因同 host，唔 log key。
+  4. 每次請求總時限 `API_TIMEOUT_MS`（watchdog 強制，連線＋讀取一齊計）；分級重試／429 規則不變（03 §1、§4）。
+  5. 唔跟 redirect；3xx 當失敗（同其他 4xx：唔重試、GREY）。
+  6. Log 唔印 key、唔印 request／response body；只印 path 同 status。
+  7. I/O 喺背景線程（`hkp-api-io`）；FBS `launchApi` 經 `MainLooperResume` 返 main looper 先改 UI／狀態；MainActivity 今日行程同步改用背景 executor，`todayTrips()` 先回清單、flush 後經 emitter 刷新。
+  8. debug 預設仍用 fixture（`HKP_USE_REAL_API=false`）；設 `true` 先用真 `HttpApiTransport`。屬建置時開關，**無執行期旗標**（04 §1）。
+  9. debug 導航開關 `HKP_USE_REAL_NAVIGATION`（預設 `false`＝SimNavigationLauncher，現有測試不變）；設 `true` 改用 `IntentNavigationPort`，真機 commit 200 後開 Google Maps 駕駛導航。q 係車場名（未有閘口坐標，承 SC-016 遺留），Maps 可能揀到稍有偏差嘅點。release 一律 `IntentNavigationPort`。
+  10. 今日行程待確認保留規則不變（03 §5：只留當日 HKT，00:00 懶清除）。
+  11. 根目錄 `.gitignore`（擁有人批准，今次例外入庫）：刪重複 `.ai/.last_report_head`（留一行）；加 Python 段（`__pycache__/`、`*.pyc`、`.venv/`、`venv/`）同日誌／落地包段（`*.log`、`*_drop/`、`*_drop.zip`）。其他唔郁；`local.properties` 本身已 ignore。
+- 建議改動：
+  1. `net/ApiEndpointPolicy.kt`（新）；`di/CorePorts.kt` `HttpApiTransport` 實作（HttpURLConnection，零新依賴）。
+  2. release／debug `Bindings` 接建置設定；`activeApiTransport`／`activeNavigation`；`build.gradle.kts` 加 BuildConfig 欄位。
+  3. `docs/api/`（每端點 request／response 範例＋`openapi.yaml`）；`tools/stub_server/stub_server.py`（只用標準庫）。
+  4. 測試：`Step35HttpTransportTest`（14）、`Step35NavigationSwitchTest`（4），用 JDK `com.sun.net.httpserver`。
+  OPEN QUESTION（待雲端／評估方決定）：
+  - recommend 時間欄位：03 寫 int（Unix 秒），mock／parser 用 ISO 字串
+  - commit／release／sync／crowd／trip 200 body 未定；App 只睇 status code（commit 409 讀 `spoken_cue`）
+  - App 只當 200 係成功（TodayTripSync 接受 2xx）；請伺服器一律回 200
+  - 401／403／400／422 一律當普通失敗（GREY＋「網絡唔順」類口播），冇專門處理
+  - trip-report 5xx 會重試，伺服器要按 session_id 去重
+  - `Retry-After` HTTP-date 格式唔支援（退用 body 秒數或 5s）
+  - crowd-report `report_type` 只有 global §10.7 一個例子 `BLOCKED_OCCUPIED`，完整值集未定；App 冇呼叫點
+  - key 打包入 APK，可被抽出（03 §1 已講只作基本識別）
+  - recommend 卡冇車場／閘口坐標（導航用車場名）
+  - NEED_CLARIFICATION／NOT_FOUND 等 status FBS 唔分辨
+  遺留項：
+  - 真 STT（release SttVoiceInput 仍 stub）；debug 冇真 GPS；短網址／geocode；藍牙 MAC 配對；WorkManager；相片上傳；6 頁 onboarding
+- 影響任務編號／常數名／檔案：Step 3.5；W-A.12／W-A.5／W-A.11；API_TIMEOUT_MS、HKP_API_BASE_URL、HKP_API_KEY、HKP_USE_REAL_API、HKP_USE_REAL_NAVIGATION；ApiEndpointPolicy.kt（新）、di/CorePorts.kt、net/ApiClient.kt、FloatingBubbleService.kt、MainActivity.kt、debug/di/Bindings.kt、release/di/Bindings.kt、debug/AndroidManifest.xml、debug/res/xml/network_security_config.xml（新）、app/build.gradle.kts、.gitignore、docs/api/*、tools/stub_server/stub_server.py
+
+#### SC-018 修訂｜Gemini RT-1..7（全接受，2026-10-27）
+
+紅隊審查對照 v2.9.1 §§1–6；以下落地條件已全部實作，唔另開 SC-019。
+
+| RT | 摘要 | 落地 |
+|----|------|------|
+| RT-1 | FBS.launchApi 主線 ANR＋舊請求遲到覆蓋 | 真機（MainLooper≠null）整段 ApiClient 放 `hkp-api-launch` 背景；JVM 維持同步。發起時捕捉 sessionId＋destinationEpoch；`dropShutdownResult` 核對 stale → log `Result dropped: stale_session_or_dest`。Fixture 喺非主線時 hop 一次令 MainLooperResume 跳返主線。 |
+| RT-2 | local.properties HKP_USE_REAL_* 污染單測 | `Bindings.useRealApi`／`useRealNavigation` 改 var；`attachService` 喺 `baseContext==null`（JVM）強制 false；`clearPorts` 一律強制 false。真機跟 BuildConfig。 |
+| RT-3 | hkp-api-io 無上限＋watchdog 競態 | 有上限 daemon `ThreadPoolExecutor`（core=2/max=6，queue=32，AbortPolicy→networkError）；io／watchdog 均 `isDaemon=true`；`AtomicReference<HttpURLConnection?>`＋`AtomicBoolean(finished)` 競態處理。 |
+| RT-4 | body 無上限＋errorStream null | `NativeConfig.MAX_RESPONSE_BYTES=256KiB`；超限 networkError；`errorStream?.use`／null→`""`。 |
+| RT-5 | host 正規化、path 拼接、NSC 對齊 | scheme／host `Locale.ROOT` 小寫；debug http 精確全等 `localhost`／`127.0.0.1`／`10.0.2.2`；`joinUrl` trim 斜線、只准 `/v1/` 且無 `?`／`#`；NSC `includeSubdomains="false"`。 |
+| RT-6 | MainActivity executor 洩漏＋destroy 後 emit | `today-trip-host-sync` 已係 daemon 單線程；emitter／mainHandler.post 落地再檢查 `channelMounted`；`onDestroy` 設 false 並清 emitter。 |
+| RT-7 | 2xx 一致、Retry-After clamp、日誌脫敏 | `isOk`＝`200..299`；Retry-After `coerceIn(1,10)` 且每請求最多一次；3xx log `HTTP_REDIRECT_BLOCKED path=… status=…`；唔 log key／body。 |
+
+可調參數（NativeConfig）：`RATE_LIMIT_RETRY_AFTER_MIN_S`／`MAX_S`、`MAX_RESPONSE_BYTES`、`API_IO_POOL_CORE`／`MAX`。
+- 類別：規格缺漏＋裁決＋紅隊修訂
+- 狀態：已落地（代碼；待 Pi `review/step35`）

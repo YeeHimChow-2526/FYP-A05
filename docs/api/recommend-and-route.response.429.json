@@ -1,0 +1,6 @@
+{
+  "status": "RATE_LIMITED",
+  "http_status": 429,
+  "retry_after_seconds": 5,
+  "error": "TOO_MANY_REQUESTS"
+}

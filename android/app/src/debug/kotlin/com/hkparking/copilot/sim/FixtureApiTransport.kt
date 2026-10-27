@@ -87,6 +87,19 @@ class FixtureApiTransport(
   }
 
   override suspend fun post(path: String, bodyJson: String): HttpResult {
+    val result = postInline(path, bodyJson)
+    // RT-1：真機 launchApi 喺背景線起跑；fixture 本身唔 suspend 時，呢度彈一次令 MainLooperResume 跳返主線先改狀態。
+    hopResumeToMainIfNeeded()
+    return result
+  }
+
+  private suspend fun hopResumeToMainIfNeeded() {
+    val main = runCatching { android.os.Looper.getMainLooper() }.getOrNull() ?: return
+    if (runCatching { android.os.Looper.myLooper() }.getOrNull() === main) return
+    kotlin.coroutines.suspendCoroutine<Unit> { cont -> cont.resumeWith(Result.success(Unit)) }
+  }
+
+  private suspend fun postInline(path: String, bodyJson: String): HttpResult {
     postCount += 1
     lastPath = path
     postBodies += path to bodyJson

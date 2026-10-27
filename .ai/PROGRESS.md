@@ -1,5 +1,7 @@
 # 開發進度（PROGRESS）— v2.9.1
 
+> 2026-10-27：Step 3.5 接受 Gemini RT-1..7 全數落地（見 SPEC_CHANGES SC-018 修訂）；測試見 Step35RtFixesTest；唔 push。
+
 最後更新：2026-10-25｜任務來源：`.ai/ARCHITECTURE.md` §19 PART 3 路線圖任務表（共 46 條任務項＝44 項工程任務，W-E.2 與 W-F.2 各拆 Part 1／Part 2）｜驗收細節以實作版 PART 3 為準。
 
 寫入者：Pi 完成任務並 commit 後勾選並填 commit；Gemini 審查 `.ai/LAST_RUN.md` 後確認；Kenny 可隨時人手修正。
@@ -58,6 +60,7 @@
 - [ ] W-A.20 STT 開發前驗證 — commit: 
 - [x] W-A.21 指令碼與語言模板 — commit: a5da97e, 752de53, 5922985, 04d8879, 4bff94b
 - [x] W-A.12 網絡分級重試 — commit: b73fff4, dfadd4f, cc1a27c
+  - Step 3.5：release／debug 真 HTTP 傳輸（HttpApiTransport＋ApiEndpointPolicy，https only）、建置設定 HKP_API_BASE_URL／HKP_API_KEY、debug 開關 HKP_USE_REAL_API／HKP_USE_REAL_NAVIGATION、docs/api＋stub server（SC-018）— commit: 
 
 ### 19.4 Phase 3 — 商業激戰區強化、安全防禦與眾包反饋（第 11–13 步）
 
@@ -87,7 +90,7 @@
 |---|---|---|
 | Step 1 | 雙層骨架＋FGS 握手＋P 膠囊燈號＋`sim/` 殼與 fixtures＋`ApiClient` 分級重試＋三種行程語音模式與能力檢查＋粵語 TTS 口播首選 | Step 1.1：W-A.6；W-A.3 常數檔。Step 1.2：W-A.15；W-A.1 狀態機。Step 1.3：W-A.19、W-A.21；W-A.7 首選口播。Step 1.4：W-A.12。Step 1.5：W-A.16。Step 1.6：W-A.1 |
 | Step 2 | 語音追問閉環＋`FloatingCardView` 追問出卡＋手動模式卡片按鈕＋Intent 喚醒 Google Maps 導航 | W-A.7；W-A.12（含 cc1a27c）。W-A.9 只完成 sim 口播即停 |
-| Step 3 | `LocalPoiTrie.kt`＋B-2 分享接盤＋`DistanceTracker`＋`EngineShutdownReceiver`（3.3／SC-016）＋Flutter 今日行程（3.4） | 3.1／3.1b／3.2／3.3／3.4 |
+| Step 3 | `LocalPoiTrie.kt`＋B-2 分享接盤＋`DistanceTracker`＋`EngineShutdownReceiver`（3.3／SC-016）＋Flutter 今日行程（3.4）＋真 HTTP 傳輸／docs/api（3.5／SC-018） | 3.1／3.1b／3.2／3.3／3.4／3.5 |
 
 - [x] Step 1 必做：原生 sim/ 模擬殼＋mock/*.json fixtures＋注入事件（屬 W-A.18；規格 docs/specs/04_mock_and_sim_shell.md），Step 1 完成前交付 — commit: dff84d8, 97bb2e6
 

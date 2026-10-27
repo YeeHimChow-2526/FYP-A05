@@ -211,7 +211,8 @@ class Step22bApiResponsesTest {
     assertEquals(5L, ApiResponses.buildResult(ApiClient.RECOMMEND, 429, bodyFive, emptyMap()).retryAfterSeconds)
     assertEquals(5L, ApiResponses.buildResult(ApiClient.RECOMMEND, 429, bodyFive, mapOf("Retry-After" to "Wed, 21 Oct 2015 07:28:00 GMT")).retryAfterSeconds)
     assertNull(ApiResponses.buildResult(ApiClient.RECOMMEND, 429, """{"status":"RATE_LIMITED"}""", emptyMap()).retryAfterSeconds)
-    assertNull(ApiResponses.buildResult(ApiClient.RECOMMEND, 429, """{"retry_after_seconds":-3}""", emptyMap()).retryAfterSeconds)
+    // RT-7：負數保留俾 ApiClient.rateLimitWaitMs coerceIn(1,10)；唔再喺 parse 層丟棄。
+    assertEquals(-3L, ApiResponses.buildResult(ApiClient.RECOMMEND, 429, """{"retry_after_seconds":-3}""", emptyMap()).retryAfterSeconds)
   }
 
   @Test

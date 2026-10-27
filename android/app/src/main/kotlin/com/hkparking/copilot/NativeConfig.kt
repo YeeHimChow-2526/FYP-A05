@@ -77,6 +77,11 @@ object NativeConfig {
   const val API_RETRY_INTERVAL_MS = 1000L               // 兩次嘗試之間的間隔（共 2 段間隔）
   const val RATE_LIMIT_RETRY_DELAY_MS = 5000L           // HTTP 429（Cloud Armor 超限）且冇 Retry-After 時之等候時長；等候後只重試一次（429 唔計入上述分級重試、唔即時重試）
   const val RATE_LIMIT_MAX_WAIT_MS = 10000L             // 429 回應 Retry-After（秒）之等候上限；單次重試仍失敗 → GREY_BREATHING，同網絡失敗分支，等司機拍膠囊重試
+  const val RATE_LIMIT_RETRY_AFTER_MIN_S = 1L           // RT-7：Retry-After 秒數下限（coerceIn）；負數／0 夾到 1，避免 sleep 出錯
+  const val RATE_LIMIT_RETRY_AFTER_MAX_S = 10L          // RT-7：Retry-After 秒數上限（同 RATE_LIMIT_MAX_WAIT_MS／1000）；超大值（如 86400）夾到 10，唔同常規 3 次重試相乘超 UX
+  const val MAX_RESPONSE_BYTES = 256 * 1024             // RT-4：單次 HTTP 回應 body 硬上限（256 KiB）；超過即停讀並當 networkError，防 OOM／Captive Portal 無限串流
+  const val API_IO_POOL_CORE = 2                        // RT-3：hkp-api-io 核心線程數（daemon ThreadPoolExecutor）
+  const val API_IO_POOL_MAX = 6                         // RT-3：hkp-api-io 上限；滿載拒絕 → 該次請求 networkError，避免 newCachedThreadPool 黑洞堆積
   const val ON_SITE_GPS_ACCURACY_MAX_M = 100            // §4.4 現場即泊 GPS 水平精度上限；不可用或大於此值視作失敗
   // MVP：不設 outbox / DataStore / SQLite 通用離線同步；唯一本機保留項為今日行程待確認（網絡恢復自動送出；香港時間 00:00 清除）
   // 數據新鮮度：只讀伺服器回傳 data_age_seconds／is_stale／source_status；客戶端嚴禁以手機時鐘計算

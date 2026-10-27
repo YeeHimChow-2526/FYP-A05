@@ -139,6 +139,8 @@ interface ApiTransport {
 
 `src/main` 代碼只引用 `Bindings`，由建置類型決定編入邊一份；無執行期旗標。
 
+debug 版另有兩個**建置時**開關（預設 `false`，SC-018）：`HKP_USE_REAL_API=true` 改用真 `HttpApiTransport`（配合 `tools/stub_server`）；`HKP_USE_REAL_NAVIGATION=true` 改用 `IntentNavigationPort` 真開 Google Maps。仍然無執行期旗標。
+
 ## 5. 測試策略（W-A.18）
 
 **Android 模擬器可驗證（大部分流程）**：
