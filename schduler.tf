@@ -17,6 +17,7 @@ resource "google_cloud_scheduler_job" "sync_trigger" {
   schedule         = "0 0 * * *" # Daily at midnight
   time_zone        = "UTC"
   attempt_deadline = "320s"
+  paused           = true
 
   http_target {
     http_method = "POST"
