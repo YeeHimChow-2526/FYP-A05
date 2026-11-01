@@ -1,3 +1,4 @@
+// FROZEN Step2 — NOT SoT; behavior mirror for FBS compile only; do not edit; delete after Step3+ FBS removal
 package com.hkparking.copilot.trip
 
 import com.hkparking.copilot.NativeConfig
@@ -63,6 +64,7 @@ class ApiClientSyncApi(private val client: ApiClient) : SyncApi {
   }
 }
 
+@Deprecated("SoT is Dart lib/core/trip/today_trip_sync.dart")
 class TodayTripSync(
   private val store: TodayTripStore,
   private val api: SyncApi,

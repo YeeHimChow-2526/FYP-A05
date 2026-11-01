@@ -16,9 +16,11 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Ignore
 import org.junit.Test
 
 class Step34TodayTripStoreTest {
+  @Ignore("Step2 SoT -> Dart: test/core/trip/today_trip_store_test.dart")
   @Test
   fun step34_01_upsertCandidatePersistsAndListsDesc() {
     val prefs = MemoryPrefsPort()
@@ -35,6 +37,7 @@ class Step34TodayTripStoreTest {
     assertEquals("CANDIDATE", maps[0]["status"])
   }
 
+  @Ignore("Step2 SoT -> Dart: test/core/trip/today_trip_store_test.dart")
   @Test
   fun step34_02_purgeOnHktDateRollover() {
     val prefs = MemoryPrefsPort()
@@ -47,6 +50,7 @@ class Step34TodayTripStoreTest {
     assertEquals("[]", prefs.getString(NativeConfig.TODAY_TRIPS_JSON_KEY) ?: "[]")
   }
 
+  @Ignore("Step2 SoT -> Dart: test/core/trip/today_trip_store_test.dart")
   @Test
   fun step34_03_clearAllDropsPendingSync() {
     val prefs = MemoryPrefsPort()
@@ -164,6 +168,7 @@ class Step34TodayTripStoreTest {
     Bindings.detachService(h.service)
   }
 
+  @Ignore("Step2 SoT -> Dart: test/core/trip/today_trip_store_test.dart")
   @Test
   fun step34_11_submitReportRequiresConfirmed() {
     val prefs = MemoryPrefsPort()
@@ -178,6 +183,7 @@ class Step34TodayTripStoreTest {
     assertTrue(api.tripPosts.isEmpty())
   }
 
+  @Ignore("Step2 SoT -> Dart: test/core/trip/today_trip_store_test.dart")
   @Test
   fun step34_12_submitReportAfterConfirmPosts() {
     val prefs = MemoryPrefsPort()
@@ -195,6 +201,7 @@ class Step34TodayTripStoreTest {
     assertTrue(store.find("s1")!!.feedbackSubmitted)
   }
 
+  @Ignore("Step2 SoT -> Dart: test/core/trip/today_trip_store_test.dart")
   @Test
   fun step34_13_submitFlushesPendingBeforeReport() {
     val prefs = MemoryPrefsPort()
@@ -238,6 +245,7 @@ class Step34TodayTripStoreTest {
     assertNotNull(list[0]["feedbackSubmitted"])
   }
 
+  @Ignore("Step2 SoT -> Dart: test/core/trip/today_trip_store_test.dart")
   @Test
   fun step34_15_onTodayTripsChangedEmittedWhenMounted() {
     val emits = mutableListOf<String>()

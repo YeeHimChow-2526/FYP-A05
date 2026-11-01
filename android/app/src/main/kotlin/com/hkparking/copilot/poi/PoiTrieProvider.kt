@@ -1,9 +1,11 @@
+// FROZEN Step2 — NOT SoT; behavior mirror for FBS compile only; do not edit; delete after Step3+ FBS removal
 package com.hkparking.copilot.poi
 
 fun interface PoiTrieProvider {
   fun get(): LocalPoiTrie?
 }
 
+@Deprecated("SoT is Dart lib/core/poi/poi_trie_provider.dart")
 class AssetPoiTrieProvider(private val open: () -> String) : PoiTrieProvider {
   @Volatile private var cached: LocalPoiTrie? = null
   @Volatile private var failed = false

@@ -3,6 +3,8 @@
 > 2026-10-27：Step 3.5 接受 Gemini RT-1..7 全數落地（見 SPEC_CHANGES SC-018 修訂）；測試見 Step35RtFixesTest；唔 push。
 >
 > V2 Step 1：純邏輯已搬 Dart（NativeConfig mirror、ShareTextParser、ApiResponses、ApiEndpointPolicy、ApiClient＋dart:io HttpApiTransport、EngineShutdownDetector、ZhHkTemplates＋OFFLINE_STALE_NOTICE）。Kotlin 上列檔係凍結殼，FBS 仍編譯；Step 2 Sync 用 Dart ApiClient；Step 3 拆 FBS 後先刪殼。
+>
+> V2 Step 2：Dart TodayTripStore／TodayTripSync（食 Dart ApiClient）、LocalPoiTrie、Jyutping、STT typo。Kotlin trip／trie 凍結。AudioCoordinator deferred。
 
 最後更新：2026-10-25｜任務來源：`.ai/ARCHITECTURE.md` §19 PART 3 路線圖任務表（共 46 條任務項＝44 項工程任務，W-E.2 與 W-F.2 各拆 Part 1／Part 2）｜驗收細節以實作版 PART 3 為準。
 

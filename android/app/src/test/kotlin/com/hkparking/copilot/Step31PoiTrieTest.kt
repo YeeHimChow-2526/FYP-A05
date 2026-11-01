@@ -5,8 +5,10 @@ import com.hkparking.copilot.poi.LocalPoiTrie
 import com.hkparking.copilot.poi.TrieResult
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Ignore
 import org.junit.Test
 
+@Ignore("Step2 SoT -> Dart: test/core/poi/local_poi_trie_test.dart")
 class Step31PoiTrieTest {
   // ---------- real asset ----------
 

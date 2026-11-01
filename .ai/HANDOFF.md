@@ -57,3 +57,13 @@
 - Kotlin 殼凍結非 SoT（`ApiEndpointPolicy.kt`、`ApiClient.kt`、`HttpApiTransport`、`EngineShutdownDetector.kt`、`ApiResponses`、`ShareTextParser`、`ZhHkTemplates`、`NativeConfig.kt`）。FBS 仍編譯。Step 3 拆 FBS 後先刪殼。
 - `CallOutcome` 方案 A：`shouldTurnGrey`／`shouldTurnReady`。唔 import `TripStateMachine`。
 - Nav SDK spike 見獨立 Step 1a，唔喺本 PR。
+
+## V2 Step 2 裁定
+
+- `TodayTripSync` 只呼叫 Dart `ApiClient.syncDriverConfirmed`／`submitTripReport`。
+- Dart `LocalPoiTrie`／Jyutping／STT typo 係名 resolve SoT。FBS 暫時繼續食凍結 Kotlin trie。
+- 凍結殼：`TodayTripStore.kt`、`TodayTripSync.kt`、`LocalPoiTrie.kt`、`PoiTrieProvider.kt`。Step 3 拆 FBS 後先刪；刪殼時一齊刪 android `hk_poi_master.json` 副本。
+- AudioCoordinator／`audio_session` duck → Step 4–5；Step 2 未做。Nav／wake out of scope。
+- TodayTripScreen 維持 OverlayChannel→Kotlin store，Step 3+ 再切 Dart。
+- 懶音 const＝真機調校前預設。
+- Deferred typo seeds：得福廣場／德福廣塲、奧海城、MegaBox、新城市廣場、荃新天地、形點、單獨 `k11`。

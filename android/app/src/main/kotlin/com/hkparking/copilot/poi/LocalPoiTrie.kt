@@ -1,3 +1,4 @@
+// FROZEN Step2 — NOT SoT; behavior mirror for FBS compile only; do not edit; delete after Step3+ FBS removal
 package com.hkparking.copilot.poi
 
 import com.hkparking.copilot.net.MiniJson
@@ -22,6 +23,7 @@ sealed class TrieResult {
   object Miss : TrieResult()
 }
 
+@Deprecated("SoT is Dart lib/core/poi/local_poi_trie.dart")
 class LocalPoiTrie private constructor(
   private val root: Node,
   val size: Int,

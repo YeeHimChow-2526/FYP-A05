@@ -1,3 +1,4 @@
+// FROZEN Step2 — NOT SoT; behavior mirror for FBS compile only; do not edit; delete after Step3+ FBS removal
 package com.hkparking.copilot.trip
 
 import com.hkparking.copilot.NativeConfig
@@ -42,6 +43,7 @@ data class TodayTripRecord(
   val feedbackSubmitted: Boolean,
 )
 
+@Deprecated("SoT is Dart lib/core/trip/today_trip_store.dart")
 class TodayTripStore(
   private val prefs: PrefsPort,
   private val hktDateOf: (Long) -> String = Companion::defaultHktDateOf,
