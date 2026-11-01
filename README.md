@@ -30,7 +30,7 @@
 
 | 檔案 | 作用 | 邊個寫 |
 |---|---|---|
-| `.ai/ARCHITECTURE.md` | v2.9.1 AI 全局知識總綱（與 `docs/AI_GLOBAL_KNOWLEDGE_v291.md` 逐字相同） | 規格守護者（隨 Doc 升版更新） |
+| `.ai/ARCHITECTURE.md` | v2.9.1 AI 全局知識總綱（罕用參考；`docs/AI_GLOBAL_KNOWLEDGE_v291.md` 只係 stub） | 規格守護者（隨 Doc 升版更新） |
 | `.ai/HANDOFF.md` | Gemini 開場提示：角色分工、技術路線、模擬器 MVP 三部曲、Pi 派工鐵律 | Kenny（填實作版網址） |
 | `.ai/PROGRESS.md` | 全部 46 條路線圖任務項清單＋待真機驗證清單 | Pi 勾選並填 commit；Gemini 確認 |
 | `.ai/SPEC_CHANGES.md` | 需要改規格嘅發現（模板＋條目） | Gemini 為主；Kenny 代記真機結果 |

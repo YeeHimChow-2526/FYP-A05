@@ -15,12 +15,7 @@
 
 ## 產品哲學
 
-- 核心原則：**零多餘摩擦、行車安全優先、符合真實用車習慣、零閒置雲端成本、無帳號無痕追蹤**。
-- 司機只喺「上車點火出發」主動開啟；行車全程退居背景，**唔干擾** Google Maps 主導航（Maps 導航發聲照常，AudioFocus 被搶時暫停本 App 收音）。
-- **語音優先**：TTS 只口播首選（位置／空位／價錢）；畫面**唔自動彈卡**、唔設倒數；原生卡片只喺追問「詳細啲」／「有冇第二個」時出現；拍卡可選。
-- location 類型 FGS **只**喺司機明確互動後啟動；**Pre-FGS** 僅 Heads-up 通知——無膠囊、無 GREY／AMBER overlay；膠囊只於 Service 回報 `FGS_STARTED` 後出現。
-- **行程語音模式三選一**（互斥）：全語音（STT＋TTS）／播報＋手動（只 TTS）／純手動；由頁面 5 及每程開程靜默能力檢查判定；`minSdk 33` 只係安裝下限（詳見 `01` §5）。
-- 結合政府開放資料＋本機商場字典樹（Kotlin）；三段偏好 `INDOOR_ONLY`／`SMART_HYBRID`／`METERS_FOCUS`。
+零多餘摩擦、行車安全優先、符合真實用車習慣、零閒置雲端成本、無帳號無痕追蹤。司機只喺上車點火出發後主動開啟；行車退居背景，唔干擾 Google Maps。語音優先：只口播首選，唔自動彈卡、唔倒數；Pre-FGS 只有 Heads-up。行程語音模式三選一（見 `01` §5）。門檻見 `NativeConfig`／specs。三段偏好 `INDOOR_ONLY`／`SMART_HYBRID`／`METERS_FOCUS`。
 
 ## Spec 索引（細則）
 
@@ -34,48 +29,11 @@
 | [`docs/reference/android_manifest_notes.md`](docs/reference/android_manifest_notes.md) | Manifest **參考**文字（唔聲稱已喺專案落地） |
 | [`android/.../NativeConfig.kt`](android/app/src/main/kotlin/com/hkparking/copilot/NativeConfig.kt) | **行車常數單一事實源**；**MUST cite，no hardcode** |
 | [`lib/core/constants/app_config.dart`](lib/core/constants/app_config.dart) | Flutter App 畫面參數（教學頁數、今日行程清除時間） |
+| [`docs/reference/native_config_glossary.md`](docs/reference/native_config_glossary.md) | 常數命名／非顯然行為；數值仍以源碼為準 |
 
 ## 目錄地圖（目標 repo）
 
-```
-android/app/src/main/
-  AndroidManifest.xml                 # location|microphone；無 ACCESS_BACKGROUND_LOCATION
-  res/xml/shortcuts.xml               # Hey Google App Actions；destination 可選；現場講法
-  kotlin/com/hkparking/copilot/
-    FloatingBubbleService.kt          # 行程宿主：膠囊、FGS_STARTED／MIC_READY 回報、AudioRecord／熱詞
-    FgsBootstrapActivity.kt           # 通知／冷啟動透明跳板；等候 FGS_STARTED 先 finish()（上限 2000ms）
-    ShareIntentReceiverActivity.kt    # B-2 Maps 分享
-    MapsNotificationListener.kt       # 模式 A 導航通知（Pre-FGS Heads-up）
-    DistanceTracker.kt                # 軟件距離；非 Geofencing；APPROACH_MUTED 判定
-    EngineShutdownReceiver.kt         # 藍牙／車充；先完成到場判定再 0.5s 停止 FGS
-    TripStateMachine.kt               # ★ 膠囊／語音狀態機唯一擁有者
-    FloatingCardView.kt               # 原生追問卡（一次一張；全卡盲撳）
-    voice/SttService.kt · voice/TtsService.kt · voice/AudioPriorityManager.kt
-    voice/VoiceCapabilityChecker.kt   # 離線粵語 STT／TTS 能力檢查 → 行程語音模式
-    voice/CommandCodes.kt             # 內部指令碼＋語言模板（本版只填 zh-HK）
-    net/ApiClient.kt                  # 3×2.5s + 2×1s；GREY_BREATHING
-    poi/LocalPoiTrie.kt               # 本機字典樹由文字查出坐標 <150ms
-    trip/TodayTripStore.kt            # 今日行程候選／待確認（SharedPreferences；HKT 00:00 清除）
-    NativeConfig.kt                   # ★ 行車常數單一事實源
-android/app/src/debug/                # 只限 debug 建置（Android 只將 src/debug 編入 debug 建置）
-  kotlin/com/hkparking/copilot/
-    sim/                              # 模擬殼：虛擬搖桿、SimEventReceiver（注入事件）、SimVoiceInput／SimLocationSource／FixtureApiTransport
-    di/Bindings.kt                    # object Bindings：綁 sim 實作（與 release 版 API 相同）
-  assets/mock/*.json                  # fixtures（AssetManager 路徑 mock/<name>.json）
-android/app/src/release/
-  kotlin/com/hkparking/copilot/
-    di/Bindings.kt                    # object Bindings：綁 SttVoiceInput／FusedLocationSource／HttpApiTransport
-assets/hk_poi_master.json
-lib/
-  main.dart                           # App 入口 — 保持乾淨
-  core/constants/app_config.dart      # App 畫面參數
-  core/constants/app_colors.dart
-  core/preferences/preference_manager.dart
-  core/platform/overlay_channel.dart  # com.hkparking.copilot/overlay（只讀原生狀態、發 App 內指令）
-  features/onboarding/                # 6 頁教學 + 權限橫額
-  features/ignition/                  # 出發／起步頁／現場即泊入口＋設定
-  features/trip_history/              # 今日行程（讀原生 TodayTripStore；一撳確認；3 格反饋）
-```
+★ `TripStateMachine.kt`（狀態機唯一擁有者）、`FloatingBubbleService.kt`（行程宿主）、`NativeConfig.kt`（行車常數）、`FloatingCardView.kt`、`net/ApiClient.kt`、`poi/LocalPoiTrie.kt`、`trip/TodayTripStore.kt`。其餘元件、debug `sim/`、Flutter 畫面見 [`docs/specs/02_native_bridge_and_fgs.md`](docs/specs/02_native_bridge_and_fgs.md)。
 
 ## CRITICAL NEVER
 
@@ -132,25 +90,13 @@ lib/
 2. Miss → 即 `startForeground(location)`＋`AMBER_STEADY`＋收到 `FGS_STARTED` 後 `finish()` 回 Maps；短網址／Geocoding 喺 **FGS 作用域**由原生 `ApiClient.kt` 跑。  
 3. 沿用重試：**網絡失敗** → `GREY_BREATHING`＋口播一次「網絡唔順，遲啲再試」；司機拍膠囊重試。**可連線但無法解析／含糊** → `ALERT_BREATHING`＋「去邊度？請拍一拍膠囊答我」；B-2 **維持只開 location**。
 
-## 測試策略（摘要，詳見 `04`）
+## 測試策略（摘要）
 
-- **模擬器**：GPX 路線回放（車速、距離、GPS 斷訊）、斷網、宿主機麥克風直通（粵語收音）、TTS、Maps 分享 Intent、`adb emu power ac off`（車充斷電）；配合原生 `sim/` 殼重播場景。
-- **只限真機**：車載藍牙 ACL 斷開、OEM 背景殺程（Xiaomi／Samsung）、市區高樓 GPS 漂移、B-1 路徑 1A Hey Google（實驗性能力）、單一 AudioRecord → 裝置端 STT（Phase A 指定組合）、防自我辨識、實際記憶體上限。
-- **完整測試清單**：`docs/testing/01_test_plan.md`（Phase A 通過只代表該指定組合可行，並不代表所有 Android 13+ 手機都可用）。
-- **記憶體**：指定測試機 `adb shell dumpsys meminfo <package>` 量度行程中 PSS（FGS＋膠囊＋原生卡片），上限按實測寫入驗收門檻。
-- **延遲**：FGS 啟動延遲與粵語 STT 延遲真機實測；本機字典樹由文字查出坐標 <150ms 為預設門檻。
+模擬器＋`sim/` 鎖行為；藍牙斷開、OEM 殺程、GPS 漂移、B-1 1A、單一 AudioRecord→STT 只限真機。完整清單見 `docs/testing/01_test_plan.md` 同 `04`。PSS／延遲按真機實測寫門檻，唔寫死延遲數字。
 
 ## 客戶端路線圖
 
-| Stage | 範圍 |
-|-------|------|
-| **1 原生核心** | `NativeConfig.kt`、`LocalPoiTrie.kt`、`ApiClient.kt`（重試）、`session_id`、`TodayTripStore.kt` 單元測試 |
-| **2 FGS＋握手** | `FgsBootstrapActivity`／`ShareIntentReceiverActivity` ↔ `FloatingBubbleService`：`FGS_STARTED`、`MIC_READY`（失敗只停用語音輸入、TTS 照常）、語音能力靜默重查並行（W-A.16） |
-| **3 狀態機＋膠囊** | `TripStateMachine.kt`、膠囊燈號、`FloatingCardView.kt` 追問出卡、到場雙態（W-A.1／W-A.17） |
-| **4 行車感知＋語音** | `DistanceTracker.kt`、MapsListener（中英雙語過濾）、熄匙、AudioRecord／熱詞／AudioFocus、語音能力檢查與行程語音模式、STT 閘門、指令碼（W-A.2/4/9/13/14/19/20/21） |
-| **5 Flutter 畫面** | 6 頁教學、權限橫額、設定、今日行程（讀原生紀錄、一撳確認、3 格反饋；W-A.11） |
-
-每個 Stage 先喺模擬器＋`sim/` 殼鎖死行為，再按真機清單驗收（W-A.18）。
+歷史 Stage 1–5（原生核心 → FGS 握手 → 狀態機 → 行車感知／語音 → Flutter 畫面）已收斂；細節見 specs 與 W-A 錨點。V2 見評估方 V2 計劃。
 
 ## 六種起步＋現場即泊（速查）
 
@@ -164,7 +110,7 @@ lib/
 | B-3 | App 起步頁確認出發 |
 | 現場即泊 | 開 App＋當前定位即時 JIT（與「出發」同級權限檢查） |
 
-麥克風（全語音模式）：權限齊＋未關本程熱詞 → 多入口 `location\|microphone`；關熱詞則 B-1／A-2／B-3／現場即泊只 `location`。A-1／A-3 一律帶 mic。播報＋手動／純手動模式一律只 `location`。
+麥克風類型同熱詞開關見 [`docs/specs/02_native_bridge_and_fgs.md`](docs/specs/02_native_bridge_and_fgs.md)。
 
 ## W-A 任務錨點（客戶端）
 
