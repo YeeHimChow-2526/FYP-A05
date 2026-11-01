@@ -88,7 +88,7 @@ class FgsBootstrapActivity : android.app.Activity {
       finish()
       return
     }
-    com.hkparking.copilot.bridge.TripPlatformEvents.enqueue("onHotwordStart", mapOf("entry" to entry.name))
+    com.hkparking.copilot.bridge.TripPlatformEvents.emit("onHotwordStart", mapOf("entry" to entry.name))
     startActivity(android.content.Intent(this, MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
     isFinished = true
     finish()

@@ -97,3 +97,4 @@
 - Kotlin `StartupPermissionChecker` 仍要求懸浮窗；Dart「出發」閘門唔再當 `SYSTEM_ALERT_WINDOW` 為必要項（Step 4 先改 checker）。
 - 橋模式 sim 只轉發 `ENGINE_SHUTDOWN`、`NETWORK_FAIL`、`NETWORK_OK`；其他 sim 事件只限 legacy。
 - `onOemKilled` 冇行程唔 teardown。橋 `onDestroy` 自己 `stopForeground`。
+- 橋模式暫時唔會 emit `onPermissionRevoked`／`onOemKilled` 去 Dart，Step 4 處理。

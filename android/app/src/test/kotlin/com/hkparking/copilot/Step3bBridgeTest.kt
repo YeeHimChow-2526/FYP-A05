@@ -22,6 +22,7 @@ class Step3bBridgeTest {
   @After
   fun tearDown() {
     TripPlatformEvents.sink = null
+    TripPlatformBridge.stopOrphan = { com.hkparking.copilot.bridge.DartBridgeRuntime.active?.stopTripFgs("BOOTSTRAP_TIMEOUT") }
     TripPlatformBridge.resetForTest()
   }
 
@@ -171,6 +172,54 @@ class Step3bBridgeTest {
     assertEquals("MISSING_PERMISSION", denied.error)
     val missing = denied.details as Map<*, *>
     assertFalse((missing["missingItems"] as List<*>).contains(StartupPermissionChecker.OVERLAY))
+  }
+
+  @Test
+  fun warmEngineEmitsImmediately() {
+    val sink = RecordingSink()
+    sink.channelMounted = true
+    TripPlatformEvents.sink = sink
+    TripPlatformEvents.emit("onHotwordStart", mapOf("entry" to "A_1"))
+    assertEquals(listOf("onHotwordStart"), sink.events.map { it.first })
+  }
+
+  @Test
+  fun coldEngineFlushesInOrderAfterReady() {
+    val sink = RecordingSink()
+    sink.channelMounted = false
+    TripPlatformEvents.sink = sink
+    TripPlatformEvents.emit("onHotwordStart", mapOf("entry" to "A_1"))
+    TripPlatformEvents.emit("onShareIntake", mapOf("hasUrl" to true))
+    assertTrue(sink.events.isEmpty())
+    sink.channelMounted = true
+    TripPlatformEvents.flush()
+    assertEquals(listOf("onHotwordStart", "onShareIntake"), sink.events.map { it.first })
+  }
+
+  @Test
+  fun lateReadyAfterTimeoutStopsOrphanFgs() {
+    var stopped = 0
+    TripPlatformBridge.stopOrphan = { stopped += 1 }
+    TripPlatformBridge.postDelayed = { _, block ->
+      block()
+      ({ })
+    }
+    val result = RecResult()
+    TripPlatformBridge.beginStartForTest("A_2", result)
+    assertEquals(false, result.value)
+    TripPlatformBridge.notifyForegroundReady(true)
+    assertEquals(1, stopped)
+  }
+
+  @Test
+  fun secondStartWhilePendingReturnsFgsPending() {
+    TripPlatformBridge.postDelayed = { _, _ -> ({ }) }
+    val first = RecResult()
+    val second = RecResult()
+    TripPlatformBridge.beginStartForTest("A_2", first)
+    TripPlatformBridge.beginStartForTest("A_2", second)
+    assertEquals(0, first.completed)
+    assertEquals("FGS_PENDING", second.error)
   }
 
   private fun service(): FloatingBubbleService = FloatingBubbleService(VoiceCapabilityChecker(BridgeReadyProbe()))

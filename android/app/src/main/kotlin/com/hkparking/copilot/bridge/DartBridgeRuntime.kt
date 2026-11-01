@@ -209,12 +209,7 @@ class DartBridgeRuntime(private val service: FloatingBubbleService) {
     Bindings.locationSource.setFixListener(null)
     Bindings.locationSource.setTickListener(null)
     Bindings.onBridgeStopped()
-    val receiver = engineReceiver
-    if (engineRegistered && receiver != null) {
-      val ctx = runCatching { service.applicationContext }.getOrNull() ?: service
-      runCatching { EngineShutdownReceiver.registrar.unregister(ctx, receiver) }
-    }
-    engineRegistered = false
+    unregisterEngine()
   }
 
   private fun prefs(): android.content.SharedPreferences? {

@@ -56,7 +56,7 @@ class ShareIntentReceiverActivity : android.app.Activity {
       finish()
       return
     }
-    com.hkparking.copilot.bridge.TripPlatformEvents.enqueue(
+    com.hkparking.copilot.bridge.TripPlatformEvents.emit(
       "onShareIntake",
       mapOf("title" to parsed.title, "lat" to parsed.lat, "lng" to parsed.lng, "hasUrl" to parsed.hasUrl),
     )

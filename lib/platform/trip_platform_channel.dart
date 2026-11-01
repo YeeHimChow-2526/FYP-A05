@@ -18,13 +18,14 @@ class ChannelTripPlatform implements TripPlatform {
   void bind(TripController controller) {
     _controller = controller;
     channel.setMethodCallHandler(_handle);
+    channel.invokeMethod<void>('ready');
   }
 
-  @override
   Future<void> checkStartGate() {
     return channel.invokeMethod<void>('checkStartGate');
   }
 
+  @override
   Future<bool> startForeground(StartupEntry entry) async {
     final ok = await channel.invokeMethod<bool>('startTripFgs', {'entry': entry.wireName});
     return ok == true;

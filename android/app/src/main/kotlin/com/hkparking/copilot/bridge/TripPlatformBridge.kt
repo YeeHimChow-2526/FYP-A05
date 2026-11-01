@@ -72,6 +72,7 @@ object TripPlatformBridge {
   private var appContext: android.content.Context? = null
   private var bound = false
   private var pendingResult: MethodChannel.Result? = null
+  private var startTimedOut = false
   private var cancelTimeout: (() -> Unit)? = null
   private val fixtureExecutor = Executors.newSingleThreadExecutor { runnable ->
     Thread(runnable, "fixture-post").apply { isDaemon = true }
@@ -113,9 +114,9 @@ object TripPlatformBridge {
         channel.invokeMethod(method, args)
       }
     }
+    sink.channelMounted = false
     TripPlatformEvents.sink = sink
     channel.setMethodCallHandler { call, result -> dispatch(call.method, call.arguments, result) }
-    TripPlatformEvents.flush()
   }
 
   internal fun bindOnce(install: () -> Unit) {
@@ -126,7 +127,17 @@ object TripPlatformBridge {
 
   fun isBound(): Boolean = bound
 
+  internal var stopOrphan: () -> Unit = { DartBridgeRuntime.active?.stopTripFgs("BOOTSTRAP_TIMEOUT") }
+
   fun notifyForegroundReady(ok: Boolean) {
+    if (pendingResult == null) {
+      if (ok && startTimedOut) {
+        startTimedOut = false
+        stopOrphan()
+      }
+      return
+    }
+    startTimedOut = false
     completeStart(ok)
   }
 
@@ -144,6 +155,7 @@ object TripPlatformBridge {
   internal fun resetForTest() {
     bound = false
     pendingResult = null
+    startTimedOut = false
     cancelTimeout?.invoke()
     cancelTimeout = null
     appContext = null
@@ -156,6 +168,11 @@ object TripPlatformBridge {
     }
     when (method) {
       "startTripFgs" -> beginStart(args["entry"] as? String ?: "A_2", result)
+      "ready" -> {
+        TripPlatformEvents.sink?.channelMounted = true
+        TripPlatformEvents.flush()
+        result.success(null)
+      }
       "checkStartGate" -> checkStartGate(result)
       "fixturePost" -> fixturePost(args["path"] as? String ?: "", args["body"] as? String ?: "", result)
       else -> {
@@ -190,6 +207,7 @@ object TripPlatformBridge {
     pendingResult = null
     cancelTimeout?.invoke()
     cancelTimeout = null
+    if (!ok) startTimedOut = true
     result.success(ok)
   }
 

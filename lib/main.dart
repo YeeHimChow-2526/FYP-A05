@@ -7,12 +7,41 @@ import 'package:flutter/material.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   OverlayChannel.attach();
-  await TripRuntime.instance.attach();
-  runApp(const CopilotApp());
+  Object? attachError;
+  try {
+    await TripRuntime.instance.attach();
+  } catch (error) {
+    attachError = error;
+  }
+  runApp(CopilotApp(attachError: attachError));
 }
 
-class CopilotApp extends StatelessWidget {
-  const CopilotApp({super.key});
+class CopilotApp extends StatefulWidget {
+  const CopilotApp({super.key, this.attachError});
+
+  final Object? attachError;
+
+  @override
+  State<CopilotApp> createState() => _CopilotAppState();
+}
+
+class _CopilotAppState extends State<CopilotApp> {
+  Object? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _error = widget.attachError;
+  }
+
+  Future<void> _retry() async {
+    try {
+      await TripRuntime.instance.attach();
+      if (mounted) setState(() => _error = null);
+    } catch (error) {
+      if (mounted) setState(() => _error = error);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -28,7 +57,23 @@ class CopilotApp extends StatelessWidget {
           onSurface: AppColors.textPrimary,
         ),
       ),
-      home: const IgnitionScreen(),
+      home: _error == null
+          ? const IgnitionScreen()
+          : Scaffold(
+              backgroundColor: AppColors.surface,
+              body: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('未能連接行程', style: TextStyle(color: AppColors.textPrimary, fontSize: 20)),
+                    const SizedBox(height: 12),
+                    Text('$_error', style: TextStyle(color: AppColors.textSecondary)),
+                    const SizedBox(height: 16),
+                    FilledButton(onPressed: _retry, child: const Text('重試')),
+                  ],
+                ),
+              ),
+            ),
     );
   }
 }
