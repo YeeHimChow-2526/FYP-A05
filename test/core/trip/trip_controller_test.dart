@@ -236,25 +236,60 @@ void main() {
     expect(controller.state, isNot(TripState.greyBreathing));
   });
 
-  test('C6 commit success navigates and stops feeding distance', () async {
+  test('C6 nav to gate keeps tracker updates but skips destination distance', () async {
     final transport = HoldTransport()..next = ok([card('CP', '朗豪坊')]);
     final platform = FakePlatform();
     final controller = await boot(transport, platform, ScriptDelay());
     controller.lockDestinationAt('朗豪坊', destLat, destLng);
-    controller.onFix(LocFix(lat: destLat + delta1000 * 0.4, lng: destLng, accuracyM: 10, speedKmh: 10, timestampMs: 1000));
-    await Future<void>.delayed(Duration.zero);
+    await controller.requestRecommendation();
     await controller.confirmCandidate(0);
     expect(controller.state, TripState.navToGate);
     expect(platform.nav, ['朗豪坊']);
-    final distanceBefore = controller.tracker.lastDistanceM;
-    final commits = transport.calls.where((path) => path == ApiClient.COMMIT).length;
-    for (var i = 0; i < 4; i++) {
-      controller.onFix(LocFix(lat: destLat + delta1000 * 0.07, lng: destLng, accuracyM: 10, speedKmh: 5, timestampMs: 3000 + i * 1000));
-    }
-    await controller.confirmCandidate(0);
-    expect(transport.calls.where((path) => path == ApiClient.COMMIT).length, commits);
-    expect(controller.tracker.lastDistanceM, distanceBefore);
+    expect(controller.tsm.jitTriggered, isFalse);
+    final recommends = transport.calls.where((path) => path == ApiClient.RECOMMEND).length;
+    controller.onFix(LocFix(lat: destLat + delta1000 * 0.9, lng: destLng, accuracyM: 10, speedKmh: 20, timestampMs: 1000));
+    final firstDistance = controller.tracker.lastDistanceM;
+    expect(firstDistance, isNotNull);
+    controller.onFix(LocFix(lat: destLat + delta1000 * 0.1, lng: destLng, accuracyM: 10, speedKmh: 20, timestampMs: 2000));
+    expect(controller.tracker.lastDistanceM, isNot(firstDistance));
+    expect(controller.tsm.jitTriggered, isFalse);
+    expect(transport.calls.where((path) => path == ApiClient.RECOMMEND).length, recommends);
     expect(controller.state, TripState.navToGate);
+  });
+
+  test('commit within 150m then shutdown parks and releases', () async {
+    final delay = ScriptDelay();
+    final transport = HoldTransport()..next = ok([card('CP', '朗豪坊')]);
+    final controller = await boot(transport, FakePlatform(), delay);
+    controller.lockDestinationAt('朗豪坊', destLat, destLng);
+    await controller.requestRecommendation();
+    await controller.confirmCandidate(0);
+    expect(controller.state, TripState.navToGate);
+    controller.onFix(LocFix(lat: destLat + delta1000 * 0.1, lng: destLng, accuracyM: 10, speedKmh: 1, timestampMs: 1000));
+    expect(controller.tracker.lastDistanceM, lessThanOrEqualTo(NativeConfig.APPROACH_RADIUS_M));
+    expect(controller.state, TripState.navToGate);
+    final pending = controller.onEngineSignal(EngineSignal.power, disconnected: true);
+    await Future<void>.delayed(Duration.zero);
+    delay.finishNext();
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.store.find('sess_test'), isNotNull);
+    expect(transport.calls, contains(ApiClient.RELEASE));
+    delay.finishNext();
+    expect(await pending, 'PARKED');
+  });
+
+  test('nav to gate can enter approach muted', () async {
+    final transport = HoldTransport()..next = ok([card('CP', '朗豪坊')]);
+    final controller = await boot(transport, FakePlatform(), ScriptDelay());
+    controller.lockDestinationAt('朗豪坊', destLat, destLng);
+    await controller.requestRecommendation();
+    await controller.confirmCandidate(0);
+    expect(controller.state, TripState.navToGate);
+    for (var i = 0; i < 4; i++) {
+      controller.onFix(LocFix(lat: destLat + delta1000 * 0.07, lng: destLng, accuracyM: 10, speedKmh: 5, timestampMs: i * 1000));
+    }
+    expect(controller.state, TripState.approachMuted);
+    expect(controller.tracker.approachMuted, isTrue);
   });
 
   test('C7 full carpark then no more options', () async {
@@ -297,6 +332,7 @@ void main() {
     final platform = FakePlatform();
     final controller = await boot(transport, platform, ScriptDelay());
     controller.tsm.applyVoiceCapability(speakingMode, true);
+    expect(controller.tsm.tripVoiceMode, TripVoiceMode.announceManual);
     controller.lockDestinationAt('甲', destLat, destLng);
     final pending = controller.requestRecommendation();
     await Future<void>.delayed(Duration.zero);
@@ -420,6 +456,29 @@ void main() {
     final before = transport.calls.length;
     await controller.requestRecommendation();
     expect(transport.calls.length, greaterThan(before));
+  });
+
+  test('C16 requestRecommendation in grey is single flight', () async {
+    final transport = HoldTransport()..next = const HttpResult(statusCode: 0, networkError: true, timedOut: true);
+    final controller = await boot(transport, FakePlatform(), ScriptDelay());
+    controller.lockDestinationAt('場', destLat, destLng);
+    controller.onFix(LocFix(lat: destLat + delta1000 * 0.4, lng: destLng, accuracyM: 10, speedKmh: 10, timestampMs: 1000));
+    await Future<void>.delayed(const Duration(milliseconds: 1));
+    expect(controller.state, TripState.greyBreathing);
+    transport.next = null;
+    final before = transport.calls.length;
+    final first = controller.requestRecommendation();
+    final second = controller.requestRecommendation();
+    await Future<void>.delayed(Duration.zero);
+    expect(transport.calls.length, before + 1);
+    const failed = HttpResult(statusCode: 0, networkError: true);
+    transport.next = failed;
+    while (transport.waiting.isNotEmpty) {
+      transport.waiting.removeAt(0).complete(failed);
+      await Future<void>.delayed(Duration.zero);
+    }
+    await first;
+    await second;
   });
 
   test('C17 share intake branches', () async {

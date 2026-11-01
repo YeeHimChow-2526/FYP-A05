@@ -67,7 +67,6 @@ class TripController {
   final List<RecommendationCard> cards = [];
   final Set<String> fullCarparkIds = {};
   final StreamController<TripSnapshot> _changes = StreamController<TripSnapshot>.broadcast();
-  final List<Timer> _timers = [];
 
   int destinationEpoch = 0;
   int _lifecycleToken = 0;
@@ -142,16 +141,19 @@ class TripController {
   }
 
   void onFix(LocFix fix) {
-    if (!tsm.fgsRunning || shutdownInProgress || tsm.state == TripState.navToGate) return;
+    if (!tsm.fgsRunning || shutdownInProgress) return;
     tracker.onFix(fix);
   }
 
   void onTick(int nowMs) {
-    if (!tsm.fgsRunning || shutdownInProgress || tsm.state == TripState.navToGate) return;
+    if (!tsm.fgsRunning || shutdownInProgress) return;
     tracker.onTick(nowMs);
   }
 
-  Future<void> requestRecommendation() => _recommend(QueryTriggerMode.driverActive, driverAsked: true);
+  Future<void> requestRecommendation() {
+    if (tsm.state == TripState.greyBreathing) return retryFromGrey();
+    return _recommend(QueryTriggerMode.driverActive, driverAsked: true);
+  }
 
   Future<void> retryFromGrey() async {
     if (_greyRetryInFlight || shutdownInProgress) return;
@@ -280,21 +282,19 @@ class TripController {
 
   void onOemKilled() {
     tsm.onOemKilled();
+    if (_disposed) return;
+    _finishTeardown('ABANDONED_OEM_KILL');
   }
 
   void dispose() {
     if (_disposed) return;
     _disposed = true;
     _lifecycleToken += 1;
-    for (final timer in _timers) {
-      timer.cancel();
-    }
-    _timers.clear();
     if (!_changes.isClosed) _changes.close();
   }
 
   void _onSample(DistanceSample sample) {
-    if (!tsm.fgsRunning || shutdownInProgress || tsm.state == TripState.navToGate) return;
+    if (!tsm.fgsRunning || shutdownInProgress) return;
     final wasJitTriggered = tsm.jitTriggered;
     tsm.onApproachSample(
       distanceM: sample.distanceM,

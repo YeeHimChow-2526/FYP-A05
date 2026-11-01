@@ -359,7 +359,6 @@ class TripStateMachine {
     if (!_inTrip()) return;
     _enter(TripState.ended);
     _assignCapsuleLight(CapsuleLight.none);
-    _onTripEnded('ABANDONED_OEM_KILL');
     clearSession();
   }
 
