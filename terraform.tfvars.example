@@ -1,0 +1,6 @@
+project_id              = "YOUR_GCP_PROJECT_ID"
+region                  = "asia-east2"
+backend_image           = "asia-east2-docker.pkg.dev/YOUR_GCP_PROJECT_ID/hkparking/server:2.9.1"
+api_domain              = "api.YOUR_DOMAIN"
+state_snapshot_bucket_name = "YOUR_GLOBALLY_UNIQUE_LOWERCASE_BUCKET_NAME"
+cloud_armor_rate_limit_per_ip_per_minute = 60

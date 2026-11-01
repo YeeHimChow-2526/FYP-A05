@@ -1,6 +1,9 @@
 # apis.tf
 resource "google_project_service" "required_apis" {
   for_each = toset([
+    "serviceusage.googleapis.com",
+    "cloudresourcemanager.googleapis.com",
+    "iam.googleapis.com",
     "run.googleapis.com",
     "firestore.googleapis.com",
     "firebaserules.googleapis.com",

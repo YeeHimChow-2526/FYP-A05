@@ -4,6 +4,8 @@
 resource "google_service_account" "app_sa" {
   account_id   = "serverless-app-sa"
   display_name = "Service Account for Serverless RAG App"
+
+  depends_on = [google_project_service.required_apis]
 }
 
 resource "google_project_iam_member" "firestore_user" {
@@ -60,6 +62,8 @@ resource "google_storage_bucket" "state_snapshots" {
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
   force_destroy               = false
+
+  depends_on = [google_project_service.required_apis]
 }
 
 resource "google_storage_bucket_iam_member" "snapshot_reader" {
@@ -68,34 +72,7 @@ resource "google_storage_bucket_iam_member" "snapshot_reader" {
   member = "serviceAccount:${google_service_account.app_sa.email}"
 }
 
-# 1. Frontend Service
-resource "google_cloud_run_v2_service" "frontend" {
-  name     = "frontend-service"
-  location = var.region
-  ingress  = "INGRESS_TRAFFIC_ALL"
-
-  template {
-    containers {
-      image = "us-docker.pkg.dev/cloudrun/container/hello" # Replace with your Frontend image URL
-      resources {
-        limits = {
-          cpu    = "1"
-          memory = "512Mi"
-        }
-      }
-    }
-  }
-}
-
-# Make Frontend publicly accessible
-resource "google_cloud_run_v2_service_iam_member" "frontend_public" {
-  name     = google_cloud_run_v2_service.frontend.name
-  location = var.region
-  role     = "roles/run.invoker"
-  member   = "allUsers"
-}
-
-# 2. Backend Logic & AI Agent Service
+# Backend API Service
 resource "google_cloud_run_v2_service" "backend" {
   name     = "backend-ai-service"
   location = var.region
@@ -148,6 +125,7 @@ resource "google_cloud_run_v2_service" "backend" {
   }
 
   depends_on = [
+    google_project_service.required_apis,
     google_project_iam_member.firestore_user,
     google_storage_bucket_iam_member.snapshot_reader,
     google_secret_manager_secret_iam_member.api_key_accessor,
@@ -161,24 +139,4 @@ resource "google_cloud_run_v2_service_iam_member" "backend_load_balancer_invoker
   location = var.region
   role     = "roles/run.invoker"
   member   = "allUsers"
-}
-
-# 3. Auto-Sync Program (Syncs Open Data API to Firestore)
-resource "google_cloud_run_v2_service" "sync_job" {
-  name     = "open-data-sync-service"
-  location = var.region
-  ingress  = "INGRESS_TRAFFIC_INTERNAL_ONLY"
-
-  template {
-    service_account = google_service_account.app_sa.email
-    containers {
-      image = "us-docker.pkg.dev/cloudrun/container/hello" # Replace with your Sync script image URL
-      resources {
-        limits = {
-          cpu    = "1"
-          memory = "512Mi"
-        }
-      }
-    }
-  }
 }

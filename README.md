@@ -64,51 +64,136 @@ transaction then checks active Firestore locks and writes the session lock.
 
 ## Cloud deployment
 
-Terraform provisions the API Cloud Run service, Firestore, a private GCS
-snapshot bucket, Secret Manager secrets, and an external HTTPS load balancer
-with Cloud Armor IP throttling. Set `project_id`, `backend_image`, `api_domain`,
-and `state_snapshot_bucket_name` in a local tfvars file. Point `api_domain` at
-the IP in the Terraform output before expecting the managed TLS certificate to
-become active.
-The backend permits unauthenticated invocation at IAM only because the
-Cloud Run ingress setting rejects traffic that does not arrive through the
-load balancer; the internal header key is not treated as the security boundary.
+The Terraform configuration enables required Google APIs and provisions
+Firestore, a private GCS snapshot bucket, Secret Manager secrets, Artifact
+Registry, the backend Cloud Run service, and an external HTTPS load balancer
+with Cloud Armor IP throttling. It does not create placeholder frontend or
+data-ingestion services.
 
-Secret values are intentionally not managed by Terraform state. First create
-the Secret Manager secrets and Artifact Registry repository:
+### 1. Prepare the GCP project
+
+The GCP project must already exist and have active billing. Install Terraform,
+`gcloud`, and (for Firestore rules) Firebase CLI. Sign in as a user who can
+enable APIs and create IAM bindings/resources. If your access is limited, ask
+your project administrator to grant the required roles or run the deployment
+with you; do not download or share a service-account key.
+
+```sh
+gcloud auth login
+gcloud auth application-default login
+gcloud config set project YOUR_GCP_PROJECT_ID
+gcloud auth application-default set-quota-project YOUR_GCP_PROJECT_ID
+gcloud billing projects describe YOUR_GCP_PROJECT_ID
+```
+
+Confirm billing is enabled. The deployer needs permission to enable project
+services, create service accounts and IAM bindings, and administer Cloud Run,
+Firestore, Cloud Storage, Secret Manager, Artifact Registry, Cloud Build, and
+Compute/Cloud Armor resources. A project Owner can bootstrap the stack; an
+administrator can instead grant narrower roles according to organization
+policy.
+
+### 2. Configure Terraform and create the foundation
+
+Copy [`terraform.tfvars.example`](./terraform.tfvars.example) to
+`terraform.tfvars` and replace the project ID, domain, and bucket name. Bucket
+names are globally unique, lowercase, and cannot be changed after creation.
+Use a DNS domain that you own; the HTTPS certificate will not become active
+until its DNS A record points to the load balancer IP.
+
+```sh
+cp terraform.tfvars.example terraform.tfvars
+# Edit terraform.tfvars with your project, DNS name, and unique bucket name.
+terraform init
+terraform plan
+```
+
+Terraform's first run must create the Secret Manager containers and Artifact
+Registry before secret versions and the API image exist. Apply foundation
+resources first:
 
 ```sh
 terraform apply \
+  -target=google_project_service.required_apis \
+  -target=google_firestore_database.database \
+  -target=google_storage_bucket.state_snapshots \
   -target=google_secret_manager_secret.internal_api_key \
   -target=google_secret_manager_secret.crowd_ip_hash_secret \
   -target=google_artifact_registry_repository.api
 ```
 
-Build and push the image to the Artifact Registry repository reported by
-`terraform output api_image_repository`, set `backend_image` to that full image
-URI in the local tfvars file, and add secret versions through Secret Manager
-out-of-band. The two secrets are `hkparking-internal-api-key` and
-`hkparking-crowd-ip-hash-secret`; do not commit their values. Then run a normal
-`terraform apply`.
+### 3. Add secrets and build the API image
+
+Secret values are deliberately not stored in Terraform or the repository.
+Create them locally with restrictive file permissions, then upload them to
+Secret Manager without printing the values:
+
+```sh
+umask 077
+mkdir -p "$HOME/.config/hkparking"
+openssl rand -hex 32 > "$HOME/.config/hkparking/internal-api-key"
+openssl rand -hex 32 > "$HOME/.config/hkparking/crowd-ip-hash-secret"
+
+gcloud secrets versions add hkparking-internal-api-key \
+  --data-file="$HOME/.config/hkparking/internal-api-key"
+gcloud secrets versions add hkparking-crowd-ip-hash-secret \
+  --data-file="$HOME/.config/hkparking/crowd-ip-hash-secret"
+```
+
+The API key is also needed by the app client. Transfer it through your private
+development workflow; it is only a basic client identifier, not a security
+boundary. Do not commit the key or either local secret file.
+
+Build and push the image, then set `backend_image` in `terraform.tfvars` to the
+same image URI:
 
 ```sh
 gcloud builds submit server \
-  --tag "${REGION}-docker.pkg.dev/${PROJECT_ID}/hkparking/server:2.9.1"
+  --tag "asia-east2-docker.pkg.dev/YOUR_GCP_PROJECT_ID/hkparking/server:2.9.1"
 ```
 
-The HTTPS load balancer injects
+### 4. Deploy and connect DNS
+
+Review the full plan, then create the remaining resources:
+
+```sh
+terraform plan
+terraform apply
+terraform output api_ip_address
+```
+
+Create an `A` record for `api_domain` pointing at `api_ip_address`. Wait for
+DNS propagation and Google-managed certificate provisioning before testing
+HTTPS. The backend permits unauthenticated invocation at IAM only because the
+Cloud Run ingress setting rejects traffic that does not arrive through the
+load balancer. Cloud Armor handles IP throttling; the API does not add a
+second in-container rate limiter. The HTTPS load balancer injects
 `X-Load-Balancer-Client-IP`; the API uses that header for crowd-report grouping
 and does not accept a client-supplied IP in JSON.
 
-Deploy Firestore rules and indexes with Firebase CLI:
+### 5. Deploy Firestore rules and indexes
+
+If the GCP project is not yet a Firebase project, register it first. Then
+authenticate Firebase CLI and deploy the checked-in rules and indexes:
 
 ```sh
-firebase deploy --only firestore:rules,firestore:indexes --project "$PROJECT_ID"
+firebase login
+# Run this only if the project has not already been registered with Firebase.
+firebase projects:addfirebase YOUR_GCP_PROJECT_ID
+firebase deploy --only firestore:rules,firestore:indexes \
+  --project YOUR_GCP_PROJECT_ID
 ```
 
-The existing sync scheduler is paused until an ingestion worker and real
-source configuration are provided. Cloud Armor handles IP throttling; the API
-does not implement a second in-container rate limiter.
+Keep the Terraform state file in a private, backed-up location and use the same
+Terraform workspace for both the foundation and full applies. Never commit
+`terraform.tfstate`, plan files, `terraform.tfvars`, or secret values.
+
+### Cost and remaining setup
+
+Cloud Run can scale to zero, but Firestore, storage, Cloud Armor, and especially
+the external HTTPS load balancer can incur charges. Check current GCP pricing
+and set project budgets/alerts before applying. No resources are created in
+GCP by this repository until you run `terraform apply`.
 
 The current scope does not include DATA.GOV.HK ingestion/history workers,
 official POI data, Gemini perk reconciliation, or the 7-day/14-day chronic
