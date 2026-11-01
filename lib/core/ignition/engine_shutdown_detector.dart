@@ -1,5 +1,18 @@
 enum EngineSignal { power, btCar }
 
+extension EngineSignalWire on EngineSignal {
+  String get wireName => switch (this) {
+        EngineSignal.power => 'POWER',
+        EngineSignal.btCar => 'BT_CAR',
+      };
+
+  static EngineSignal fromWire(String raw) => switch (raw) {
+        'POWER' => EngineSignal.power,
+        'BT_CAR' => EngineSignal.btCar,
+        _ => throw ArgumentError('Unknown EngineSignal: $raw'),
+      };
+}
+
 class EngineShutdownDetector {
   EngineShutdownDetector({int Function()? nowMs}) : nowMs = nowMs ?? _systemNow;
 

@@ -29,6 +29,8 @@ class DistanceTracker {
   bool _approachMuted = false;
   bool _staleEmittedForGap = false;
 
+  bool get approachMuted => _approachMuted;
+
   static const double _earthRadiusM = 6371000;
 
   void setDestination(double? lat, double? lng) {

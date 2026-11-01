@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:copilot/core/constants/native_config.dart';
 import 'package:copilot/core/net/api_client.dart';
@@ -45,6 +46,7 @@ class HoldTransport implements ApiTransport {
 class FakePlatform implements TripPlatform {
   bool allow = true;
   int starts = 0;
+  int interrupts = 0;
   final spoken = <String>[];
   final tiers = <SamplingTier>[];
   final nav = <String>[];
@@ -65,10 +67,17 @@ class FakePlatform implements TripPlatform {
   @override
   void speak(String text) => spoken.add(text);
   @override
-  void interruptSpeech() {}
+  void interruptSpeech() => interrupts += 1;
   @override
   void launchGateNavigation(String label) => nav.add(label);
 }
+
+const CapabilitySnapshot speakingMode = CapabilitySnapshot(
+  stt: CapabilityStatus.available,
+  tts: CapabilityStatus.available,
+  mode: TripVoiceMode.announceManual,
+  voiceInputEnabled: false,
+);
 
 class ScriptDelay {
   final pending = <Completer<void>>[];
@@ -102,10 +111,20 @@ HttpResult ok(List<RecommendationCard> cards) => HttpResult(
       recommendResponse: RecommendResponse(status: 'SUCCESS', cards: cards),
     );
 
-Future<TripController> boot(HoldTransport transport, FakePlatform platform, ScriptDelay delay, {PoiNameResolver? resolver, bool online = true}) async {
+Future<TripController> boot(
+  HoldTransport transport,
+  FakePlatform platform,
+  ScriptDelay delay, {
+  PoiNameResolver? resolver,
+  bool online = true,
+  TripNetwork? network,
+  String Function()? sessionIdFactory,
+  bool startTrip = true,
+}) async {
+  final net = network ?? TripNetwork(online);
   final api = ApiClient(transport, sleeper: (_) async {});
   final store = TodayTripStore(MemoryPrefsPort(), hktDateOf: (_) => '2026-10-26', nowMs: () => 1_000);
-  final sync = TodayTripSync(store, _NoSync(), online ? _Online() : _Offline(), nowMs: () => 1_000);
+  final sync = TodayTripSync(store, _NoSync(), net, nowMs: () => 1_000);
   final controller = TripController(
     platform: platform,
     api: api,
@@ -113,10 +132,11 @@ Future<TripController> boot(HoldTransport transport, FakePlatform platform, Scri
     sync: sync,
     nowMs: () => 5_000,
     delay: delay.call,
+    network: net,
     resolver: resolver,
-    sessionIdFactory: () => 'sess_test',
+    sessionIdFactory: sessionIdFactory ?? () => 'sess_test',
   );
-  await controller.start(StartupEntry.a2);
+  if (startTrip) await controller.start(StartupEntry.a2);
   return controller;
 }
 
@@ -190,14 +210,22 @@ void main() {
     controller.onFix(LocFix(lat: destLat + delta1000 * 0.9, lng: destLng, accuracyM: 10, speedKmh: 20, timestampMs: 1000));
     controller.onFix(LocFix(lat: destLat + delta1000 * 0.8, lng: destLng, accuracyM: 10, speedKmh: 20, timestampMs: 2000));
     expect(transport.calls.where((path) => path == ApiClient.RECOMMEND), hasLength(1));
-    expect(transport.bodies.single, contains('"origin_lat":0.0'));
-    expect(transport.bodies.single, contains('"preference":"SMART_HYBRID"'));
+    final body = jsonDecode(transport.bodies.single) as Map<String, Object?>;
+    expect(body['session_id'], 'sess_test');
+    expect(body['origin_lat'], 0.0);
+    expect(body['origin_lng'], 0.0);
+    expect(body['dest_lat'], destLat);
+    expect(body['dest_lng'], destLng);
+    expect(body['dest_name'], '尖沙咀');
+    expect(body['preference'], 'SMART_HYBRID');
+    expect(body['expand_scarcity'], false);
   });
 
   test('C5 background failure is silent then success leaves grey', () async {
     final transport = HoldTransport()..next = const HttpResult(statusCode: 0, networkError: true, timedOut: true);
     final platform = FakePlatform();
     final controller = await boot(transport, platform, ScriptDelay());
+    controller.tsm.applyVoiceCapability(speakingMode, true);
     controller.lockDestinationAt('尖沙咀', destLat, destLng);
     controller.onFix(LocFix(lat: destLat + delta1000 * 0.4, lng: destLng, accuracyM: 10, speedKmh: 10, timestampMs: 1000));
     await Future<void>.delayed(const Duration(milliseconds: 1));
@@ -218,7 +246,14 @@ void main() {
     await controller.confirmCandidate(0);
     expect(controller.state, TripState.navToGate);
     expect(platform.nav, ['朗豪坊']);
-    controller.onFix(LocFix(lat: destLat + delta1000 * 0.2, lng: destLng, accuracyM: 10, speedKmh: 10, timestampMs: 2000));
+    final distanceBefore = controller.tracker.lastDistanceM;
+    final commits = transport.calls.where((path) => path == ApiClient.COMMIT).length;
+    for (var i = 0; i < 4; i++) {
+      controller.onFix(LocFix(lat: destLat + delta1000 * 0.07, lng: destLng, accuracyM: 10, speedKmh: 5, timestampMs: 3000 + i * 1000));
+    }
+    await controller.confirmCandidate(0);
+    expect(transport.calls.where((path) => path == ApiClient.COMMIT).length, commits);
+    expect(controller.tracker.lastDistanceM, distanceBefore);
     expect(controller.state, TripState.navToGate);
   });
 
@@ -261,13 +296,15 @@ void main() {
     final transport = HoldTransport();
     final platform = FakePlatform();
     final controller = await boot(transport, platform, ScriptDelay());
+    controller.tsm.applyVoiceCapability(speakingMode, true);
     controller.lockDestinationAt('甲', destLat, destLng);
-    controller.onFix(LocFix(lat: destLat + delta1000 * 0.4, lng: destLng, accuracyM: 10, speedKmh: 10, timestampMs: 1000));
+    final pending = controller.requestRecommendation();
     await Future<void>.delayed(Duration.zero);
     controller.lockDestinationAt('乙', destLat, destLng);
     transport.waiting.first.complete(ok([card('OLD')]));
-    await Future<void>.delayed(Duration.zero);
+    await pending;
     expect(controller.cards, isEmpty);
+    expect(platform.spoken, isNot(contains('去OLD')));
     expect(platform.spoken, isEmpty);
   });
 
@@ -323,7 +360,7 @@ void main() {
     expect(await pending, 'OUTSIDE');
   });
 
-  test('C14 two signals shut down once and C15 drops fade results', () async {
+  test('C14 two signals shut down once', () async {
     final delay = ScriptDelay();
     final transport = HoldTransport()..next = const HttpResult(statusCode: 200);
     final controller = await boot(transport, FakePlatform(), delay);
@@ -342,11 +379,34 @@ void main() {
     expect(controller.state, TripState.cruising);
   });
 
+  test('C15 drops recommend that returns during fade', () async {
+    final delay = ScriptDelay();
+    final transport = HoldTransport();
+    final platform = FakePlatform();
+    final controller = await boot(transport, platform, delay);
+    controller.tsm.applyVoiceCapability(speakingMode, true);
+    controller.lockDestinationAt('場', destLat, destLng);
+    final pendingRecommend = controller.requestRecommendation();
+    await Future<void>.delayed(Duration.zero);
+    final shutdown = controller.onEngineSignal(EngineSignal.power, disconnected: true);
+    await Future<void>.delayed(Duration.zero);
+    delay.finishNext();
+    await Future<void>.delayed(Duration.zero);
+    transport.waiting.first.complete(ok([card('LATE')]));
+    await pendingRecommend;
+    expect(controller.cards, isEmpty);
+    expect(platform.spoken, isNot(contains('去LATE')));
+    expect(controller.state, isNot(TripState.nearbyReady));
+    delay.finishNext();
+    await shutdown;
+    expect(controller.state, TripState.ended);
+  });
+
   test('C16 grey retry is single flight', () async {
     final transport = HoldTransport();
     final controller = await boot(transport, FakePlatform(), ScriptDelay());
-    final first = controller.requestRecommendation();
-    final second = controller.requestRecommendation();
+    final first = controller.retryFromGrey();
+    final second = controller.retryFromGrey();
     await Future<void>.delayed(Duration.zero);
     expect(transport.calls, hasLength(1));
     const failed = HttpResult(statusCode: 0, networkError: true);
@@ -434,6 +494,238 @@ void main() {
     }
     await pending;
     expect(other.tsm.networkDegraded, isFalse);
+  });
+
+  test('C11 offline shutdown skips release', () async {
+    final delay = ScriptDelay();
+    final transport = HoldTransport()..next = const HttpResult(statusCode: 200);
+    final net = TripNetwork(false);
+    final controller = await boot(transport, FakePlatform(), delay, network: net);
+    controller.lockDestinationAt('場', destLat, destLng);
+    controller.onFix(LocFix(lat: destLat + delta1000 * 0.1, lng: destLng, accuracyM: 10, speedKmh: 1, timestampMs: 1000));
+    final pending = controller.onEngineSignal(EngineSignal.power, disconnected: true);
+    await Future<void>.delayed(Duration.zero);
+    delay.finishNext();
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.store.find('sess_test'), isNotNull);
+    expect(transport.calls, isNot(contains(ApiClient.RELEASE)));
+    delay.finishNext();
+    expect(await pending, 'PARKED');
+  });
+
+  test('C18b stale session outcome does not grey the new session', () async {
+    var n = 0;
+    final held = HoldTransport();
+    final controller = await boot(held, FakePlatform(), ScriptDelay(), sessionIdFactory: () => 'sess_${n++}');
+    final oldSession = controller.sessionId;
+    final pending = controller.requestRecommendation();
+    await Future<void>.delayed(Duration.zero);
+    await controller.start(StartupEntry.a2);
+    expect(controller.sessionId, isNot(oldSession));
+    expect(controller.tsm.fgsRunning, isTrue);
+    const failed = HttpResult(statusCode: 0, networkError: true);
+    held.next = failed;
+    while (held.waiting.isNotEmpty) {
+      held.waiting.removeAt(0).complete(failed);
+      await Future<void>.delayed(Duration.zero);
+    }
+    await pending;
+    expect(controller.sessionId, isNot(oldSession));
+    expect(controller.tsm.fgsRunning, isTrue);
+    expect(controller.tsm.networkDegraded, isFalse);
+    expect(controller.state, TripState.cruising);
+  });
+
+  test('speech gate keeps approach muted silent unless driver asked', () async {
+    final transport = HoldTransport()..next = ok(const []);
+    final platform = FakePlatform();
+    final controller = await boot(transport, platform, ScriptDelay());
+    controller.tsm.applyVoiceCapability(speakingMode, true);
+    controller.lockDestinationAt('場', destLat, destLng);
+    for (var i = 0; i < 4; i++) {
+      controller.onFix(LocFix(lat: destLat + delta1000 * 0.07, lng: destLng, accuracyM: 10, speedKmh: 5, timestampMs: i * 1000));
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 1));
+    expect(controller.state, TripState.approachMuted);
+    expect(controller.tracker.approachMuted, isTrue);
+    expect(platform.spoken, isEmpty);
+    transport.next = null;
+    final pending = controller.requestRecommendation();
+    await Future<void>.delayed(Duration.zero);
+    controller.tsm.onPlaceClarificationNeeded();
+    expect(platform.spoken, isEmpty);
+    transport.waiting.first.complete(ok([card('ASK', '朗豪坊')]));
+    await pending;
+    expect(platform.spoken, contains('去ASK'));
+  });
+
+  test('F1 teardown interrupts and stops after fade and on permission or oem', () async {
+    final delay = ScriptDelay();
+    final platform = FakePlatform();
+    final transport = HoldTransport()..next = const HttpResult(statusCode: 200);
+    final controller = await boot(transport, platform, delay);
+    controller.lockDestinationAt('場', destLat, destLng);
+    controller.onFix(LocFix(lat: destLat + delta1000 * 0.1, lng: destLng, accuracyM: 10, speedKmh: 1, timestampMs: 1000));
+    final pending = controller.onEngineSignal(EngineSignal.power, disconnected: true);
+    await Future<void>.delayed(Duration.zero);
+    delay.finishNext();
+    await Future<void>.delayed(Duration.zero);
+    expect(platform.interrupts, 1);
+    expect(platform.stops, isEmpty);
+    delay.finishNext();
+    await pending;
+    expect(platform.stops, ['PARKED_CONFIRMED']);
+    expect(platform.interrupts, 2);
+
+    final revoked = FakePlatform();
+    final revokedController = await boot(HoldTransport(), revoked, ScriptDelay());
+    revokedController.onPermissionRevoked('RECORD_AUDIO');
+    expect(revoked.stops, isEmpty);
+    revokedController.onPermissionRevoked('ACCESS_FINE_LOCATION');
+    expect(revoked.stops, ['PERMISSION_REVOKED']);
+    expect(revoked.interrupts, 1);
+    expect(revokedController.sessionId, isNull);
+
+    final killed = FakePlatform();
+    final killedController = await boot(HoldTransport(), killed, ScriptDelay());
+    killedController.onOemKilled();
+    expect(killed.stops, ['ABANDONED_OEM_KILL']);
+    expect(killed.interrupts, 1);
+    expect(killedController.sessionId, isNull);
+  });
+
+  test('F2 failed fgs is not accepted and share is dropped', () async {
+    final bad = FakePlatform()..allow = false;
+    final failed = await boot(HoldTransport(), bad, ScriptDelay(), startTrip: false);
+    final outcome = await failed.start(StartupEntry.a2);
+    expect(outcome.accepted, isFalse);
+    expect(failed.sessionId, isNull);
+    expect(failed.tsm.fgsRunning, isFalse);
+    expect(bad.stops, ['BOOTSTRAP_TIMEOUT']);
+
+    final sharePlatform = FakePlatform()..allow = false;
+    final share = await boot(HoldTransport(), sharePlatform, ScriptDelay(), startTrip: false);
+    await share.onShareIntake(title: '朗豪坊', lat: 22.3, lng: 114.1, hasUrl: true);
+    expect(share.shareDroppedReason, 'SHARE_DROPPED');
+    expect(share.tsm.destinationName, isNull);
+    expect(share.tsm.fgsRunning, isFalse);
+  });
+
+  test('F3 parked id falls back from card then destination name', () async {
+    final delay = ScriptDelay();
+    final withCard = HoldTransport()..next = ok([card('CP1', '朗豪坊')]);
+    final controller = await boot(withCard, FakePlatform(), delay);
+    controller.lockDestinationAt('尖沙咀', destLat, destLng);
+    controller.onFix(LocFix(lat: destLat + delta1000 * 0.1, lng: destLng, accuracyM: 10, speedKmh: 1, timestampMs: 1000));
+    await Future<void>.delayed(const Duration(milliseconds: 1));
+    expect(controller.cards.single.carparkId, 'CP1');
+    final pending = controller.onEngineSignal(EngineSignal.power, disconnected: true);
+    await Future<void>.delayed(Duration.zero);
+    delay.finishNext();
+    await Future<void>.delayed(Duration.zero);
+    final releaseBody = jsonDecode(withCard.bodies.last) as Map<String, Object?>;
+    expect(releaseBody['target_carpark_id'], 'CP1');
+    expect(controller.store.find('sess_test')?.carparkId, 'CP1');
+    delay.finishNext();
+    await pending;
+
+    final delay2 = ScriptDelay();
+    final named = HoldTransport()..next = const HttpResult(statusCode: 200);
+    final byName = await boot(named, FakePlatform(), delay2);
+    byName.lockDestinationAt('尖沙咀', destLat, destLng);
+    byName.onFix(LocFix(lat: destLat + delta1000 * 0.1, lng: destLng, accuracyM: 10, speedKmh: 1, timestampMs: 1000));
+    final pendingName = byName.onEngineSignal(EngineSignal.power, disconnected: true);
+    await Future<void>.delayed(Duration.zero);
+    delay2.finishNext();
+    await Future<void>.delayed(Duration.zero);
+    final nameBody = jsonDecode(named.bodies.last) as Map<String, Object?>;
+    expect(nameBody['target_carpark_id'], '尖沙咀');
+    delay2.finishNext();
+    await pendingName;
+  });
+
+  test('F4 recommend failure or empty result keeps cached cards', () async {
+    final transport = HoldTransport()..next = ok([card('KEEP', '保留')]);
+    final controller = await boot(transport, FakePlatform(), ScriptDelay());
+    controller.lockDestinationAt('場', destLat, destLng);
+    controller.onFix(LocFix(lat: destLat + delta1000 * 0.4, lng: destLng, accuracyM: 10, speedKmh: 10, timestampMs: 1000));
+    await Future<void>.delayed(const Duration(milliseconds: 1));
+    expect(controller.cards.single.carparkId, 'KEEP');
+    transport.next = const HttpResult(statusCode: 0, networkError: true, timedOut: true);
+    await controller.requestRecommendation();
+    expect(controller.cards.single.carparkId, 'KEEP');
+    transport.next = ok(const []);
+    await controller.requestRecommendation();
+    expect(controller.cards.single.carparkId, 'KEEP');
+  });
+
+  test('engine signal ignored when fgs is not running', () async {
+    final controller = await boot(HoldTransport(), FakePlatform(), ScriptDelay(), startTrip: false);
+    expect(await controller.onEngineSignal(EngineSignal.power, disconnected: true), 'IGNORED_NOT_RUNNING');
+  });
+
+  test('jit fires once per session even after relock', () async {
+    final transport = HoldTransport()..next = ok([card('CP')]);
+    final controller = await boot(transport, FakePlatform(), ScriptDelay());
+    controller.lockDestinationAt('甲', destLat, destLng);
+    controller.onFix(LocFix(lat: destLat + delta1000 * 0.9, lng: destLng, accuracyM: 10, speedKmh: 20, timestampMs: 1000));
+    await Future<void>.delayed(Duration.zero);
+    controller.lockDestinationAt('乙', destLat, destLng);
+    controller.onFix(LocFix(lat: destLat + delta1000 * 0.8, lng: destLng, accuracyM: 10, speedKmh: 20, timestampMs: 2000));
+    await Future<void>.delayed(Duration.zero);
+    expect(transport.calls.where((path) => path == ApiClient.RECOMMEND), hasLength(1));
+  });
+
+  test('grey retry does not block a driver ask', () async {
+    final transport = HoldTransport();
+    final controller = await boot(transport, FakePlatform(), ScriptDelay());
+    final grey = controller.retryFromGrey();
+    await Future<void>.delayed(Duration.zero);
+    final asked = controller.requestRecommendation();
+    await Future<void>.delayed(Duration.zero);
+    expect(transport.calls.where((path) => path == ApiClient.RECOMMEND), hasLength(2));
+    const failed = HttpResult(statusCode: 0, networkError: true);
+    transport.next = failed;
+    while (transport.waiting.isNotEmpty) {
+      transport.waiting.removeAt(0).complete(failed);
+      await Future<void>.delayed(Duration.zero);
+    }
+    await grey;
+    await asked;
+  });
+
+  test('old fade does not reset the new session', () async {
+    final delay = ScriptDelay();
+    var n = 0;
+    final controller = await boot(HoldTransport(), FakePlatform(), delay, sessionIdFactory: () => 'sess_${n++}');
+    final pending = controller.onEngineSignal(EngineSignal.power, disconnected: true);
+    await Future<void>.delayed(Duration.zero);
+    delay.finishNext();
+    await Future<void>.delayed(Duration.zero);
+    final started = await controller.start(StartupEntry.a2);
+    expect(started.accepted, isTrue);
+    final nextSession = controller.sessionId;
+    delay.finishNext();
+    await pending;
+    expect(controller.sessionId, nextSession);
+    expect(controller.tsm.fgsRunning, isTrue);
+    expect(controller.state, TripState.cruising);
+  });
+
+  test('dispose closes the snapshot stream and cancels timers', () async {
+    final delay = ScriptDelay();
+    final platform = FakePlatform();
+    final controller = await boot(HoldTransport(), platform, delay);
+    final pending = controller.onEngineSignal(EngineSignal.power, disconnected: true);
+    await Future<void>.delayed(Duration.zero);
+    delay.finishNext();
+    await Future<void>.delayed(Duration.zero);
+    final done = expectLater(controller.changes, emitsDone);
+    controller.dispose();
+    if (delay.pending.isNotEmpty) delay.finishNext();
+    await pending;
+    await done;
+    expect(platform.stops, isNot(contains('ENGINE_SHUTDOWN')));
   });
 }
 

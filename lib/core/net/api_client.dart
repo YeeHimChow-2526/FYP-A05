@@ -11,6 +11,21 @@ import 'recommend_response.dart';
 
 enum QueryTriggerMode { backgroundPrefetch, driverActive, b2Resolution }
 
+extension QueryTriggerModeWire on QueryTriggerMode {
+  String get wireName => switch (this) {
+        QueryTriggerMode.backgroundPrefetch => 'BACKGROUND_PREFETCH',
+        QueryTriggerMode.driverActive => 'DRIVER_ACTIVE',
+        QueryTriggerMode.b2Resolution => 'B2_RESOLUTION',
+      };
+
+  static QueryTriggerMode fromWire(String raw) => switch (raw) {
+        'BACKGROUND_PREFETCH' => QueryTriggerMode.backgroundPrefetch,
+        'DRIVER_ACTIVE' => QueryTriggerMode.driverActive,
+        'B2_RESOLUTION' => QueryTriggerMode.b2Resolution,
+        _ => throw ArgumentError('Unknown QueryTriggerMode: $raw'),
+      };
+}
+
 typedef NetworkEffects = void Function({required bool grey, required bool ready});
 
 class RecommendRequest {

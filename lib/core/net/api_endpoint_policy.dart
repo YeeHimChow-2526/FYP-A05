@@ -1,5 +1,26 @@
 enum EndpointReason { ok, blankUrl, blankKey, badUrl, unsupportedScheme, cleartextNotAllowed }
 
+extension EndpointReasonWire on EndpointReason {
+  String get wireName => switch (this) {
+        EndpointReason.ok => 'OK',
+        EndpointReason.blankUrl => 'BLANK_URL',
+        EndpointReason.blankKey => 'BLANK_KEY',
+        EndpointReason.badUrl => 'BAD_URL',
+        EndpointReason.unsupportedScheme => 'UNSUPPORTED_SCHEME',
+        EndpointReason.cleartextNotAllowed => 'CLEARTEXT_NOT_ALLOWED',
+      };
+
+  static EndpointReason fromWire(String raw) => switch (raw) {
+        'OK' => EndpointReason.ok,
+        'BLANK_URL' => EndpointReason.blankUrl,
+        'BLANK_KEY' => EndpointReason.blankKey,
+        'BAD_URL' => EndpointReason.badUrl,
+        'UNSUPPORTED_SCHEME' => EndpointReason.unsupportedScheme,
+        'CLEARTEXT_NOT_ALLOWED' => EndpointReason.cleartextNotAllowed,
+        _ => throw ArgumentError('Unknown EndpointReason: $raw'),
+      };
+}
+
 class EndpointVerdict {
   const EndpointVerdict(this.reason, {this.normalizedBaseUrl = '', this.host = ''});
 

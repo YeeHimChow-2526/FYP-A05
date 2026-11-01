@@ -9,6 +9,29 @@ extension StartCommandWire on StartCommand {
         StartCommand.setDestination => 'SET_DESTINATION',
         StartCommand.onSite => 'ON_SITE',
       };
+
+  static StartCommand fromWire(String raw) => switch (raw) {
+        'SET_DESTINATION' => StartCommand.setDestination,
+        'ON_SITE' => StartCommand.onSite,
+        _ => throw ArgumentError('Unknown StartCommand: $raw'),
+      };
+}
+
+extension CapabilityStatusWire on CapabilityStatus {
+  String get wireName => switch (this) {
+        CapabilityStatus.available => 'AVAILABLE',
+        CapabilityStatus.supportedNotInstalled => 'SUPPORTED_NOT_INSTALLED',
+        CapabilityStatus.unsupported => 'UNSUPPORTED',
+        CapabilityStatus.unknown => 'UNKNOWN',
+      };
+
+  static CapabilityStatus fromWire(String raw) => switch (raw) {
+        'AVAILABLE' => CapabilityStatus.available,
+        'SUPPORTED_NOT_INSTALLED' => CapabilityStatus.supportedNotInstalled,
+        'UNSUPPORTED' => CapabilityStatus.unsupported,
+        'UNKNOWN' => CapabilityStatus.unknown,
+        _ => throw ArgumentError('Unknown CapabilityStatus: $raw'),
+      };
 }
 
 class CapabilitySnapshot {
@@ -32,5 +55,12 @@ extension TripVoiceModeWire on TripVoiceMode {
         TripVoiceMode.fullVoice => 'FULL_VOICE',
         TripVoiceMode.announceManual => 'ANNOUNCE_MANUAL',
         TripVoiceMode.manualOnly => 'MANUAL_ONLY',
+      };
+
+  static TripVoiceMode fromWire(String raw) => switch (raw) {
+        'FULL_VOICE' => TripVoiceMode.fullVoice,
+        'ANNOUNCE_MANUAL' => TripVoiceMode.announceManual,
+        'MANUAL_ONLY' => TripVoiceMode.manualOnly,
+        _ => throw ArgumentError('Unknown TripVoiceMode: $raw'),
       };
 }

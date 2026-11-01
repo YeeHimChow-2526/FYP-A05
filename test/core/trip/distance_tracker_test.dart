@@ -91,4 +91,64 @@ void main() {
     expect(subject.tier, SamplingTier.far);
     expect(subject.lastDistanceM, isNull);
   });
+
+  test('T7 low-hold gap reset', () {
+    final samples = <DistanceSample>[];
+    final subject = tracker([], samples)..setDestination(destLat, destLng);
+    subject.onFix(fixNorth(70, 5, 0));
+    subject.onFix(fixNorth(70, 5, 1000));
+    expect(samples.last.lowSpeedHoldS, 1);
+    final gapResetAt = 1000 + NativeConfig.GPS_FIX_STALE_S * 1000 + 1;
+    subject.onFix(fixNorth(70, 5, gapResetAt));
+    expect(samples.last.lowSpeedHoldS, 0);
+    subject.onFix(fixNorth(70, 5, gapResetAt + 1000));
+    expect(samples.last.lowSpeedHoldS, 1);
+    subject.onTick(gapResetAt + 1000 + NativeConfig.GPS_FIX_STALE_S * 1000 + 1);
+    subject.onFix(fixNorth(70, 5, gapResetAt + 1000 + NativeConfig.GPS_FIX_STALE_S * 1000 + 1));
+    expect(samples.last.lowSpeedHoldS, 0);
+  });
+
+  test('T8 exit hold only while muted and long gap resets', () {
+    final samples = <DistanceSample>[];
+    final subject = tracker([], samples)..setDestination(destLat, destLng);
+    subject.onFix(fixNorth(250, 5, 0));
+    subject.onFix(fixNorth(250, 5, 10000));
+    expect(samples.last.exitHoldS, 0);
+    subject.setApproachMuted(true);
+    subject.onFix(fixNorth(250, 5, 11000));
+    expect(samples.last.exitHoldS, 0);
+    subject.onFix(fixNorth(250, 5, 20000));
+    expect(samples.last.exitHoldS, 9);
+    subject.onFix(fixNorth(250, 5, 20000 + NativeConfig.APPROACH_EXIT_HOLD_S * 1000 + 1));
+    expect(samples.last.exitHoldS, 0);
+    subject.onFix(fixNorth(250, 5, 20000 + NativeConfig.APPROACH_EXIT_HOLD_S * 1000 + 1 + 9000));
+    expect(samples.last.exitHoldS, 9);
+  });
+
+  test('T11 setDestination reemits fresh false and null returns far', () {
+    final samples = <DistanceSample>[];
+    final tiers = <SamplingTier>[];
+    final subject = tracker(tiers, samples)..setDestination(destLat, destLng);
+    subject.onFix(fixNorth(100, 5, 0));
+    subject.onTick(6000);
+    final before = samples.length;
+    subject.setDestination(destLat + 0.01, destLng);
+    expect(samples.length, before + 1);
+    expect(samples.last.fresh, isFalse);
+    subject.setDestination(null, null);
+    expect(subject.tier, SamplingTier.far);
+    expect(subject.lastDistanceM, isNull);
+    expect(tiers, contains(SamplingTier.far));
+  });
+
+  test('T12 tier changes notify onTierChanged', () {
+    final tiers = <SamplingTier>[];
+    final subject = tracker(tiers)..setDestination(destLat, destLng);
+    subject.onFix(fixNorth(900, 5, 0));
+    subject.onFix(fixNorth(100, 5, 1000));
+    expect(tiers, [SamplingTier.near, SamplingTier.approach]);
+    subject.reset();
+    expect(tiers.last, SamplingTier.far);
+    expect(subject.tier, SamplingTier.far);
+  });
 }

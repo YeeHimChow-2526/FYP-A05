@@ -11,6 +11,13 @@ enum DriverPreference {
 
   static const DriverPreference defaultPreference = DriverPreference.smartHybrid;
   static const bool defaultHotwordEnabled = true;
+
+  static DriverPreference fromWire(String raw) => switch (raw) {
+        'INDOOR_ONLY' => DriverPreference.indoorOnly,
+        'SMART_HYBRID' => DriverPreference.smartHybrid,
+        'METERS_FOCUS' => DriverPreference.metersFocus,
+        _ => throw ArgumentError('Unknown DriverPreference: $raw'),
+      };
 }
 
 class PreferenceManager {
