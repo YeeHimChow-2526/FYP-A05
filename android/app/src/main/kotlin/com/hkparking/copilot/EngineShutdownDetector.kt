@@ -1,5 +1,7 @@
+// FROZEN Step1 — NOT SoT; behavior mirror for FBS compile only; do not edit; delete after Step3 FBS removal
 package com.hkparking.copilot
 
+@Deprecated("SoT is Dart lib/core — do not edit; delete after Step3 FBS removal")
 class EngineShutdownDetector {
   enum class Signal { POWER, BT_CAR }
 

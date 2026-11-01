@@ -1,8 +1,9 @@
 # NativeConfig 詞彙（非數值表）
 
-解釋 `NativeConfig` 命名同非顯然行為。**單一事實源仍係源碼**；本檔唔複製數值表、唔貼 `object NativeConfig { … }`。
+解釋 `NativeConfig` 命名同非顯然行為。本檔唔複製數值表、唔貼 `object NativeConfig { … }`。
 
-- Kotlin：[`android/app/src/main/kotlin/com/hkparking/copilot/NativeConfig.kt`](../../android/app/src/main/kotlin/com/hkparking/copilot/NativeConfig.kt)
+**新線 SoT：** [`lib/core/constants/native_config.dart`](../../lib/core/constants/native_config.dart)（SCREAMING_SNAKE，數值同 Kotlin 1:1）。Kotlin [`NativeConfig.kt`](../../android/app/src/main/kotlin/com/hkparking/copilot/NativeConfig.kt) 只係凍結殼，供 FBS 編譯，Step 3 拆 FBS 後先刪。
+
 - Flutter 畫面參數：[`lib/core/constants/app_config.dart`](../../lib/core/constants/app_config.dart)
 - 行為細節：[`docs/specs/01_ui_and_voice_fsm.md`](../specs/01_ui_and_voice_fsm.md)、[`docs/specs/03_api_and_local_trie.md`](../specs/03_api_and_local_trie.md)
 
@@ -37,4 +38,4 @@
 
 ## 唔做
 
-唔貼成份常數表；唔改規格行為。改數值只改 `NativeConfig.kt`（畫面參數只改 `app_config.dart`）。
+唔貼成份常數表；唔改規格行為。改數值必須 Dart `native_config.dart` 同 Kotlin `NativeConfig.kt` 同步（畫面參數只改 `app_config.dart`）。

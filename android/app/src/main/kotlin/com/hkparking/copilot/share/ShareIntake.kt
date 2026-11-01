@@ -12,6 +12,8 @@ data class ParsedShare(
     get() = lat != null && lng != null
 }
 
+// FROZEN Step1 — NOT SoT; behavior mirror for FBS compile only; do not edit; delete after Step3 FBS removal
+@Deprecated("SoT is Dart lib/core/share/share_text_parser.dart")
 object ShareTextParser {
   private val URL_REGEX = Regex("""https?://\S+""", RegexOption.IGNORE_CASE)
   // Decimal lat,lng with ≥3 fractional digits; optional spaces around comma.

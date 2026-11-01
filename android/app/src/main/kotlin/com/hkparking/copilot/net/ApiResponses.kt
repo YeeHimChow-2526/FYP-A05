@@ -1,8 +1,10 @@
+// FROZEN Step1 — NOT SoT; behavior mirror for FBS compile only; do not edit; delete after Step3 FBS removal
 package com.hkparking.copilot.net
 
 import com.hkparking.copilot.NativeConfig
 import com.hkparking.copilot.voice.RecommendationCard
 
+@Deprecated("SoT is Dart lib/core — do not edit; delete after Step3 FBS removal")
 object ApiResponses {
   fun parseRecommend(body: String): RecommendResponse? {
     val root = MiniJson.parseObjectOrNull(body) ?: return null

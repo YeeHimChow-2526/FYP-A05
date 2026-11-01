@@ -1,3 +1,4 @@
+// FROZEN Step1 — NOT SoT; behavior mirror for FBS compile only; do not edit; delete after Step3 FBS removal
 package com.hkparking.copilot.net
 
 import java.util.Locale
@@ -11,6 +12,7 @@ import java.util.Locale
  * 唔合規（空白、壞 URL、非本機 http、冇 key）→ 視為「未設定」，傳輸層直接回 networkError（離線分支），唔會 crash。
  * 永不關閉 SSL 驗證；https 一律用系統預設信任鏈。
  */
+@Deprecated("SoT is Dart lib/core — do not edit; delete after Step3 FBS removal")
 object ApiEndpointPolicy {
   /** debug 先准 http 嘅主機：本機、模擬器指向電腦嘅 10.0.2.2；真機用 `adb reverse` 再打 localhost。 */
   val LOCAL_CLEARTEXT_HOSTS: Set<String> = setOf("localhost", "127.0.0.1", "10.0.2.2")

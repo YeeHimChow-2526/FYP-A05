@@ -49,3 +49,11 @@
  - 每個 `## 模擬器驗收` 必須寫：而家去到邊個閘口、逐步點撳、期望見到咩、失敗時要貼咩畀你（截圖／logcat）。我未覆「已試，結果：…」之前，唔好派下一題。
 
 請回覆：「已讀取 v2.9.1 規格並載入模擬器 MVP 三部曲與 Pi 派工協議，請指示當前進度。」
+
+## V2 Step 1 裁定（2026-11-01）
+
+- Wake 主線留 Step 5：原生 `SpeechRecognizer` 循環聽「泊車助手」；Sherpa KWS 延後。撳掣講一路可用。本 Step 只加 `OFFLINE_STALE_NOTICE`，未接喚醒。
+- ApiClient／ApiEndpointPolicy／JSON 提前到 Step 1。Step 2 `TodayTripSync` 只准依賴 Dart `ApiClient`。
+- Kotlin 殼凍結非 SoT（`ApiEndpointPolicy.kt`、`ApiClient.kt`、`HttpApiTransport`、`EngineShutdownDetector.kt`、`ApiResponses`、`ShareTextParser`、`ZhHkTemplates`、`NativeConfig.kt`）。FBS 仍編譯。Step 3 拆 FBS 後先刪殼。
+- `CallOutcome` 方案 A：`shouldTurnGrey`／`shouldTurnReady`。唔 import `TripStateMachine`。
+- Nav SDK spike 見獨立 Step 1a，唔喺本 PR。

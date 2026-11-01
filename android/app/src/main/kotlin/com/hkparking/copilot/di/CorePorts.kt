@@ -210,6 +210,8 @@ class PlatformLocationSource : LocationSource {
  * - 單次請求總時限 = [timeoutMs]（預設 NativeConfig.API_TIMEOUT_MS）；body 硬上限 MAX_RESPONSE_BYTES（RT-4）。
  * - 唔跟 redirect（3xx → HTTP_REDIRECT_BLOCKED log，唔帶 key／URL 秘密）（RT-7）；唔 log key／body。
  */
+// FROZEN Step1 — NOT SoT; behavior mirror for FBS compile only; do not edit; delete after Step3 FBS removal
+@Deprecated("SoT is Dart lib/core/net/http_api_transport.dart")
 class HttpApiTransport(
   private val baseUrl: String = "",
   private val apiKey: String = ApiClient.INTERNAL_API_KEY,

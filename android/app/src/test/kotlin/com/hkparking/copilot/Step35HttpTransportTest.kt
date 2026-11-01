@@ -18,6 +18,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import org.junit.Ignore
 import org.junit.Test
 
 /**
@@ -27,6 +28,7 @@ import org.junit.Test
 class Step35HttpTransportTest {
   private val key = "test-key-35"
 
+  @Ignore("Step1 SoT → Dart: test/core/net/http_api_transport_test.dart")
   @Test
   fun step35_headersKeyAndJsonRoundTrip() {
     val server = Step35Server()
@@ -59,6 +61,7 @@ class Step35HttpTransportTest {
     }
   }
 
+  @Ignore("Step1 SoT → Dart: test/core/net/http_api_transport_test.dart")
   @Test
   fun step35_apiClientBodiesReachServerWithSpecFields() {
     val server = Step35Server()
@@ -93,6 +96,7 @@ class Step35HttpTransportTest {
     }
   }
 
+  @Ignore("Step1 SoT → Dart: test/core/net/http_api_transport_test.dart")
   @Test
   fun step35_commit409LockFullReadsSpokenCueNoRetry() {
     val server = Step35Server()
@@ -115,6 +119,7 @@ class Step35HttpTransportTest {
     }
   }
 
+  @Ignore("Step1 SoT → Dart: test/core/net/http_api_transport_test.dart")
   @Test
   fun step35_tripReport409And404AreSilentNoRetry() {
     val server = Step35Server()
@@ -144,6 +149,7 @@ class Step35HttpTransportTest {
     }
   }
 
+  @Ignore("Step1 SoT → Dart: test/core/net/http_api_transport_test.dart")
   @Test
   fun step35_429RetryAfterHeaderWaitsThenRetriesOnce() {
     val server = Step35Server()
@@ -171,6 +177,7 @@ class Step35HttpTransportTest {
     }
   }
 
+  @Ignore("Step1 SoT → Dart: test/core/net/http_api_transport_test.dart")
   @Test
   fun step35_429WithoutHeaderUsesBodyRetryAfter() {
     val server = Step35Server()
@@ -187,6 +194,7 @@ class Step35HttpTransportTest {
     }
   }
 
+  @Ignore("Step1 SoT → Dart: test/core/net/http_api_transport_test.dart")
   @Test
   fun step35_5xxIsGradedRetryThenGrey() {
     val server = Step35Server()
@@ -213,6 +221,7 @@ class Step35HttpTransportTest {
     }
   }
 
+  @Ignore("Step1 SoT → Dart: test/core/net/http_api_transport_test.dart")
   @Test
   fun step35_malformedRecommendJsonIsNetworkError() {
     val server = Step35Server()
@@ -230,6 +239,7 @@ class Step35HttpTransportTest {
     }
   }
 
+  @Ignore("Step1 SoT → Dart: test/core/net/http_api_transport_test.dart")
   @Test
   fun step35_slowServerTimesOutWithinApiTimeout() {
     val server = Step35Server()
@@ -253,6 +263,7 @@ class Step35HttpTransportTest {
     }
   }
 
+  @Ignore("Step1 SoT → Dart: test/core/net/http_api_transport_test.dart")
   @Test
   fun step35_connectionRefusedIsNetworkError() {
     val port = java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1")).use { it.localPort }
@@ -264,6 +275,7 @@ class Step35HttpTransportTest {
     assertFalse(result.timedOut)
   }
 
+  @Ignore("Step1 SoT → Dart: test/core/net/http_api_transport_test.dart")
   @Test
   fun step35_blankOrInvalidConfigIsOfflineWithoutHittingServer() {
     val server = Step35Server()
@@ -293,6 +305,7 @@ class Step35HttpTransportTest {
     }
   }
 
+  @Ignore("Step1 SoT → Dart: test/core/net/http_api_transport_test.dart")
   @Test
   fun step35_endpointPolicyHttpsOnlyExceptDebugLoopback() {
     fun reason(url: String, debug: Boolean, k: String = key) = ApiEndpointPolicy.check(url, k, debug).reason
@@ -312,6 +325,7 @@ class Step35HttpTransportTest {
     assertEquals(ApiEndpointPolicy.Reason.BLANK_KEY, reason("https://api.example.hk", debug = false, k = " "))
   }
 
+  @Ignore("Step1 SoT → Dart: test/core/net/http_api_transport_test.dart")
   @Test
   fun step35_redirectIsNotFollowed() {
     val server = Step35Server()

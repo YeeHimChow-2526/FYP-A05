@@ -18,6 +18,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import org.junit.After
+import org.junit.Ignore
 import org.junit.Test
 
 /**
@@ -48,6 +49,7 @@ class Step35RtFixesTest {
     assertFalse(Bindings.useRealNavigation)
   }
 
+  @Ignore("Step1 SoT → Dart: test/core/net/api_client_test.dart")
   @Test
   fun rt5_hostNormalizeAcceptsLocalhostUppercaseRejectsTrailingDotAndSubdomain() {
     assertEquals(
@@ -72,6 +74,7 @@ class Step35RtFixesTest {
     )
   }
 
+  @Ignore("Step1 SoT → Dart: test/core/net/api_client_test.dart")
   @Test
   fun rt5_pathJoinAvoidsDoubleSlashAndRejectsQueryFragment() {
     val base = "http://127.0.0.1:8787/"
@@ -83,6 +86,7 @@ class Step35RtFixesTest {
     assertNull(ApiEndpointPolicy.joinUrl(base, "/api/v1/x", allowLocalCleartext = true))
   }
 
+  @Ignore("Step1 SoT → Dart: test/core/net/api_client_test.dart")
   @Test
   fun rt4_bodyOverMaxBytesIsNetworkError() {
     val server = Step35RtServer()
@@ -102,6 +106,7 @@ class Step35RtFixesTest {
     }
   }
 
+  @Ignore("Step1 SoT → Dart: test/core/net/api_client_test.dart")
   @Test
   fun rt4_nullErrorStreamOn5xxIsSafeEmptyBody() {
     val server = Step35RtServer()
@@ -121,6 +126,7 @@ class Step35RtFixesTest {
     }
   }
 
+  @Ignore("Step1 SoT → Dart: test/core/net/api_client_test.dart")
   @Test
   fun rt7_status201And204TreatedAs2xxSuccess() {
     val server = Step35RtServer()
@@ -145,6 +151,7 @@ class Step35RtFixesTest {
     }
   }
 
+  @Ignore("Step1 SoT → Dart: test/core/net/api_client_test.dart")
   @Test
   fun rt7_retryAfterNegativeAndHugeClampedToOneAndTenSeconds() {
     val waits = CopyOnWriteArrayList<Long>()
@@ -182,6 +189,7 @@ class Step35RtFixesTest {
     assertEquals(listOf(NativeConfig.RATE_LIMIT_RETRY_AFTER_MAX_S * 1000L), waits.toList())
   }
 
+  @Ignore("Step1 SoT → Dart: test/core/net/api_client_test.dart")
   @Test
   fun rt7_redirectBlockedDoesNotLeakKeyInPathOnlyLogContract() {
     // Contract: joinUrl / policy never embed apiKey; 3xx returns status without following.
@@ -203,6 +211,7 @@ class Step35RtFixesTest {
     }
   }
 
+  @Ignore("Step1 SoT → Dart: test/core/net/api_client_test.dart")
   @Test
   fun rt3_boundedPoolRejectsOverflowAsNetworkError() {
     // Fill the IO pool + queue, then one more post should get RejectedExecution → networkError.

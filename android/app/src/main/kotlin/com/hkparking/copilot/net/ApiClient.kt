@@ -1,3 +1,4 @@
+// FROZEN Step1 — NOT SoT; behavior mirror for FBS compile only; do not edit; delete after Step3 FBS removal
 package com.hkparking.copilot.net
 
 import com.hkparking.copilot.CapsuleLight
@@ -66,6 +67,7 @@ data class CallOutcome(
   val actionSpokenCue: String? = null,
 )
 
+@Deprecated("SoT is Dart lib/core — do not edit; delete after Step3 FBS removal")
 class ApiClient(
   private val transport: ApiTransport,
   private val stateMachine: TripStateMachine = TripStateMachine(),

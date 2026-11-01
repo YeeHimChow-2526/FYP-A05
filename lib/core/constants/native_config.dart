@@ -1,0 +1,63 @@
+// ignore_for_file: constant_identifier_names
+/// Mirror of main/NativeConfig.kt @ ad87283 — SCREAMING_SNAKE 1:1；數值禁止漂移。
+/// 新線 SoT。Kotlin 檔只係凍結殼。
+class NativeConfig {
+  static const int OVERLAY_MAX_CARD_HEIGHT_DP = 175;
+  static const double OVERLAY_MAX_SCREEN_COVERAGE = 0.4;
+  static const int CARD_PAGE_TRANSITION_MS = 350;
+  static const int FGS_BOOTSTRAP_TIMEOUT_MS = 2000;
+  static const double NAV_CONFIDENCE_HIGH_THRESHOLD = 0.8;
+  static const double NAV_CONFIDENCE_LOW_THRESHOLD = 0.5;
+  static const double DISTANCE_SANITY_TOLERANCE_MULTIPLIER = 1.2;
+  static const int TRIGGER_DISTANCE_M = 1000;
+  static const int SILENCE_DRIVE_SPEED_KMH = 20;
+  static const int SILENCE_DRIVE_DURATION_S = 30;
+  static const int SILENCE_DRIVE_DISTANCE_M = 400;
+  static const double LISTEN_OPENING_WAIT_S = 3.0;
+  static const double LISTEN_END_SILENCE_S = 0.8;
+  static const double LISTEN_MAX_UTTERANCE_S = 8.0;
+  static const double STT_RESULT_TIMEOUT_S = 5.0;
+  static const int VOICE_CAPABILITY_CHECK_TIMEOUT_MS = 1500;
+  static const String SPEECH_LOCALE_DEFAULT = 'zh-HK';
+  static const double STT_CONFIDENCE_THRESHOLD = 0.6;
+  static const int TRIE_LOOKUP_BUDGET_MS = 150;
+  static const int APPROACH_RADIUS_M = 150;
+  static const int APPROACH_CORE_RADIUS_M = 80;
+  static const int APPROACH_SPEED_THRESHOLD_KMH = 8;
+  static const int APPROACH_CONSECUTIVE_S = 3;
+  static const int DEAD_RECKONING_SPEED_KMH = 15;
+  static const int GPS_FIX_STALE_S = 5;
+  static const int APPROACH_EXIT_DISTANCE_M = 200;
+  static const int APPROACH_EXIT_HOLD_S = 10;
+  static const int HIGH_FREQ_EXIT_RADIUS_M = 200;
+  static const int RADAR_MUTE_SPEED_KMH = 8;
+  static const int TEARDOWN_FADE_MS = 500;
+  static const int VALID_FIX_MAX_ACCURACY_M = 100;
+  static const int DISTANCE_TICK_MS = 1000;
+  static const int LOC_INTERVAL_FAR_MS = 30000;
+  static const int LOC_INTERVAL_NEAR_MS = 5000;
+  static const int LOC_INTERVAL_APPROACH_MS = 1000;
+  static const String LOC_PRIORITY_FAR = 'BALANCED';
+  static const String LOC_PRIORITY_NEAR = 'BALANCED';
+  static const String LOC_PRIORITY_APPROACH = 'HIGH_ACCURACY';
+  static const int ENGINE_OFF_DEBOUNCE_MS = 2000;
+  static const int ENGINE_OFF_MAX_SPEED_KMH = 8;
+  static const String TODAY_TRIPS_PREFS_NAME = 'hkparking_copilot';
+  static const String TODAY_TRIPS_JSON_KEY = 'today_trips_json';
+  static const String TODAY_TRIPS_HKT_DATE_KEY = 'today_trips_hkt_date';
+  static const int TODAY_TRIP_NOTES_MAX_CHARS = 140;
+  static const double SCORE_WEIGHT_DIST = 50.0;
+  static const double SCORE_WEIGHT_VAC = 40.0;
+  static const int SCORE_D_MAX_M = 1500;
+  static const int API_TIMEOUT_MS = 2500;
+  static const int API_MAX_ATTEMPTS = 3;
+  static const int API_RETRY_INTERVAL_MS = 1000;
+  static const int RATE_LIMIT_RETRY_DELAY_MS = 5000;
+  static const int RATE_LIMIT_MAX_WAIT_MS = 10000;
+  static const int RATE_LIMIT_RETRY_AFTER_MIN_S = 1;
+  static const int RATE_LIMIT_RETRY_AFTER_MAX_S = 10;
+  static const int MAX_RESPONSE_BYTES = 256 * 1024;
+  static const int API_IO_POOL_CORE = 2;
+  static const int API_IO_POOL_MAX = 6;
+  static const int ON_SITE_GPS_ACCURACY_MAX_M = 100;
+}

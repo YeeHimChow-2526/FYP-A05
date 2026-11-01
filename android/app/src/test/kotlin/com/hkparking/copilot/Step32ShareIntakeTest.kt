@@ -22,9 +22,11 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Ignore
 import org.junit.Test
 
 class Step32ShareIntakeTest {
+  @Ignore("Step1 SoT → Dart: test/core/share/share_text_parser_test.dart")
   @Test
   fun step32_01_parseTitleAndShortUrl() {
     val p = ShareTextParser.parse("朗豪坊 https://maps.app.goo.gl/abc")
@@ -34,6 +36,7 @@ class Step32ShareIntakeTest {
     assertNull(p.lng)
   }
 
+  @Ignore("Step1 SoT → Dart: test/core/share/share_text_parser_test.dart")
   @Test
   fun step32_02_parseMultilineTakesFirstLine() {
     val p = ShareTextParser.parse("朗豪坊\n旺角亞皆老街8號\nhttps://maps.app.goo.gl/abc")
@@ -41,6 +44,7 @@ class Step32ShareIntakeTest {
     assertTrue(p.hasUrl)
   }
 
+  @Ignore("Step1 SoT → Dart: test/core/share/share_text_parser_test.dart")
   @Test
   fun step32_03_parsePlainDroppedPin() {
     val p = ShareTextParser.parse("22.318, 114.168")
@@ -49,6 +53,7 @@ class Step32ShareIntakeTest {
     assertEquals(114.168, p.lng!!, 0.0001)
   }
 
+  @Ignore("Step1 SoT → Dart: test/core/share/share_text_parser_test.dart")
   @Test
   fun step32_04_parseCoordsInsideUrl() {
     val a = ShareTextParser.parse("https://maps.google.com/?q=22.30123,114.17234")
@@ -64,6 +69,7 @@ class Step32ShareIntakeTest {
     assertNull(b.title)
   }
 
+  @Ignore("Step1 SoT → Dart: test/core/share/share_text_parser_test.dart")
   @Test
   fun step32_05_parseUrlOnlyHasNoTitle() {
     val p = ShareTextParser.parse("https://maps.app.goo.gl/abc")
@@ -73,6 +79,7 @@ class Step32ShareIntakeTest {
     assertNull(p.lng)
   }
 
+  @Ignore("Step1 SoT → Dart: test/core/share/share_text_parser_test.dart")
   @Test
   fun step32_06_parseBlankAndNull() {
     for (raw in listOf(null, "   ")) {
@@ -85,6 +92,7 @@ class Step32ShareIntakeTest {
     }
   }
 
+  @Ignore("Step1 SoT → Dart: test/core/share/share_text_parser_test.dart")
   @Test
   fun step32_07_parseRejectsOutOfRangeCoords() {
     val a = ShareTextParser.parse("95.1234, 200.1234")
@@ -95,6 +103,7 @@ class Step32ShareIntakeTest {
     assertNull(b.lng)
   }
 
+  @Ignore("Step1 SoT → Dart: test/core/share/share_text_parser_test.dart")
   @Test
   fun step32_08_parseSubjectFallback() {
     val p = ShareTextParser.parse("https://maps.app.goo.gl/abc", subject = "朗豪坊")

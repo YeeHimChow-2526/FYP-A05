@@ -15,8 +15,10 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Ignore
 import org.junit.Test
 
+@Ignore("Step1 SoT → Dart: test/core/net/api_client_test.dart")
 class ApiClientTest {
   private val calls = mutableListOf<CapturedCall>()
   private val queued = ArrayDeque<HttpResult>()

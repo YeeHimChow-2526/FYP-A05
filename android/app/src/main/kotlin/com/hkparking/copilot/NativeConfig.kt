@@ -1,6 +1,8 @@
+// FROZEN Step1 — NOT SoT; behavior mirror for FBS compile only; do not edit; delete after Step3 FBS removal
 package com.hkparking.copilot
 
 // 來源：實作版 Doc v2.9.1 PART 2 §二.1。命名見 docs/reference/native_config_glossary.md
+@Deprecated("SoT is Dart lib/core — do not edit; delete after Step3 FBS removal")
 object NativeConfig {
   // --- 車載卡片尺寸（原生 FloatingCardView）---
   // 卡片高 = min(OVERLAY_MAX_CARD_HEIGHT_DP, OVERLAY_MAX_SCREEN_COVERAGE × 螢幕高)

@@ -160,6 +160,8 @@ object CommandCodes {
   private val DESTINATION = Regex("""目的地\s*(.+)""")
 }
 
+// FROZEN Step1 — NOT SoT; behavior mirror for FBS compile only; do not edit; delete after Step3 FBS removal
+@Deprecated("SoT is Dart lib/core/voice/zh_hk_templates.dart")
 object ZhHkTemplates {
   val speechLocale: String = NativeConfig.SPEECH_LOCALE_DEFAULT
 
