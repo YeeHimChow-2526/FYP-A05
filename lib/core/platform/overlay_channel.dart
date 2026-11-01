@@ -33,6 +33,7 @@ class OverlayChannel {
     channel.setMethodCallHandler(null);
   }
 
+  @Deprecated('Step3b: use TripRuntime')
   static Future<void> startBubbleService() {
     return channel.invokeMethod<void>('startBubbleService');
   }
@@ -69,16 +70,19 @@ class OverlayChannel {
     return channel.invokeMethod<dynamic>('getTripState');
   }
 
+  @Deprecated('Step3b: use TripRuntime')
   static Future<dynamic> getTodayTrips() {
     return channel.invokeMethod<dynamic>('getTodayTrips');
   }
 
+  @Deprecated('Step3b: use TripRuntime')
   static Future<void> confirmParkedCandidate(String sessionId) {
     return channel.invokeMethod<void>('confirmParkedCandidate', {
       'sessionId': sessionId,
     });
   }
 
+  @Deprecated('Step3b: use TripRuntime')
   static Future<void> submitTripReport(String payloadJson) {
     return channel.invokeMethod<void>('submitTripReport', {
       'payloadJson': payloadJson,

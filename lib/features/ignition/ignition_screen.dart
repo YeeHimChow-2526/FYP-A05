@@ -1,8 +1,10 @@
 import 'dart:async';
 
+import 'package:copilot/app/trip_runtime.dart';
 import 'package:copilot/core/constants/app_colors.dart';
 import 'package:copilot/core/platform/overlay_channel.dart';
 import 'package:copilot/core/preferences/preference_manager.dart';
+import 'package:copilot/core/trip/trip_types.dart';
 import 'package:copilot/features/trip_history/today_trip_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -42,22 +44,45 @@ class _IgnitionScreenState extends State<IgnitionScreen> {
   }
 
   Future<void> _startFromGesture() async {
+    Object? status;
     try {
-      await OverlayChannel.startBubbleService();
+      status = await OverlayChannel.getPermissionStatus();
+    } on MissingPluginException {
+      return;
+    } on PlatformException catch (error) {
+      if (!mounted) return;
+      setState(() => _tripStarted = false);
+      await _showPermissionGap(error);
+      return;
+    }
+    if (!_permissionsAllowStart(status)) {
       if (!mounted) return;
       setState(() {
-        _tripStarted = true;
-        _permissionBanner = null;
+        _tripStarted = false;
+        _permissionBanner = '權限未齊。請查看主畫面頂部權限狀態橫額。請泊好車後再處理。';
+      });
+      return;
+    }
+    try {
+      await TripRuntime.instance.attach();
+      final outcome = await TripRuntime.instance.controller!.start(StartupEntry.a2);
+      if (!mounted) return;
+      setState(() {
+        _tripStarted = outcome.accepted;
+        _permissionBanner = outcome.accepted ? null : '未能開始行程';
       });
     } on MissingPluginException {
       return;
     } on PlatformException catch (error) {
       if (!mounted) return;
-      setState(() {
-        _tripStarted = false;
-      });
+      setState(() => _tripStarted = false);
       await _showPermissionGap(error);
     }
+  }
+
+  bool _permissionsAllowStart(Object? status) {
+    if (status is! Map) return false;
+    return status['fineLocation'] == 'granted' && status['postNotifications'] == 'granted';
   }
 
   Future<void> _selectPreference(DriverPreference value) async {

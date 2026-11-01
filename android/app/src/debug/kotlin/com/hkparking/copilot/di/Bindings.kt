@@ -402,6 +402,45 @@ object Bindings {
     }
   }
 
+  @Volatile var allowFixturePost: Boolean = true
+
+  fun transportUseRealApi(): Boolean = useRealApi
+
+  fun onBridgeStarted(service: com.hkparking.copilot.FloatingBubbleService) {
+    voiceInput.setSimControlListener { event, _, _ ->
+      when (event) {
+        "ENGINE_SHUTDOWN" -> com.hkparking.copilot.bridge.TripPlatformEvents.emit(
+          "onEngineSignal",
+          mapOf("signal" to "POWER", "disconnected" to true),
+        )
+        "NETWORK_FAIL" -> {
+          networkStatus.online = false
+          com.hkparking.copilot.bridge.TripPlatformEvents.emit("onNetworkChanged", mapOf("online" to false))
+        }
+        "NETWORK_OK" -> {
+          networkStatus.online = true
+          com.hkparking.copilot.bridge.TripPlatformEvents.emit("onNetworkChanged", mapOf("online" to true))
+        }
+      }
+    }
+  }
+
+  fun onBridgeStopped() {
+    voiceInput.setSimControlListener(null)
+  }
+
+  fun fixturePostOrNull(path: String, body: String): Map<String, Any?>? {
+    if (!allowFixturePost) return null
+    val result = com.hkparking.copilot.trip.runSuspendBlocking { activeApiTransport.post(path, body) }
+    return mapOf(
+      "statusCode" to result.statusCode,
+      "body" to result.bodyJson,
+      "timedOut" to result.timedOut,
+      "networkError" to result.networkError,
+      "retryAfterS" to result.resolvedRetryAfterSeconds(),
+    )
+  }
+
   private fun voiceSnapshot(mode: TripVoiceMode, timedOut: Boolean = false): CapabilitySnapshot {
     val fullVoice = mode == TripVoiceMode.FULL_VOICE
     return CapabilitySnapshot(

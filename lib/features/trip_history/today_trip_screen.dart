@@ -1,8 +1,9 @@
+import 'package:copilot/app/trip_runtime.dart';
 import 'package:copilot/core/constants/app_colors.dart';
-import 'package:copilot/core/platform/overlay_channel.dart';
+import 'package:copilot/core/trip/today_trip_store.dart';
+import 'package:copilot/core/trip/today_trip_sync.dart';
 import 'package:copilot/features/trip_history/quick_feedback_bar.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 class TodayTripView {
   TodayTripView({
@@ -39,7 +40,10 @@ class TodayTripView {
 }
 
 class TodayTripScreen extends StatefulWidget {
-  const TodayTripScreen({super.key});
+  const TodayTripScreen({super.key, this.store, this.sync});
+
+  final TodayTripStore? store;
+  final TodayTripSync? sync;
 
   @override
   State<TodayTripScreen> createState() => _TodayTripScreenState();
@@ -49,18 +53,21 @@ class _TodayTripScreenState extends State<TodayTripScreen> {
   List<TodayTripView> _trips = const [];
   bool _loading = true;
 
+  TodayTripStore? _store;
+  TodayTripSync? _sync;
+
   @override
   void initState() {
     super.initState();
-    OverlayChannel.attach();
-    OverlayChannel.todayTripsListeners.add(_onTripsChanged);
+    _store = widget.store ?? TripRuntime.instance.store;
+    _sync = widget.sync ?? TripRuntime.instance.sync;
+    _store?.addListener(_onTripsChanged);
     _reload();
   }
 
   @override
   void dispose() {
-    // RT-7: always remove listener.
-    OverlayChannel.todayTripsListeners.remove(_onTripsChanged);
+    _store?.removeListener(_onTripsChanged);
     super.dispose();
   }
 
@@ -69,32 +76,24 @@ class _TodayTripScreenState extends State<TodayTripScreen> {
   }
 
   Future<void> _reload() async {
+    final store = _store;
+    if (store == null) {
+      if (!mounted) return;
+      setState(() {
+        _trips = const [];
+        _loading = false;
+      });
+      return;
+    }
     try {
-      final raw = await OverlayChannel.getTodayTrips();
       final list = <TodayTripView>[];
-      if (raw is List) {
-        for (final item in raw) {
-          if (item is Map) {
-            final view = TodayTripView.fromMap(Map<Object?, Object?>.from(item));
-            if (view != null) list.add(view);
-          }
-        }
+      for (final row in store.list(store.nowMs())) {
+        final view = TodayTripView.fromMap(row.toJson());
+        if (view != null) list.add(view);
       }
       if (!mounted) return;
       setState(() {
         _trips = list;
-        _loading = false;
-      });
-    } on MissingPluginException {
-      if (!mounted) return;
-      setState(() {
-        _trips = const [];
-        _loading = false;
-      });
-    } on PlatformException {
-      if (!mounted) return;
-      setState(() {
-        _trips = const [];
         _loading = false;
       });
     } catch (_) {
@@ -108,7 +107,8 @@ class _TodayTripScreenState extends State<TodayTripScreen> {
 
   Future<void> _confirm(String sessionId) async {
     try {
-      await OverlayChannel.confirmParkedCandidate(sessionId);
+      await _sync?.confirm(sessionId);
+      _reload();
     } catch (_) {
       // Silent.
     }
@@ -141,6 +141,7 @@ class _TodayTripScreenState extends State<TodayTripScreen> {
                     final trip = _trips[index];
                     return _TripCard(
                       trip: trip,
+                      sync: _sync,
                       onConfirm: () => _confirm(trip.sessionId),
                       onFeedbackSubmitted: _reload,
                     );
@@ -153,11 +154,13 @@ class _TodayTripScreenState extends State<TodayTripScreen> {
 class _TripCard extends StatelessWidget {
   const _TripCard({
     required this.trip,
+    required this.sync,
     required this.onConfirm,
     required this.onFeedbackSubmitted,
   });
 
   final TodayTripView trip;
+  final TodayTripSync? sync;
   final VoidCallback onConfirm;
   final VoidCallback onFeedbackSubmitted;
 
@@ -197,6 +200,7 @@ class _TripCard extends StatelessWidget {
                 sessionId: trip.sessionId,
                 carparkId: trip.carparkId,
                 parkedAtEpochMs: trip.parkedAtEpochMs,
+                sync: sync,
                 onSubmitted: onFeedbackSubmitted,
               ),
             if (isConfirmed && trip.feedbackSubmitted)

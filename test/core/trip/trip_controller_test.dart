@@ -718,6 +718,15 @@ void main() {
     expect(controller.cards.single.carparkId, 'KEEP');
   });
 
+  test('oem kill without a trip does not teardown', () async {
+    final platform = FakePlatform();
+    final controller = await boot(HoldTransport(), platform, ScriptDelay(), startTrip: false);
+    controller.onOemKilled();
+    expect(platform.stops, isEmpty);
+    expect(platform.interrupts, 0);
+    expect(controller.sessionId, isNull);
+  });
+
   test('engine signal ignored when fgs is not running', () async {
     final controller = await boot(HoldTransport(), FakePlatform(), ScriptDelay(), startTrip: false);
     expect(await controller.onEngineSignal(EngineSignal.power, disconnected: true), 'IGNORED_NOT_RUNNING');

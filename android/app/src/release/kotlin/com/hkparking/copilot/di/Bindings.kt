@@ -95,4 +95,14 @@ object Bindings {
   }
 
   fun clearPendingStart() {}
+
+  @Volatile var allowFixturePost: Boolean = false
+
+  fun transportUseRealApi(): Boolean = true
+
+  fun onBridgeStarted(service: com.hkparking.copilot.FloatingBubbleService) {}
+
+  fun onBridgeStopped() {}
+
+  fun fixturePostOrNull(path: String, body: String): Map<String, Any?>? = null
 }

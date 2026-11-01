@@ -281,6 +281,8 @@ class TripController {
   }
 
   void onOemKilled() {
+    final inTrip = tsm.sessionId != null || tsm.fgsRunning || tsm.fgsStartAccepted;
+    if (!inTrip) return;
     tsm.onOemKilled();
     if (_disposed) return;
     _finishTeardown('ABANDONED_OEM_KILL');

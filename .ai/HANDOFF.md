@@ -72,3 +72,27 @@
 
 - Dart `TripStateMachine`／`DistanceTracker`／`TripController` 係行程 SoT。Kotlin 兩檔凍結，FBS legacy 未改。
 - 3b（`dart_bridge`、TodayTrip UI 改讀 Dart store、結束雙寫）留 merge 後。Nav／5 掣／AudioCoordinator／喚醒仍延後。
+
+## V2 Step 3 裁定
+
+- L1 Dart TSM／tracker／controller 係行程 SoT；Kotlin 殼凍結唔刪。
+- L2 TripController 係唯一 writer；產品路徑唔再寫 Kotlin TodayTripStore。
+- L3 FBS `EXTRA_MODE=dart_bridge` 只做平台橋；legacy 無 `EXTRA_MODE` 路徑唔改行為。
+- L4 GREY > ALERT、新鮮度唔用本機時鐘、STT -1 ≠ 0、唔退普通話、Mute 唔係口播旗。
+- L5 CallOutcome 方案 A。
+- L6 `DateTime.now` 只准 `lib/app/trip_runtime.dart`。
+- L7 改終點用 destinationEpoch 丟棄 in-flight。
+- L8 DistanceTracker 語意維持 3a 測試。
+- L9 熄匙 debounce／token 喺 Dart；online 先 release。
+- L10 debug `useRealApi=false` 走 fixturePost；true／release 走 HttpApiTransport。
+- L11 橋模式唔 attach 膠囊、唔新增 overlay 權限。
+- L12 FGS type 橋模式只 location；stopForeground 後 stopSelf。
+- L13 掂 FBS 嘅舊測試唔加 Ignore。
+- L14 無新 pub 依賴、唔改 NativeConfig 數值、minSdk 33。
+- L15 ChannelPrefsPort hydrate／write-through 同一個 today-trips prefs。
+- 延後：Nav SDK／5 掣／FBS 全刪 → Step 4；語音對話／mic FGS／卡片／4 prefs／B-2 miss 重試 → Step 5；AudioCoordinator → Step 4–5；喚醒 → Step 5；origin lat/lng 真 fix → Step 4。
+- §4.B.6 橋模式暫時冇：語音輸入／STT 對話、mic FGS、膠囊、浮卡、scarcity 問答、B-2 miss 背景重試（miss 只去澄清）。
+- `FgsBootstrapActivity` 仍係產品入口（A-1／A-3），已加 `EXTRA_MODE`。
+- Kotlin `StartupPermissionChecker` 仍要求懸浮窗；Dart「出發」閘門唔再當 `SYSTEM_ALERT_WINDOW` 為必要項（Step 4 先改 checker）。
+- 橋模式 sim 只轉發 `ENGINE_SHUTDOWN`、`NETWORK_FAIL`、`NETWORK_OK`；其他 sim 事件只限 legacy。
+- `onOemKilled` 冇行程唔 teardown。橋 `onDestroy` 自己 `stopForeground`。

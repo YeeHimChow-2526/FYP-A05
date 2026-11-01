@@ -19,6 +19,11 @@ class TodayTripStore {
   final String Function(int epochMs) hktDateOf;
   final int Function() nowMs;
   final TripListener? listener;
+  final List<TripListener> listeners = [];
+
+  void addListener(TripListener listener) => listeners.add(listener);
+
+  void removeListener(TripListener listener) => listeners.remove(listener);
 
   static const String statusCandidate = TodayTripStoreStatus.candidate;
   static const String statusConfirmed = TodayTripStoreStatus.confirmed;
@@ -159,5 +164,8 @@ class TodayTripStore {
 
   void _notify() {
     listener?.call();
+    for (final item in List<TripListener>.of(listeners)) {
+      item();
+    }
   }
 }

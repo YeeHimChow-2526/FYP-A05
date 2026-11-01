@@ -11,12 +11,31 @@ import com.hkparking.copilot.voice.AndroidSpeechProbe
 import com.hkparking.copilot.voice.TripVoiceMode
 import com.hkparking.copilot.voice.VoiceCapabilityChecker
 import com.hkparking.copilot.voice.ZhHkTemplates
+import com.hkparking.copilot.bridge.BridgeSink
+import com.hkparking.copilot.bridge.DartBridgeRuntime
+import com.hkparking.copilot.bridge.TripPlatformBridge
+import com.hkparking.copilot.bridge.TripPlatformEvents
+import com.hkparking.copilot.bridge.TripPlatformHost
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.embedding.engine.FlutterEngineCache
+import io.flutter.embedding.engine.dart.DartExecutor
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
   private var overlayHost: AndroidOverlayHost? = null
+  private var tripSink: BridgeSink? = null
+
+  override fun provideFlutterEngine(context: android.content.Context): FlutterEngine {
+    val cache = FlutterEngineCache.getInstance()
+    cache.get(ENGINE_KEY)?.let { return it }
+    val engine = FlutterEngine(context)
+    engine.dartExecutor.executeDartEntrypoint(DartExecutor.DartEntrypoint.createDefault())
+    cache.put(ENGINE_KEY, engine)
+    return engine
+  }
+
+  override fun shouldDestroyEngineWithHost(): Boolean = false
 
   override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
     super.configureFlutterEngine(flutterEngine)
@@ -40,6 +59,30 @@ class MainActivity : FlutterActivity() {
       if (host.channelMounted) host.emit("onTodayTripsChanged", emptyMap())
     }
     val bridge = OverlayBridge(host)
+    val tripChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, TRIP_CHANNEL)
+    val sink = object : BridgeSink {
+      override var channelMounted: Boolean = true
+      override fun emit(method: String, args: Map<String, Any?>) {
+        if (!channelMounted) return
+        if (android.os.Looper.myLooper() === android.os.Looper.getMainLooper()) {
+          tripChannel.invokeMethod(method, args)
+        } else {
+          mainHandler.post { if (channelMounted) tripChannel.invokeMethod(method, args) }
+        }
+      }
+    }
+    tripSink = sink
+    TripPlatformEvents.sink = sink
+    val tripBridge = TripPlatformBridge(ActivityTripHost(this))
+    tripChannel.setMethodCallHandler { call, result ->
+      val args = when (val raw = call.arguments) {
+        is Map<*, *> -> raw.entries.associate { it.key.toString() to it.value }
+        else -> emptyMap()
+      }
+      val outcome = tripBridge.handle(call.method, args)
+      if (outcome.ok) result.success(outcome.value) else result.error(outcome.errorCode ?: "ERROR", outcome.message, outcome.details)
+    }
+    TripPlatformEvents.flush()
     channel.setMethodCallHandler { call, result ->
       val args = when (val raw = call.arguments) {
         is Map<*, *> -> raw.entries.associate { it.key.toString() to it.value }
@@ -58,10 +101,88 @@ class MainActivity : FlutterActivity() {
     // RT-6：卸 channel；背景 sync 完成後主線回呼見 channelMounted=false 就唔 emit。
     // today-trip-host-sync 已係 daemon 單線程 Executor，唔強制 shutdown 以免截斷 in-flight。
     overlayHost?.channelMounted = false
+    tripSink?.channelMounted = false
+    if (TripPlatformEvents.sink === tripSink) TripPlatformEvents.sink = null
     Bindings.todayTripsChangedEmitter = null
     overlayHost = null
+    tripSink = null
     super.onDestroy()
   }
+
+  companion object {
+    const val ENGINE_KEY = "trip_engine"
+    const val TRIP_CHANNEL = "com.hkparking.copilot/trip_platform"
+  }
+}
+
+private class ActivityTripHost(private val activity: MainActivity) : TripPlatformHost {
+  override fun startTripFgs(entry: String): Boolean {
+    val intent = Intent(activity, FloatingBubbleService::class.java)
+    intent.putExtra(FloatingBubbleService.EXTRA_ENTRY, entry)
+    intent.putExtra(FloatingBubbleService.EXTRA_MODE, FloatingBubbleService.MODE_DART_BRIDGE)
+    activity.startForegroundService(intent)
+    return true
+  }
+
+  override fun stopTripFgs(reason: String) {
+    DartBridgeRuntime.active?.stopTripFgs(reason)
+  }
+
+  override fun applySamplingTier(tier: String) {
+    DartBridgeRuntime.active?.applySamplingTier(tier)
+  }
+
+  override fun setNotificationText(text: String) {
+    DartBridgeRuntime.active?.setNotificationText(text)
+  }
+
+  override fun speak(text: String) {
+    DartBridgeRuntime.active?.speak(text)
+  }
+
+  override fun interruptSpeech() {
+    DartBridgeRuntime.active?.interruptSpeech()
+  }
+
+  override fun launchGateNavigation(label: String) {
+    DartBridgeRuntime.active?.launchGateNavigation(label)
+  }
+
+  override fun voiceCapability(): Map<String, Any?> {
+    return DartBridgeRuntime.active?.voiceCapability() ?: mapOf(
+      "stt" to "UNKNOWN",
+      "tts" to "UNKNOWN",
+      "tripVoiceMode" to "MANUAL_ONLY",
+      "timedOut" to false,
+    )
+  }
+
+  override fun transportConfig(): Map<String, Any?> = mapOf(
+    "useRealApi" to if (com.hkparking.copilot.BuildConfig.DEBUG) Bindings.transportUseRealApi() else true,
+    "baseUrl" to com.hkparking.copilot.BuildConfig.HKP_API_BASE_URL,
+    "apiKey" to com.hkparking.copilot.BuildConfig.HKP_API_KEY,
+  )
+
+  override fun prefsLoad(): Map<String, String?> = tripPrefs().let { prefs ->
+    mapOf(
+      NativeConfig.TODAY_TRIPS_JSON_KEY to prefs.getString(NativeConfig.TODAY_TRIPS_JSON_KEY, null),
+      NativeConfig.TODAY_TRIPS_HKT_DATE_KEY to prefs.getString(NativeConfig.TODAY_TRIPS_HKT_DATE_KEY, null),
+    )
+  }
+
+  override fun prefsPut(key: String, value: String) {
+    tripPrefs().edit().putString(key, value).apply()
+  }
+
+  override fun prefsRemove(key: String) {
+    tripPrefs().edit().remove(key).apply()
+  }
+
+  override fun fixturePost(path: String, body: String): Map<String, Any?> {
+    return Bindings.fixturePostOrNull(path, body) ?: emptyMap()
+  }
+
+  private fun tripPrefs() = activity.getSharedPreferences(NativeConfig.TODAY_TRIPS_PREFS_NAME, android.content.Context.MODE_PRIVATE)
 }
 
 interface OverlayHost {

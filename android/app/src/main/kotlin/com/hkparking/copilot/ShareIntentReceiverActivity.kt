@@ -87,7 +87,11 @@ class ShareIntentReceiverActivity : android.app.Activity {
     handler.postDelayed(timeout, NativeConfig.FGS_BOOTSTRAP_TIMEOUT_MS)
     val start = android.content.Intent(this, FloatingBubbleService::class.java)
     start.putExtra(FloatingBubbleService.EXTRA_ENTRY, StartupEntry.B_2.name)
+    start.putExtra(FloatingBubbleService.EXTRA_MODE, FloatingBubbleService.MODE_DART_BRIDGE)
     putShareExtras(start, parsed)
+    if (!com.hkparking.copilot.bridge.TripPlatformEvents.isMounted()) {
+      startActivity(android.content.Intent(this, MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
     startForegroundService(start)
   }
 

@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:copilot/core/constants/app_colors.dart';
 import 'package:copilot/core/constants/app_config.dart';
-import 'package:copilot/core/platform/overlay_channel.dart';
+import 'package:copilot/core/trip/today_trip_sync.dart';
 import 'package:flutter/material.dart';
 
 /// Three-slot feedback bar for a confirmed today-trip row (RT-7 StatefulWidget).
@@ -12,12 +12,14 @@ class QuickFeedbackBar extends StatefulWidget {
     required this.sessionId,
     required this.carparkId,
     required this.parkedAtEpochMs,
+    this.sync,
     this.onSubmitted,
   });
 
   final String sessionId;
   final String carparkId;
   final int parkedAtEpochMs;
+  final TodayTripSync? sync;
   final VoidCallback? onSubmitted;
 
   @override
@@ -65,7 +67,7 @@ class _QuickFeedbackBarState extends State<QuickFeedbackBar> {
     // RT-3: snake_case JSON; no photo_url key.
     final json = jsonEncode(payload);
     try {
-      await OverlayChannel.submitTripReport(json);
+      await widget.sync?.submitReport(json);
       widget.onSubmitted?.call();
     } catch (_) {
       // Silent: native / channel errors do not crash the row.

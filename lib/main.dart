@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:copilot/app/trip_runtime.dart';
 import 'package:copilot/core/constants/app_colors.dart';
 import 'package:copilot/core/platform/overlay_channel.dart';
 import 'package:copilot/features/ignition/ignition_screen.dart';
@@ -6,6 +9,7 @@ import 'package:flutter/material.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   OverlayChannel.attach();
+  unawaited(TripRuntime.instance.attach());
   runApp(const CopilotApp());
 }
 

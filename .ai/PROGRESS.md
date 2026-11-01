@@ -6,7 +6,9 @@
 >
 > V2 Step 2：Dart TodayTripStore／TodayTripSync（食 Dart ApiClient）、LocalPoiTrie、Jyutping、STT typo。Kotlin trip／trie 凍結。AudioCoordinator deferred。
 >
-> V2 Step 3a：Dart TripStateMachine／DistanceTracker／TripController。Kotlin TSM／tracker 凍結。3b 橋接未做。
+> V2 Step 3a：Dart TripStateMachine／DistanceTracker／TripController。Kotlin TSM／tracker 凍結。
+>
+> V2 Step 3b：FBS `dart_bridge` 平台橋、TripRuntime、TodayTrip UI 改讀 Dart store。語音對話／膠囊／浮卡留 Step 5。
 
 最後更新：2026-10-25｜任務來源：`.ai/ARCHITECTURE.md` §19 PART 3 路線圖任務表（共 46 條任務項＝44 項工程任務，W-E.2 與 W-F.2 各拆 Part 1／Part 2）｜驗收細節以實作版 PART 3 為準。
 

@@ -119,6 +119,7 @@ class FgsBootstrapActivity : android.app.Activity {
     handler.postDelayed(timeout, NativeConfig.FGS_BOOTSTRAP_TIMEOUT_MS)
     val start = android.content.Intent(this, FloatingBubbleService::class.java)
     start.putExtra(FloatingBubbleService.EXTRA_ENTRY, entry.name)
+    start.putExtra(FloatingBubbleService.EXTRA_MODE, FloatingBubbleService.MODE_DART_BRIDGE)
     startForegroundService(start)
   }
 
