@@ -67,3 +67,8 @@
 - TodayTripScreen 維持 OverlayChannel→Kotlin store，Step 3+ 再切 Dart。
 - 懶音 const＝真機調校前預設。
 - Deferred typo seeds：得福廣場／德福廣塲、奧海城、MegaBox、新城市廣場、荃新天地、形點、單獨 `k11`。
+
+## V2 Step 3a
+
+- Dart `TripStateMachine`／`DistanceTracker`／`TripController` 係行程 SoT。Kotlin 兩檔凍結，FBS legacy 未改。
+- 3b（`dart_bridge`、TodayTrip UI 改讀 Dart store、結束雙寫）留 merge 後。Nav／5 掣／AudioCoordinator／喚醒仍延後。

@@ -1,3 +1,4 @@
+// FROZEN Step3 — NOT SoT (Dart lib/core/trip/...); legacy FBS path + JVM tests only; delete with FBS legacy in Step4
 package com.hkparking.copilot
 
 import com.hkparking.copilot.di.LocFix
@@ -22,6 +23,7 @@ data class DistanceSample(
   val fresh: Boolean,
 )
 
+@Deprecated("SoT is Dart lib/core/trip/distance_tracker.dart")
 class DistanceTracker(
   private val listener: Listener,
 ) {

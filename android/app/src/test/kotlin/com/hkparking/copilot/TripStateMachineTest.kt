@@ -13,9 +13,11 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Ignore
 import org.junit.Test
 
 class TripStateMachineTest {
+  @Ignore("Step3 SoT -> Dart: test/core/trip/trip_state_machine_test.dart")
   @Test
   fun preFgsHasNoCapsuleAndIgnoresColdTapAndDrive() {
     val machine = TripStateMachine()
@@ -46,6 +48,7 @@ class TripStateMachineTest {
     assertNull(machine.sessionId)
   }
 
+  @Ignore("Step3 SoT -> Dart: test/core/trip/trip_state_machine_test.dart")
   @Test
   fun successfulEntriesCreateUniqueSessionIds() {
     val ids = mutableSetOf<String>()
@@ -82,6 +85,7 @@ class TripStateMachineTest {
     assertEquals(second, again.sessionId)
   }
 
+  @Ignore("Step3 SoT -> Dart: test/core/trip/trip_state_machine_test.dart")
   @Test
   fun b1MissAndOnSiteGpsFailureStayPreFgsWithoutSession() {
     val missed = TripStateMachine()
@@ -157,6 +161,7 @@ class TripStateMachineTest {
     assertEquals(TripState.PRE_FGS, now.state)
   }
 
+  @Ignore("Step3 SoT -> Dart: test/core/trip/trip_state_machine_test.dart")
   @Test
   fun fgsStartedEntersCruisingOrImmediateJit() {
     val cruising = started(StartupEntry.A_2)
@@ -199,6 +204,7 @@ class TripStateMachineTest {
     assertTrue(onSite.jitRequested)
   }
 
+  @Ignore("Step3 SoT -> Dart: test/core/trip/trip_state_machine_test.dart")
   @Test
   fun networkFailureStaysGreyAheadOfAlert() {
     val machine = started(StartupEntry.A_1)
@@ -223,6 +229,7 @@ class TripStateMachineTest {
     assertNotEquals(TripState.ALERT_BREATHING, noDestination.state)
   }
 
+  @Ignore("Step3 SoT -> Dart: test/core/trip/trip_state_machine_test.dart")
   @Test
   fun alertTriggersSpeakOnceAndLowConfidenceKeepsDestination() {
     val byDuration = started(StartupEntry.A_2)
@@ -287,6 +294,7 @@ class TripStateMachineTest {
     assertEquals(TripState.CRUISING, lockedFail.state)
   }
 
+  @Ignore("Step3 SoT -> Dart: test/core/trip/trip_state_machine_test.dart")
   @Test
   fun permissionRevokeEndsSessionButMicRevokeOnlyDegrades() {
     val ended = mutableListOf<String>()
@@ -323,6 +331,7 @@ class TripStateMachineTest {
     assertTrue(manual.sessionId!!.startsWith("sess_"))
   }
 
+  @Ignore("Step3 SoT -> Dart: test/core/trip/trip_state_machine_test.dart")
   @Test
   fun tripEndDestroysSessionWithoutReconnectingOldId() {
     val reasons = mutableListOf<String>()
@@ -401,6 +410,7 @@ class TripStateMachineTest {
     assertEquals(TripVoiceMode.MANUAL_ONLY, service.tripStateMachine.tripVoiceMode)
   }
 
+  @Ignore("Step3 SoT -> Dart: test/core/trip/trip_state_machine_test.dart")
   @Test
   fun silentRecheckTimeoutReusesConfirmedModeOrFallsBackWhenNeverConfirmed() {
     val confirmedProbe = HangAfterProbe(ReadyProbe())
@@ -424,6 +434,7 @@ class TripStateMachineTest {
     assertNotEquals(TripVoiceMode.FULL_VOICE, unavailable.tripVoiceMode)
   }
 
+  @Ignore("Step3 SoT -> Dart: test/core/trip/trip_state_machine_test.dart")
   @Test
   fun greyBreathingStaysAheadOfAlertEvenWithoutDestination() {
     val machine = started(StartupEntry.A_2)
@@ -437,6 +448,7 @@ class TripStateMachineTest {
     assertNotEquals(TripState.ALERT_BREATHING, machine.state)
   }
 
+  @Ignore("Step3 SoT -> Dart: test/core/trip/trip_state_machine_test.dart")
   @Test
   fun voiceModeComesFromCheckerAndFailedStartHasNoSession() {
     val announce = TripStateMachine()
@@ -479,6 +491,7 @@ class TripStateMachineTest {
     return checker
   }
 
+  @Ignore("Step3 SoT -> Dart: test/core/trip/trip_state_machine_test.dart")
   @Test
   fun alertCueAppendsTapOnlyWhenFullVoiceMicNotUpgraded() {
     val full = alertCue(TripVoiceMode.FULL_VOICE, micActive = false)
@@ -508,6 +521,7 @@ class TripStateMachineTest {
     assertFalse(failed.lastSpokenCue!!.contains(ZhHkTemplates.TAP_CAPSULE))
   }
 
+  @Ignore("Step3 SoT -> Dart: test/core/trip/trip_state_machine_test.dart")
   @Test
   fun onDestinationSetLeavesAlertAndJitWithinTrigger() {
     val far = voiced(TripVoiceMode.MANUAL_ONLY, micActive = false)
@@ -535,6 +549,7 @@ class TripStateMachineTest {
     assertEquals("朗豪坊", near.destinationName)
   }
 
+  @Ignore("Step3 SoT -> Dart: test/core/trip/trip_state_machine_test.dart")
   @Test
   fun requestStartAcceptsCommandCodeAndResetsStatusPip() {
     val named = TripStateMachine().requestStart(

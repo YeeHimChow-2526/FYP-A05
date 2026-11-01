@@ -23,6 +23,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Ignore
 import org.junit.Test
 
 class Step33DistanceAndShutdownTest {
@@ -33,6 +34,7 @@ class Step33DistanceAndShutdownTest {
     private const val DELTA_1000M = 0.008983
   }
 
+  @Ignore("Step3 SoT -> Dart: test/core/trip/distance_tracker_test.dart")
   @Test
   fun step33_01_haversineRoundsToMetres() {
     val m100 = DistanceTracker.haversineM(DEST_LAT, DEST_LNG, DEST_LAT + DELTA_100M, DEST_LNG)
@@ -41,6 +43,7 @@ class Step33DistanceAndShutdownTest {
     assertTrue(abs(m1000 - 1000.0) <= 2.0)
   }
 
+  @Ignore("Step3 SoT -> Dart: test/core/trip/distance_tracker_test.dart")
   @Test
   fun step33_02_tierHysteresis150Enter200Exit() {
     val tiers = mutableListOf<SamplingTier>()
@@ -208,6 +211,7 @@ class Step33DistanceAndShutdownTest {
     Bindings.detachService(harness.service)
   }
 
+  @Ignore("Step3 SoT -> Dart: test/core/trip/distance_tracker_test.dart")
   @Test
   fun step33_09_inaccurateFixIgnored() {
     val samples = mutableListOf<DistanceSample>()

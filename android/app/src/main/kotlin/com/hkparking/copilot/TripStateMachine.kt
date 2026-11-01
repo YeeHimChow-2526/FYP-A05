@@ -1,3 +1,4 @@
+// FROZEN Step3 — NOT SoT (Dart lib/core/trip/...); legacy FBS path + JVM tests only; delete with FBS legacy in Step4
 package com.hkparking.copilot
 
 import com.hkparking.copilot.voice.CapabilitySnapshot
@@ -61,6 +62,7 @@ data class StartOutcome(
   val startFgs: Boolean,
 )
 
+@Deprecated("SoT is Dart lib/core/trip/trip_state_machine.dart")
 class TripStateMachine(
   private val onTripEnded: (String) -> Unit = {},
   private val sessionIdFactory: () -> String = { "sess_${UUID.randomUUID().toString().replace("-", "")}" },
