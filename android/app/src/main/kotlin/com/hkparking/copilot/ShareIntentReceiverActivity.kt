@@ -56,43 +56,13 @@ class ShareIntentReceiverActivity : android.app.Activity {
       finish()
       return
     }
-    val listener: (FloatingBubbleService) -> Unit = listener@{
-      if (bootstrapTimedOut) return@listener
-      timeoutRunnable?.let { runnable -> timeoutHandler?.removeCallbacks(runnable) }
-      fgsStartedReceived = true
-      isFinished = true
-      clearHandshake()
-      finish()
-    }
-    fgsStartedListener = listener
-    FloatingBubbleService.addFgsStartedListener(listener)
-    val timeoutListener: () -> Unit = {
-      if (markBootstrapTimedOut()) {
-        timeoutRunnable?.let { runnable -> timeoutHandler?.removeCallbacks(runnable) }
-        clearHandshake()
-        finish()
-      }
-    }
-    bootstrapTimeoutListener = timeoutListener
-    FloatingBubbleService.addBootstrapTimeoutListener(timeoutListener)
-    val handler = android.os.Handler(android.os.Looper.getMainLooper())
-    timeoutHandler = handler
-    val timeout = Runnable {
-      if (markBootstrapTimedOut()) {
-        clearHandshake()
-        finish()
-      }
-    }
-    timeoutRunnable = timeout
-    handler.postDelayed(timeout, NativeConfig.FGS_BOOTSTRAP_TIMEOUT_MS)
-    val start = android.content.Intent(this, FloatingBubbleService::class.java)
-    start.putExtra(FloatingBubbleService.EXTRA_ENTRY, StartupEntry.B_2.name)
-    start.putExtra(FloatingBubbleService.EXTRA_MODE, FloatingBubbleService.MODE_DART_BRIDGE)
-    putShareExtras(start, parsed)
-    if (!com.hkparking.copilot.bridge.TripPlatformEvents.isMounted()) {
-      startActivity(android.content.Intent(this, MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
-    }
-    startForegroundService(start)
+    com.hkparking.copilot.bridge.TripPlatformEvents.enqueue(
+      "onShareIntake",
+      mapOf("title" to parsed.title, "lat" to parsed.lat, "lng" to parsed.lng, "hasUrl" to parsed.hasUrl),
+    )
+    startActivity(android.content.Intent(this, MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+    isFinished = true
+    finish()
   }
 
   override fun onDestroy() {

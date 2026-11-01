@@ -3,13 +3,13 @@ package com.hkparking.copilot
 import com.hkparking.copilot.bridge.BridgeSink
 import com.hkparking.copilot.bridge.TripPlatformBridge
 import com.hkparking.copilot.bridge.TripPlatformEvents
-import com.hkparking.copilot.bridge.TripPlatformHost
 import com.hkparking.copilot.di.Bindings
 import com.hkparking.copilot.di.LocFix
 import com.hkparking.copilot.sim.SimLocationSource
 import com.hkparking.copilot.voice.LocaleProbe
 import com.hkparking.copilot.voice.SpeechCapabilityProbe
 import com.hkparking.copilot.voice.VoiceCapabilityChecker
+import io.flutter.plugin.common.MethodChannel
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -22,6 +22,7 @@ class Step3bBridgeTest {
   @After
   fun tearDown() {
     TripPlatformEvents.sink = null
+    TripPlatformBridge.resetForTest()
   }
 
   @Test
@@ -30,7 +31,7 @@ class Step3bBridgeTest {
     TripPlatformEvents.sink = sink
     val service = service()
     service.enterForegroundGate = { true }
-    service.dispatchStart(FloatingBubbleService.MODE_DART_BRIDGE, null)
+    service.bridgeRuntime.onStartCommand(null)
     assertEquals(1, service.bridgeRuntime.handledStarts)
     assertEquals(TripState.PRE_FGS, service.tripStateMachine.state)
     assertFalse(service.isCapsuleVisible)
@@ -43,8 +44,7 @@ class Step3bBridgeTest {
   fun b2_missingModeStaysOnLegacyPath() {
     val service = service()
     service.enterForegroundGate = { true }
-    service.dispatchStart(null, null)
-    assertFalse(service.bridgeMode)
+    service.onStartCommand(null, 0, 1)
     assertEquals(0, service.bridgeRuntime.handledStarts)
     assertTrue(service.isFgsRunning)
   }
@@ -55,7 +55,7 @@ class Step3bBridgeTest {
     TripPlatformEvents.sink = sink
     val service = service()
     service.enterForegroundGate = { true }
-    service.dispatchStart(FloatingBubbleService.MODE_DART_BRIDGE, null)
+    service.bridgeRuntime.onStartCommand(null)
     (Bindings.locationSource as SimLocationSource).injectFix(LocFix(22.3, 114.1, 8.0, Double.NaN, 10L))
     val fix = sink.events.last { it.first == "onFix" }.second
     assertEquals(22.3, fix["lat"])
@@ -69,7 +69,7 @@ class Step3bBridgeTest {
     TripPlatformEvents.sink = sink
     val service = service()
     service.enterForegroundGate = { true }
-    service.dispatchStart(FloatingBubbleService.MODE_DART_BRIDGE, null)
+    service.bridgeRuntime.onStartCommand(null)
     service.bridgeRuntime.engineReceiver!!.handleAction("android.intent.action.ACTION_POWER_DISCONNECTED", false)
     val event = sink.events.last { it.first == "onEngineSignal" }.second
     assertEquals("POWER", event["signal"])
@@ -83,7 +83,7 @@ class Step3bBridgeTest {
   fun b5_stopTripFgsStopsForegroundThenSelf() {
     val service = service()
     service.enterForegroundGate = { true }
-    service.dispatchStart(FloatingBubbleService.MODE_DART_BRIDGE, null)
+    service.bridgeRuntime.onStartCommand(null)
     service.bridgeRuntime.stopTripFgs("TEST")
     assertEquals(listOf("stopForeground", "stopSelf"), service.bridgeRuntime.stopTrace)
   }
@@ -93,15 +93,14 @@ class Step3bBridgeTest {
     val before = Bindings.todayTripStore
     val service = service()
     service.enterForegroundGate = { true }
-    service.dispatchStart(FloatingBubbleService.MODE_DART_BRIDGE, null)
+    service.bridgeRuntime.onStartCommand(null)
     assertSame(before, Bindings.todayTripStore)
     service.bridgeRuntime.onDestroy()
   }
 
   @Test
   fun b7_prefsPutRejectsNonWhitelistKey() {
-    val bridge = TripPlatformBridge(UnusedHost())
-    val outcome = bridge.handle("prefsPut", mapOf("key" to "other", "value" to "x"))
+    val outcome = TripPlatformBridge.handleForTest("prefsPut", mapOf("key" to "other", "value" to "x"))
     assertFalse(outcome.ok)
     assertEquals("PREF_KEY", outcome.errorCode)
   }
@@ -111,12 +110,67 @@ class Step3bBridgeTest {
     val previous = Bindings.allowFixturePost
     Bindings.allowFixturePost = false
     try {
-      val outcome = TripPlatformBridge(UnusedHost()).handle("fixturePost", mapOf("path" to "/v1/recommend", "body" to "{}"))
+      val outcome = TripPlatformBridge.handleForTest("fixturePost", mapOf("path" to "/v1/recommend", "body" to "{}"))
       assertFalse(outcome.ok)
       assertEquals("UNSUPPORTED", outcome.errorCode)
     } finally {
       Bindings.allowFixturePost = previous
     }
+  }
+
+  @Test
+  fun b9_startHandshakeCompletesTrueOnce() {
+    TripPlatformBridge.postDelayed = { _, _ -> { } }
+    val result = RecResult()
+    TripPlatformBridge.beginStartForTest("A_2", result)
+    TripPlatformBridge.notifyForegroundReady(true)
+    TripPlatformBridge.notifyForegroundReady(false)
+    assertEquals(1, result.completed)
+    assertEquals(true, result.value)
+  }
+
+  @Test
+  fun b10_startHandshakeTimesOutFalse() {
+    var fire: (() -> Unit)? = null
+    TripPlatformBridge.postDelayed = { _, block ->
+      fire = block
+      { fire = null }
+    }
+    val result = RecResult()
+    TripPlatformBridge.beginStartForTest("A_2", result)
+    fire!!.invoke()
+    fire?.invoke()
+    assertEquals(1, result.completed)
+    assertEquals(false, result.value)
+  }
+
+  @Test
+  fun b11_bindOnceDoesNotRebind() {
+    TripPlatformBridge.resetForTest()
+    var calls = 0
+    TripPlatformBridge.bindOnce { calls += 1 }
+    TripPlatformBridge.bindOnce { calls += 1 }
+    assertEquals(1, calls)
+    assertTrue(TripPlatformBridge.isBound())
+  }
+
+  @Test
+  fun b12_checkStartGateIgnoresOverlay() {
+    TripPlatformBridge.startGateInput = {
+      PermissionCheckInput(fineLocationGranted = true, postNotificationsGranted = true, systemAlertWindowGranted = false)
+    }
+    val allowed = RecResult()
+    TripPlatformBridge.checkStartGateForTest(allowed)
+    assertEquals(1, allowed.completed)
+    assertNull(allowed.error)
+    TripPlatformBridge.startGateInput = {
+      PermissionCheckInput(fineLocationGranted = false, postNotificationsGranted = true, systemAlertWindowGranted = false)
+    }
+    val denied = RecResult()
+    TripPlatformBridge.checkStartGateForTest(denied)
+    assertEquals("MISSING_PERMISSION", denied.error)
+    val missing = denied.details as Map<*, *>
+    assertFalse((missing["missingItems"] as List<*>).contains(StartupPermissionChecker.OVERLAY))
   }
 
   private fun service(): FloatingBubbleService = FloatingBubbleService(VoiceCapabilityChecker(BridgeReadyProbe()))
@@ -130,20 +184,21 @@ private class RecordingSink : BridgeSink {
   }
 }
 
-private class UnusedHost : TripPlatformHost {
-  override fun startTripFgs(entry: String) = false
-  override fun stopTripFgs(reason: String) {}
-  override fun applySamplingTier(tier: String) {}
-  override fun setNotificationText(text: String) {}
-  override fun speak(text: String) {}
-  override fun interruptSpeech() {}
-  override fun launchGateNavigation(label: String) {}
-  override fun voiceCapability(): Map<String, Any?> = emptyMap()
-  override fun transportConfig(): Map<String, Any?> = emptyMap()
-  override fun prefsLoad(): Map<String, String?> = emptyMap()
-  override fun prefsPut(key: String, value: String) {}
-  override fun prefsRemove(key: String) {}
-  override fun fixturePost(path: String, body: String): Map<String, Any?> = emptyMap()
+private class RecResult : MethodChannel.Result {
+  var value: Any? = null
+  var error: String? = null
+  var details: Any? = null
+  var completed = 0
+  override fun success(result: Any?) {
+    completed += 1
+    value = result
+  }
+  override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
+    completed += 1
+    error = errorCode
+    details = errorDetails
+  }
+  override fun notImplemented() {}
 }
 
 private class BridgeReadyProbe : SpeechCapabilityProbe {

@@ -44,27 +44,9 @@ class _IgnitionScreenState extends State<IgnitionScreen> {
   }
 
   Future<void> _startFromGesture() async {
-    Object? status;
-    try {
-      status = await OverlayChannel.getPermissionStatus();
-    } on MissingPluginException {
-      return;
-    } on PlatformException catch (error) {
-      if (!mounted) return;
-      setState(() => _tripStarted = false);
-      await _showPermissionGap(error);
-      return;
-    }
-    if (!_permissionsAllowStart(status)) {
-      if (!mounted) return;
-      setState(() {
-        _tripStarted = false;
-        _permissionBanner = '權限未齊。請查看主畫面頂部權限狀態橫額。請泊好車後再處理。';
-      });
-      return;
-    }
     try {
       await TripRuntime.instance.attach();
+      await TripRuntime.instance.platform!.checkStartGate();
       final outcome = await TripRuntime.instance.controller!.start(StartupEntry.a2);
       if (!mounted) return;
       setState(() {
@@ -78,11 +60,6 @@ class _IgnitionScreenState extends State<IgnitionScreen> {
       setState(() => _tripStarted = false);
       await _showPermissionGap(error);
     }
-  }
-
-  bool _permissionsAllowStart(Object? status) {
-    if (status is! Map) return false;
-    return status['fineLocation'] == 'granted' && status['postNotifications'] == 'granted';
   }
 
   Future<void> _selectPreference(DriverPreference value) async {

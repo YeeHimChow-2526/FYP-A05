@@ -91,8 +91,9 @@
 - L14 無新 pub 依賴、唔改 NativeConfig 數值、minSdk 33。
 - L15 ChannelPrefsPort hydrate／write-through 同一個 today-trips prefs。
 - 延後：Nav SDK／5 掣／FBS 全刪 → Step 4；語音對話／mic FGS／卡片／4 prefs／B-2 miss 重試 → Step 5；AudioCoordinator → Step 4–5；喚醒 → Step 5；origin lat/lng 真 fix → Step 4。
+- Q5：橋模式暫無語音對話／STT／scarcity；Step 5 先接 Dart controller。FYP demo 用手動＋口播。
 - §4.B.6 橋模式暫時冇：語音輸入／STT 對話、mic FGS、膠囊、浮卡、scarcity 問答、B-2 miss 背景重試（miss 只去澄清）。
-- `FgsBootstrapActivity` 仍係產品入口（A-1／A-3），已加 `EXTRA_MODE`。
+- `FgsBootstrapActivity`／`ShareIntentReceiverActivity` 只 enqueue `onHotwordStart`／`onShareIntake` 並開 MainActivity，由 Dart `startTripFgs` 開 FGS。
 - Kotlin `StartupPermissionChecker` 仍要求懸浮窗；Dart「出發」閘門唔再當 `SYSTEM_ALERT_WINDOW` 為必要項（Step 4 先改 checker）。
 - 橋模式 sim 只轉發 `ENGINE_SHUTDOWN`、`NETWORK_FAIL`、`NETWORK_OK`；其他 sim 事件只限 legacy。
 - `onOemKilled` 冇行程唔 teardown。橋 `onDestroy` 自己 `stopForeground`。

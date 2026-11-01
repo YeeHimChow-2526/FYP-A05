@@ -106,14 +106,9 @@ class FloatingBubbleService : android.app.Service {
   }
 
   val bridgeRuntime = com.hkparking.copilot.bridge.DartBridgeRuntime(this)
-  internal var bridgeMode: Boolean = false
 
   override fun onStartCommand(intent: android.content.Intent?, flags: Int, startId: Int): Int {
-    return dispatchStart(intent?.getStringExtra(EXTRA_MODE), intent)
-  }
-
-  internal fun dispatchStart(mode: String?, intent: android.content.Intent?): Int {
-    if (mode == MODE_DART_BRIDGE) return bridgeRuntime.onStartCommand(intent)
+    if (intent?.getStringExtra(EXTRA_MODE) == MODE_DART_BRIDGE) return bridgeRuntime.onStartCommand(intent)
     val entryName = intent?.getStringExtra(EXTRA_ENTRY)
     val entry = entryName?.let { runCatching { StartupEntry.valueOf(it) }.getOrNull() } ?: StartupEntry.A_1
     val hotwordEnabled = intent?.getBooleanExtra(EXTRA_HOTWORD, true) ?: true
@@ -1689,10 +1684,6 @@ class FloatingBubbleService : android.app.Service {
   }
 
   fun onRuntimePermissionRevoked(revokedPermission: String) {
-    if (bridgeMode) {
-      com.hkparking.copilot.bridge.TripPlatformEvents.emit("onPermissionRevoked", mapOf("permission" to revokedPermission))
-      return
-    }
     if (revokedPermission == RECORD_AUDIO) {
       capabilityChecker.onRecordAudioRevoked()
       isMicActive = false
@@ -1781,16 +1772,7 @@ class FloatingBubbleService : android.app.Service {
     return viaHeyGoogleColdStart || (isFgsRunning && isMicActive)
   }
 
-  override fun onTaskRemoved(rootIntent: android.content.Intent?) {
-    if (bridgeMode) com.hkparking.copilot.bridge.TripPlatformEvents.emit("onOemKilled", emptyMap())
-    super.onTaskRemoved(rootIntent)
-  }
-
   fun onOemKilledOrTaskRemoved() {
-    if (bridgeMode) {
-      com.hkparking.copilot.bridge.TripPlatformEvents.emit("onOemKilled", emptyMap())
-      return
-    }
     isFgsRunning = false
     isCapsuleVisible = false
     isMicActive = false

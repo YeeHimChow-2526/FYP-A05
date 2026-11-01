@@ -9,7 +9,7 @@ import com.hkparking.copilot.di.Bindings
 import com.hkparking.copilot.di.LocFix
 import com.hkparking.copilot.voice.TripVoiceMode
 
-class DartBridgeRuntime(private val service: FloatingBubbleService) : TripPlatformHost {
+class DartBridgeRuntime(private val service: FloatingBubbleService) {
   companion object {
     @Volatile var active: DartBridgeRuntime? = null
   }
@@ -25,25 +25,32 @@ class DartBridgeRuntime(private val service: FloatingBubbleService) : TripPlatfo
     private set
   private var foregroundHeld = false
   private var engineRegistered = false
+  private var wired = false
 
   fun onStartCommand(intent: Intent?): Int {
     handledStarts += 1
-    service.bridgeMode = true
     active = true
     DartBridgeRuntime.active = this
+    if (wired) {
+      emitShare(intent)
+      TripPlatformBridge.notifyForegroundReady(true)
+      return android.app.Service.START_NOT_STICKY
+    }
     val started = service.enterForeground()
     if (!started) {
       active = false
-      service.bridgeMode = false
       if (DartBridgeRuntime.active === this) DartBridgeRuntime.active = null
+      TripPlatformBridge.notifyForegroundReady(false)
       return android.app.Service.START_NOT_STICKY
     }
     foregroundHeld = true
+    wired = true
     wireLocation()
     registerEngine()
     Bindings.onBridgeStarted(service)
     emitShare(intent)
     TripPlatformEvents.emit("onNetworkChanged", mapOf("online" to Bindings.networkStatus.isOnline()))
+    TripPlatformBridge.notifyForegroundReady(true)
     return android.app.Service.START_NOT_STICKY
   }
 
@@ -53,44 +60,43 @@ class DartBridgeRuntime(private val service: FloatingBubbleService) : TripPlatfo
     unwire()
   }
 
-  override fun startTripFgs(entry: String): Boolean {
-    val intent = Intent(service, FloatingBubbleService::class.java)
-    intent.putExtra(FloatingBubbleService.EXTRA_ENTRY, entry)
-    intent.putExtra(FloatingBubbleService.EXTRA_MODE, FloatingBubbleService.MODE_DART_BRIDGE)
-    return runCatching {
-      service.startForegroundService(intent)
-      true
-    }.getOrDefault(false)
-  }
-
-  override fun stopTripFgs(reason: String) {
+  fun stopTripFgs(reason: String) {
     releaseForeground(stopSelf = true)
     TripPlatformEvents.emit("onFgsStopped", mapOf("reason" to reason))
     unwire()
   }
 
-  override fun applySamplingTier(tier: String) {
+  fun applySamplingTier(tier: String) {
     val parsed = runCatching { SamplingTier.valueOf(tier) }.getOrDefault(SamplingTier.FAR)
     Bindings.locationSource.applySamplingTier(parsed)
   }
 
-  override fun setNotificationText(text: String) {
+  fun setNotificationText(text: String) {
     notificationText = text
+    runCatching {
+      val manager = service.getSystemService(android.app.NotificationManager::class.java) ?: return
+      val notification = android.app.Notification.Builder(service, FloatingBubbleService.CHANNEL_ID)
+        .setSmallIcon(service.applicationInfo.icon)
+        .setContentTitle(FloatingBubbleService.CHANNEL_NAME)
+        .setContentText(text)
+        .build()
+      manager.notify(FloatingBubbleService.NOTIFICATION_ID, notification)
+    }
   }
 
-  override fun speak(text: String) {
+  fun speak(text: String) {
     service.ttsService.speak(text, TripVoiceMode.ANNOUNCE_MANUAL, isApproachMuted = false, driverAsked = true)
   }
 
-  override fun interruptSpeech() {
+  fun interruptSpeech() {
     service.ttsService.interrupt()
   }
 
-  override fun launchGateNavigation(label: String) {
+  fun launchGateNavigation(label: String) {
     Bindings.activeNavigation.launchGateNavigation(label)
   }
 
-  override fun voiceCapability(): Map<String, Any?> {
+  fun voiceCapability(): Map<String, Any?> {
     val checker = service.capabilityChecker
     return mapOf(
       "stt" to checker.sttStatus.name,
@@ -100,13 +106,7 @@ class DartBridgeRuntime(private val service: FloatingBubbleService) : TripPlatfo
     )
   }
 
-  override fun transportConfig(): Map<String, Any?> = mapOf(
-    "useRealApi" to if (com.hkparking.copilot.BuildConfig.DEBUG) Bindings.transportUseRealApi() else true,
-    "baseUrl" to com.hkparking.copilot.BuildConfig.HKP_API_BASE_URL,
-    "apiKey" to com.hkparking.copilot.BuildConfig.HKP_API_KEY,
-  )
-
-  override fun prefsLoad(): Map<String, String?> {
+  fun prefsLoad(): Map<String, String?> {
     val prefs = prefs() ?: return emptyMap()
     return mapOf(
       NativeConfig.TODAY_TRIPS_JSON_KEY to prefs.getString(NativeConfig.TODAY_TRIPS_JSON_KEY, null),
@@ -114,16 +114,12 @@ class DartBridgeRuntime(private val service: FloatingBubbleService) : TripPlatfo
     )
   }
 
-  override fun prefsPut(key: String, value: String) {
+  fun prefsPut(key: String, value: String) {
     prefs()?.edit()?.putString(key, value)?.apply()
   }
 
-  override fun prefsRemove(key: String) {
+  fun prefsRemove(key: String) {
     prefs()?.edit()?.remove(key)?.apply()
-  }
-
-  override fun fixturePost(path: String, body: String): Map<String, Any?> {
-    return Bindings.fixturePostOrNull(path, body) ?: emptyMap()
   }
 
   private fun releaseForeground(stopSelf: Boolean) {
@@ -137,7 +133,7 @@ class DartBridgeRuntime(private val service: FloatingBubbleService) : TripPlatfo
       runCatching { service.stopSelf() }
     }
     active = false
-    service.bridgeMode = false
+    wired = false
     if (DartBridgeRuntime.active === this) DartBridgeRuntime.active = null
   }
 
@@ -164,6 +160,7 @@ class DartBridgeRuntime(private val service: FloatingBubbleService) : TripPlatfo
   }
 
   private fun registerEngine() {
+    unregisterEngine()
     val receiver = EngineShutdownReceiver { signal, disconnected ->
       TripPlatformEvents.emit(
         "onEngineSignal",
@@ -193,11 +190,22 @@ class DartBridgeRuntime(private val service: FloatingBubbleService) : TripPlatfo
     if (TripPlatformEvents.isMounted()) {
       TripPlatformEvents.emit("onShareIntake", args)
     } else {
-      TripPlatformEvents.enqueueShare(args)
+      TripPlatformEvents.enqueue("onShareIntake", args)
     }
   }
 
+  private fun unregisterEngine() {
+    val receiver = engineReceiver
+    if (engineRegistered && receiver != null) {
+      val ctx = runCatching { service.applicationContext }.getOrNull() ?: service
+      runCatching { EngineShutdownReceiver.registrar.unregister(ctx, receiver) }
+    }
+    engineRegistered = false
+    engineReceiver = null
+  }
+
   private fun unwire() {
+    wired = false
     Bindings.locationSource.setFixListener(null)
     Bindings.locationSource.setTickListener(null)
     Bindings.onBridgeStopped()

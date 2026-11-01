@@ -23,6 +23,8 @@ class TodayTripStore {
 
   void addListener(TripListener listener) => listeners.add(listener);
 
+  void reloadFromPrefs() => _notify();
+
   void removeListener(TripListener listener) => listeners.remove(listener);
 
   static const String statusCandidate = TodayTripStoreStatus.candidate;

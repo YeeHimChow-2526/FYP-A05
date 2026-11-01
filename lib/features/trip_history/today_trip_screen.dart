@@ -60,6 +60,9 @@ class _TodayTripScreenState extends State<TodayTripScreen> {
   void initState() {
     super.initState();
     _store = widget.store ?? TripRuntime.instance.store;
+    if (_store == null) {
+      throw StateError('TripRuntime.store is null');
+    }
     _sync = widget.sync ?? TripRuntime.instance.sync;
     _store?.addListener(_onTripsChanged);
     _reload();

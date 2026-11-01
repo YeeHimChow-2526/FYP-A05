@@ -88,39 +88,10 @@ class FgsBootstrapActivity : android.app.Activity {
       finish()
       return
     }
-    val listener: (FloatingBubbleService) -> Unit = listener@{
-      if (bootstrapTimedOut) return@listener
-      timeoutRunnable?.let { runnable -> timeoutHandler?.removeCallbacks(runnable) }
-      fgsStartedReceived = true
-      isFinished = true
-      clearHandshake()
-      finish()
-    }
-    fgsStartedListener = listener
-    FloatingBubbleService.addFgsStartedListener(listener)
-    val timeoutListener: () -> Unit = {
-      if (markBootstrapTimedOut()) {
-        timeoutRunnable?.let { runnable -> timeoutHandler?.removeCallbacks(runnable) }
-        clearHandshake()
-        finish()
-      }
-    }
-    bootstrapTimeoutListener = timeoutListener
-    FloatingBubbleService.addBootstrapTimeoutListener(timeoutListener)
-    val handler = android.os.Handler(android.os.Looper.getMainLooper())
-    timeoutHandler = handler
-    val timeout = Runnable {
-      if (markBootstrapTimedOut()) {
-        clearHandshake()
-        finish()
-      }
-    }
-    timeoutRunnable = timeout
-    handler.postDelayed(timeout, NativeConfig.FGS_BOOTSTRAP_TIMEOUT_MS)
-    val start = android.content.Intent(this, FloatingBubbleService::class.java)
-    start.putExtra(FloatingBubbleService.EXTRA_ENTRY, entry.name)
-    start.putExtra(FloatingBubbleService.EXTRA_MODE, FloatingBubbleService.MODE_DART_BRIDGE)
-    startForegroundService(start)
+    com.hkparking.copilot.bridge.TripPlatformEvents.enqueue("onHotwordStart", mapOf("entry" to entry.name))
+    startActivity(android.content.Intent(this, MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+    isFinished = true
+    finish()
   }
 
   override fun onDestroy() {

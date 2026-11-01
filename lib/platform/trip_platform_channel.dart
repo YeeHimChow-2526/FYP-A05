@@ -21,6 +21,10 @@ class ChannelTripPlatform implements TripPlatform {
   }
 
   @override
+  Future<void> checkStartGate() {
+    return channel.invokeMethod<void>('checkStartGate');
+  }
+
   Future<bool> startForeground(StartupEntry entry) async {
     final ok = await channel.invokeMethod<bool>('startTripFgs', {'entry': entry.wireName});
     return ok == true;
@@ -128,6 +132,8 @@ class ChannelTripPlatform implements TripPlatform {
         controller.onPermissionRevoked(map['permission'] as String? ?? '');
       case 'onOemKilled':
         controller.onOemKilled();
+      case 'onHotwordStart':
+        await controller.start(StartupEntryWire.fromWire(map['entry'] as String? ?? 'A_1'));
       case 'onShareIntake':
         await controller.onShareIntake(
           title: map['title'] as String?,

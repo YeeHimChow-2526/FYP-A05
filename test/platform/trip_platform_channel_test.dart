@@ -1,3 +1,4 @@
+import 'package:copilot/core/platform/channel_prefs_port.dart';
 import 'package:copilot/core/net/api_client.dart';
 import 'package:copilot/core/net/api_transport.dart';
 import 'package:copilot/core/net/http_result.dart';
@@ -87,6 +88,46 @@ void main() {
       (_) {},
     );
     expect(controller.tracker.lastDistanceM, isNull);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
+  });
+
+  test('hydrate blocks write-through and hotword start hands off to startTripFgs', () async {
+    final writes = <String>[];
+    final prefs = ChannelPrefsPort(onWrite: (key, value) => writes.add('$key:$value'));
+    prefs.putString('today_trips_json', '[]');
+    prefs.remove('today_trips_hkt_date');
+    expect(writes, isEmpty);
+    expect(prefs.getString('today_trips_json'), isNull);
+    prefs.hydrate({'today_trips_json': '[]'});
+    prefs.putString('today_trips_json', '[1]');
+    expect(writes, ['today_trips_json:[1]']);
+
+    final channel = MethodChannel(ChannelTripPlatform.name);
+    final calls = <MethodCall>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      if (call.method == 'startTripFgs') return true;
+      return null;
+    });
+    final platform = ChannelTripPlatform(channel);
+    final store = TodayTripStore(MemoryPrefsPort(), hktDateOf: (_) => '2026-10-26');
+    final controller = TripController(
+      platform: platform,
+      api: ApiClient(_NoTransport(), sleeper: (_) async {}),
+      store: store,
+      sync: TodayTripSync(store, _NoSync(), _Online()),
+      nowMs: () => 1,
+      delay: (_) async {},
+      sessionIdFactory: () => 'sess_hot',
+    );
+    platform.bind(controller);
+    const codec = StandardMethodCodec();
+    await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.handlePlatformMessage(
+      ChannelTripPlatform.name,
+      codec.encodeMethodCall(const MethodCall('onHotwordStart', {'entry': 'A_1'})),
+      (_) {},
+    );
+    expect(calls.where((call) => call.method == 'startTripFgs').single.arguments, {'entry': 'A_1'});
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
   });
 }
