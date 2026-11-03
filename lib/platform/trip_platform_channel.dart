@@ -143,7 +143,7 @@ class ChannelTripPlatform implements TripPlatform {
           hasUrl: map['hasUrl'] == true,
         );
       case 'onFgsStopped':
-        return;
+        controller.onFgsStopped();
     }
   }
 }

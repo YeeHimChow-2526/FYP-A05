@@ -33,7 +33,10 @@ class FixtureApiTransport(
     fixtureName = name
   }
 
+  internal var customFixtureLoader: Boolean = false
+
   fun setFixtureLoader(loader: (String) -> String?) {
+    customFixtureLoader = true
     val fallback = fixtureLoader
     fixtureLoader = { name -> loader(name) ?: fallback(name) }
   }

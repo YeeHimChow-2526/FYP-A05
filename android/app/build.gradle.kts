@@ -50,6 +50,8 @@ android {
         // 只影響 debug：true = 改用 HttpApiTransport；release 一律打真雲端。
         buildConfigField("boolean", "HKP_USE_REAL_API", hkpSetting("HKP_USE_REAL_API").equals("true", ignoreCase = true).toString())
         buildConfigField("boolean", "HKP_USE_REAL_NAVIGATION", hkpSetting("HKP_USE_REAL_NAVIGATION").equals("true", ignoreCase = true).toString())
+        // debug 橋模式：true = SimLocationSource；預設 false = 模擬器真 GPS。JVM 單測強制 true。
+        buildConfigField("boolean", "HKP_USE_SIM_LOCATION", hkpSetting("HKP_USE_SIM_LOCATION").equals("true", ignoreCase = true).toString())
     }
 
     buildFeatures {

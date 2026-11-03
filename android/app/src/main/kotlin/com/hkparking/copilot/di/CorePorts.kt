@@ -33,6 +33,10 @@ interface LocationSource {
   fun stop()
 }
 
+interface AttachableLocationSource : LocationSource {
+  fun attach(context: android.content.Context)
+}
+
 data class LocFix(
   val lat: Double,
   val lng: Double,
@@ -79,7 +83,7 @@ class FusedLocationSource : LocationSource {
 }
 
 
-class PlatformLocationSource : LocationSource {
+class PlatformLocationSource : AttachableLocationSource {
   private var appContext: android.content.Context? = null
   private var locationManager: android.location.LocationManager? = null
   private var distanceListener: ((Int, Double, Int) -> Unit)? = null
@@ -110,7 +114,7 @@ class PlatformLocationSource : LocationSource {
     fixListener?.invoke(fix)
   }
 
-  fun attach(context: android.content.Context) {
+  override fun attach(context: android.content.Context) {
     appContext = context.applicationContext
     locationManager = runCatching {
       context.applicationContext.getSystemService(android.content.Context.LOCATION_SERVICE) as? android.location.LocationManager

@@ -73,6 +73,7 @@ class SimEventReceiver(
       TRIE_MISS_NETWORK_FAIL -> emit(event, intValue, stringValue)
       TRIE_MISS_AMBIGUOUS -> emit(event, intValue, stringValue)
       GPS_BAD_ACCURACY -> gpsBadAccuracy(event, intValue, stringValue)
+      FIX -> emitFix(stringValue)
       FORCE_STALE -> armRecommend(FixtureApiTransport.STALE_FIXTURE)
       FORCE_DEGRADED -> armRecommend(FixtureApiTransport.DEGRADED_FIXTURE)
       FORCE_RATE_LIMIT -> forceRateLimit(event, intValue, stringValue)
@@ -202,6 +203,35 @@ class SimEventReceiver(
     return true
   }
 
+  private fun emitFix(stringValue: String?): Boolean {
+    val parsed = parseFix(stringValue) ?: return ignore(FIX)
+    if (com.hkparking.copilot.bridge.DartBridgeRuntime.active == null) return ignore(FIX)
+    val timestampMs = runCatching { android.os.SystemClock.elapsedRealtime() }.getOrElse { 0L }
+    com.hkparking.copilot.bridge.TripPlatformEvents.emit(
+      "onFix",
+      mapOf(
+        "lat" to parsed.lat,
+        "lng" to parsed.lng,
+        "accuracyM" to (parsed.accuracyM ?: 10.0),
+        "speedKmh" to parsed.speedKmh,
+        "timestampMs" to timestampMs,
+      ),
+    )
+    return true
+  }
+
+  private data class FixParts(val lat: Double, val lng: Double, val speedKmh: Double?, val accuracyM: Double?)
+
+  private fun parseFix(raw: String?): FixParts? {
+    val parts = raw?.split(',')?.map { it.trim() } ?: return null
+    if (parts.size !in 2..4) return null
+    val lat = parts[0].toDoubleOrNull() ?: return null
+    val lng = parts[1].toDoubleOrNull() ?: return null
+    val speed = if (parts.size >= 3) parts[2].toDoubleOrNull() ?: return null else null
+    val accuracy = if (parts.size >= 4) parts[3].toDoubleOrNull() ?: return null else null
+    return FixParts(lat, lng, speed, accuracy)
+  }
+
   private fun armRecommend(name: String): Boolean {
     Bindings.apiTransport.armRecommendFixture(name)
     return true
@@ -279,6 +309,7 @@ class SimEventReceiver(
     private const val TRIE_MISS_NETWORK_FAIL = "TRIE_MISS_NETWORK_FAIL"
     private const val TRIE_MISS_AMBIGUOUS = "TRIE_MISS_AMBIGUOUS"
     private const val GPS_BAD_ACCURACY = "GPS_BAD_ACCURACY"
+    private const val FIX = "FIX"
     private const val FORCE_STALE = "FORCE_STALE"
     private const val FORCE_DEGRADED = "FORCE_DEGRADED"
     private const val FORCE_LOCK_FULL = "FORCE_LOCK_FULL"
@@ -309,6 +340,12 @@ class SimEventReceiver(
 
     fun register(context: android.content.Context, receiver: SimEventReceiver) {
       registrar.register(context, receiver, ACTION_SIM_EVENT, ContextCompat.RECEIVER_EXPORTED)
+    }
+
+    internal fun swapRegistrarForTest(block: () -> Unit): () -> Unit {
+      val previous = registrar
+      registrar = ReceiverRegistrar { _, _, _, _ -> block() }
+      return { registrar = previous }
     }
   }
 }

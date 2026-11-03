@@ -80,6 +80,7 @@ class TripController {
   String? shareDroppedReason;
 
   Stream<TripSnapshot> get changes => _changes.stream;
+  bool get tripRunning => tsm.fgsRunning;
   TripState get state => tsm.state;
   CapsuleLight get capsuleLight => tsm.capsuleLight;
   String? get sessionId => tsm.sessionId;
@@ -286,6 +287,16 @@ class TripController {
     tsm.onOemKilled();
     if (_disposed) return;
     _finishTeardown('ABANDONED_OEM_KILL');
+  }
+
+  void onFgsStopped() {
+    if (_disposed) return;
+    _lifecycleToken += 1;
+    shutdownInProgress = false;
+    tsm.clearSession();
+    tracker.reset();
+    detector.reset();
+    _emit();
   }
 
   void dispose() {

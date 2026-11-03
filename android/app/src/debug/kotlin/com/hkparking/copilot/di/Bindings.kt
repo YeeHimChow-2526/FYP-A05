@@ -32,6 +32,15 @@ fun interface FgsStarter {
 object Bindings {
   val voiceInput: SimVoiceInput = SimVoiceInput()
   val locationSource: SimLocationSource = SimLocationSource()
+  // Step 3c：橋模式定位。預設 false = 獨立 PlatformLocationSource（模擬器 Extended Controls／GPX／adb geo fix）。
+  // HKP_USE_SIM_LOCATION=true 先共用 SimLocationSource。JVM 單測（baseContext==null／clearPorts）強制 true。
+  @Volatile var useSimLocation: Boolean = if (jvmHost()) true else com.hkparking.copilot.BuildConfig.HKP_USE_SIM_LOCATION
+    private set
+  private val platformBridgeLocation: PlatformLocationSource by lazy { PlatformLocationSource() }
+  internal var bridgeLocationOverride: LocationSource? = null
+  val bridgeLocationSource: LocationSource
+    get() = bridgeLocationOverride ?: if (useSimLocation) locationSource else platformBridgeLocation
+  private var bridgeLocationAttached = false
   val apiTransport: FixtureApiTransport = FixtureApiTransport()
   // Step 3.5（SC-018／RT-2）：debug 預設用 fixture；建置時 HKP_USE_REAL_API=true 先改打真 HTTP。
   // 冇 runtime 產品開關；但 JVM 單測（attachService baseContext==null／clearPorts）強制重置為 false，
@@ -75,7 +84,7 @@ object Bindings {
   }
   internal var activeService: com.hkparking.copilot.FloatingBubbleService? = null
     private set
-  private var receiverRegistered = false
+  internal var receiverRegistered = false
   var capabilityCheckTimedOut: Boolean = false
     private set
   var todayTripsCleared: Boolean = false
@@ -196,6 +205,9 @@ object Bindings {
     // RT-2：每次清 port 都強制拉返 fixture／sim，避免上一輪測試／local.properties 殘留真通道。
     useRealApi = false
     useRealNavigation = false
+    useSimLocation = true
+    bridgeLocationAttached = false
+    bridgeLocationOverride = null
     locationSource.setLocationListener(null)
     locationSource.setMotionListener(null)
     locationSource.setFixListener(null)
@@ -407,6 +419,20 @@ object Bindings {
   fun transportUseRealApi(): Boolean = useRealApi
 
   fun onBridgeStarted(service: com.hkparking.copilot.FloatingBubbleService) {
+    val jvmUnitTest = runCatching { service.baseContext }.getOrNull() == null
+    useSimLocation = if (jvmUnitTest) true else com.hkparking.copilot.BuildConfig.HKP_USE_SIM_LOCATION
+    if (!bridgeLocationAttached) {
+      val source = bridgeLocationSource
+      if (source is AttachableLocationSource) source.attach(service)
+      bridgeLocationAttached = true
+    }
+    ensureBridgeSimReceiver(service)
+    apiTransport.delayMs = service.delayMs
+    apiTransport.setFixtureLoader { name ->
+      runCatching {
+        service.assets.open("mock/$name").bufferedReader().use { it.readText() }
+      }.getOrNull()
+    }
     voiceInput.setSimControlListener { event, _, _ ->
       when (event) {
         "ENGINE_SHUTDOWN" -> com.hkparking.copilot.bridge.TripPlatformEvents.emit(
@@ -427,6 +453,35 @@ object Bindings {
 
   fun onBridgeStopped() {
     voiceInput.setSimControlListener(null)
+    bridgeLocationSource.stop()
+    bridgeLocationAttached = false
+  }
+
+  private fun jvmHost(): Boolean = runCatching { android.os.Looper.getMainLooper() }.getOrNull() == null
+
+  private fun ensureBridgeSimReceiver(service: com.hkparking.copilot.FloatingBubbleService) {
+    if (activeReceiver == null) {
+      activeReceiver = SimEventReceiver(
+        onEventHandled = {
+          val current = activeService
+          if (current != null) current.updateCapsuleVisual()
+        },
+      )
+    }
+    if (receiverRegistered) return
+    val appContext = runCatching { service.applicationContext }.getOrNull() ?: service
+    val receiver = activeReceiver ?: return
+    val result = runCatching { SimEventReceiver.register(appContext, receiver) }
+    if (result.isSuccess) {
+      receiverRegistered = true
+    } else {
+      runCatching {
+        android.util.Log.w(
+          "SimEventReceiver",
+          "register failed reason=${result.exceptionOrNull()?.javaClass?.simpleName}",
+        )
+      }
+    }
   }
 
   fun fixturePostOrNull(path: String, body: String): Map<String, Any?>? {

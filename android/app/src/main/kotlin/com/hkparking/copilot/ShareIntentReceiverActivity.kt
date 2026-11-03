@@ -3,6 +3,7 @@ package com.hkparking.copilot
 import com.hkparking.copilot.share.ParsedShare
 import com.hkparking.copilot.share.ShareIntake
 import com.hkparking.copilot.share.ShareTextParser
+import com.hkparking.copilot.voice.ZhHkTemplates
 
 class ShareIntentReceiverActivity : android.app.Activity {
   private val service: FloatingBubbleService?
@@ -47,19 +48,13 @@ class ShareIntentReceiverActivity : android.app.Activity {
       return
     }
     val permissions = readPermissions()
-    val gate = StartupPermissionChecker.checkBeforeStart(StartupEntry.B_2, permissions)
-    lastPermissionGate = gate
-    if (!gate.allowedToStartFgs) {
-      failureReason = MISSING_PERMISSION
-      isFinished = gate.activityFinished
-      if (gate.repairNotificationText != null) postRepairNotification(gate.repairNotificationText)
+    if (!acceptBridgeShare(parsed, permissions)) {
+      if (permissions.postNotificationsGranted && lastBridgeMissing.isNotEmpty()) {
+        postRepairNotification(ZhHkTemplates.permissionRepair(lastBridgeMissing.joinToString("、")))
+      }
       finish()
       return
     }
-    com.hkparking.copilot.bridge.TripPlatformEvents.emit(
-      "onShareIntake",
-      mapOf("title" to parsed.title, "lat" to parsed.lat, "lng" to parsed.lng, "hasUrl" to parsed.hasUrl),
-    )
     startActivity(android.content.Intent(this, MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
     isFinished = true
     finish()
@@ -83,6 +78,36 @@ class ShareIntentReceiverActivity : android.app.Activity {
     private set
   var lastParsed: ParsedShare? = null
     private set
+  var lastBridgeMissing: List<String> = emptyList()
+    private set
+
+  fun acceptBridgeShare(parsed: ParsedShare, permissions: PermissionCheckInput): Boolean {
+    val missing = mutableListOf<String>()
+    if (!permissions.fineLocationGranted || permissions.coarseLocationOnly) {
+      missing += StartupPermissionChecker.FINE_LOCATION
+    }
+    if (!permissions.postNotificationsGranted) missing += StartupPermissionChecker.NOTIFICATIONS
+    lastBridgeMissing = missing
+    lastPermissionGate = PermissionGateResult(
+      allowedToStartFgs = missing.isEmpty(),
+      missingItems = missing,
+      activityFinished = missing.isNotEmpty(),
+    )
+    if (missing.isNotEmpty()) {
+      failureReason = MISSING_PERMISSION
+      isFinished = true
+      com.hkparking.copilot.bridge.TripPlatformEvents.emit(
+        MISSING_PERMISSION,
+        mapOf("missingItems" to missing),
+      )
+      return false
+    }
+    com.hkparking.copilot.bridge.TripPlatformEvents.emit(
+      "onShareIntake",
+      mapOf("title" to parsed.title, "lat" to parsed.lat, "lng" to parsed.lng, "hasUrl" to parsed.hasUrl),
+    )
+    return true
+  }
 
   fun launchFromShare(
     text: String?,

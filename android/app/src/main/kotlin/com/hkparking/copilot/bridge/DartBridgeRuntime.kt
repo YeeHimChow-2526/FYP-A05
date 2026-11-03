@@ -45,9 +45,9 @@ class DartBridgeRuntime(private val service: FloatingBubbleService) {
     }
     foregroundHeld = true
     wired = true
+    Bindings.onBridgeStarted(service)
     wireLocation()
     registerEngine()
-    Bindings.onBridgeStarted(service)
     emitShare(intent)
     TripPlatformEvents.emit("onNetworkChanged", mapOf("online" to Bindings.networkStatus.isOnline()))
     TripPlatformBridge.notifyForegroundReady(true)
@@ -68,7 +68,7 @@ class DartBridgeRuntime(private val service: FloatingBubbleService) {
 
   fun applySamplingTier(tier: String) {
     val parsed = runCatching { SamplingTier.valueOf(tier) }.getOrDefault(SamplingTier.FAR)
-    Bindings.locationSource.applySamplingTier(parsed)
+    Bindings.bridgeLocationSource.applySamplingTier(parsed)
   }
 
   fun setNotificationText(text: String) {
@@ -138,11 +138,12 @@ class DartBridgeRuntime(private val service: FloatingBubbleService) {
   }
 
   private fun wireLocation() {
-    Bindings.locationSource.setFixListener { fix -> emitFix(fix) }
-    Bindings.locationSource.setTickListener { nowMs ->
+    val source = Bindings.bridgeLocationSource
+    source.setFixListener { fix -> emitFix(fix) }
+    source.setTickListener { nowMs ->
       TripPlatformEvents.emit("onTick", mapOf("nowMs" to nowMs))
     }
-    runCatching { Bindings.locationSource.start() }
+    runCatching { source.start() }
   }
 
   private fun emitFix(fix: LocFix) {
@@ -206,8 +207,9 @@ class DartBridgeRuntime(private val service: FloatingBubbleService) {
 
   private fun unwire() {
     wired = false
-    Bindings.locationSource.setFixListener(null)
-    Bindings.locationSource.setTickListener(null)
+    val source = Bindings.bridgeLocationSource
+    source.setFixListener(null)
+    source.setTickListener(null)
     Bindings.onBridgeStopped()
     unregisterEngine()
   }

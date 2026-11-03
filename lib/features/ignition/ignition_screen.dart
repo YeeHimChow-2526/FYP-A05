@@ -4,6 +4,7 @@ import 'package:copilot/app/trip_runtime.dart';
 import 'package:copilot/core/constants/app_colors.dart';
 import 'package:copilot/core/platform/overlay_channel.dart';
 import 'package:copilot/core/preferences/preference_manager.dart';
+import 'package:copilot/core/trip/trip_controller.dart';
 import 'package:copilot/core/trip/trip_types.dart';
 import 'package:copilot/features/trip_history/today_trip_screen.dart';
 import 'package:flutter/material.dart';
@@ -21,19 +22,35 @@ class _IgnitionScreenState extends State<IgnitionScreen> {
   String _nativeState = '';
   String _nativeDataJson = '';
   String? _permissionBanner;
-  bool _tripStarted = false;
+  TripController? _watched;
+  StreamSubscription<TripSnapshot>? _tripChanges;
+
+  bool get _tripStarted => TripRuntime.instance.controller?.tripRunning == true;
 
   @override
   void initState() {
     super.initState();
     OverlayChannel.attach();
     OverlayChannel.tripStateListeners.add(_onTripStateChanged);
+    _watchTrip();
   }
 
   @override
   void dispose() {
+    _tripChanges?.cancel();
     OverlayChannel.tripStateListeners.remove(_onTripStateChanged);
     super.dispose();
+  }
+
+  void _watchTrip() {
+    final controller = TripRuntime.instance.controller;
+    if (identical(controller, _watched)) return;
+    _tripChanges?.cancel();
+    _watched = controller;
+    if (controller == null) return;
+    _tripChanges = controller.changes.listen((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   void _onTripStateChanged(String state, String dataJson) {
@@ -46,18 +63,17 @@ class _IgnitionScreenState extends State<IgnitionScreen> {
   Future<void> _startFromGesture() async {
     try {
       await TripRuntime.instance.attach();
+      _watchTrip();
       await TripRuntime.instance.platform!.checkStartGate();
       final outcome = await TripRuntime.instance.controller!.start(StartupEntry.a2);
       if (!mounted) return;
       setState(() {
-        _tripStarted = outcome.accepted;
         _permissionBanner = outcome.accepted ? null : '未能開始行程';
       });
     } on MissingPluginException {
       return;
     } on PlatformException catch (error) {
       if (!mounted) return;
-      setState(() => _tripStarted = false);
       await _showPermissionGap(error);
     }
   }

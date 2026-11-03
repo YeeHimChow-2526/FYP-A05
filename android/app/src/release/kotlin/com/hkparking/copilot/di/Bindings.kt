@@ -26,6 +26,8 @@ class ConnectivityNetworkStatus : NetworkStatusProvider {
 object Bindings {
   val voiceInput: VoiceInput = SttVoiceInput()
   val locationSource: PlatformLocationSource = PlatformLocationSource()
+  val bridgeLocationSource: LocationSource = locationSource
+  private var bridgeLocationAttached = false
   // Step 3.5（SC-018）：release 一律打真雲端；URL／key 由建置設定注入（android/local.properties／-P／環境變數）。
   // 未設定或唔合規 → HttpApiTransport 回 networkError（離線分支），唔 crash；release 唔准 http。
   val apiTransport: ApiTransport = HttpApiTransport(
@@ -100,9 +102,16 @@ object Bindings {
 
   fun transportUseRealApi(): Boolean = true
 
-  fun onBridgeStarted(service: com.hkparking.copilot.FloatingBubbleService) {}
+  fun onBridgeStarted(service: com.hkparking.copilot.FloatingBubbleService) {
+    if (bridgeLocationAttached) return
+    bridgeLocationAttached = true
+    locationSource.attach(service)
+  }
 
-  fun onBridgeStopped() {}
+  fun onBridgeStopped() {
+    bridgeLocationSource.stop()
+    bridgeLocationAttached = false
+  }
 
   fun fixturePostOrNull(path: String, body: String): Map<String, Any?>? = null
 }
