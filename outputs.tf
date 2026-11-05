@@ -1,11 +1,6 @@
-output "api_ip_address" {
-  value       = google_compute_global_address.api.address
-  description = "Point the configured API DNS name at this HTTPS load-balancer IP."
-}
-
 output "api_base_url" {
-  value       = "https://${var.api_domain}"
-  description = "External HTTPS base URL for the FastAPI service."
+  value       = google_cloud_run_v2_service.backend.uri
+  description = "Generated HTTPS URL for the Cloud Run API service."
 }
 
 output "state_snapshot_bucket" {

@@ -76,7 +76,7 @@ resource "google_storage_bucket_iam_member" "snapshot_reader" {
 resource "google_cloud_run_v2_service" "backend" {
   name     = "backend-ai-service"
   location = var.region
-  ingress  = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
+  ingress  = "INGRESS_TRAFFIC_ALL"
 
   template {
     service_account = google_service_account.app_sa.email
@@ -133,10 +133,15 @@ resource "google_cloud_run_v2_service" "backend" {
   ]
 }
 
-resource "google_cloud_run_v2_service_iam_member" "backend_load_balancer_invoker" {
+resource "google_cloud_run_v2_service_iam_member" "backend_public_invoker" {
   project  = var.project_id
   name     = google_cloud_run_v2_service.backend.name
   location = var.region
   role     = "roles/run.invoker"
   member   = "allUsers"
+}
+
+moved {
+  from = google_cloud_run_v2_service_iam_member.backend_load_balancer_invoker
+  to   = google_cloud_run_v2_service_iam_member.backend_public_invoker
 }

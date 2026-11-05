@@ -15,8 +15,9 @@ The API source is in [`server/`](./server/). It implements:
 - `POST /v1/feedback/trip-report`
 
 All API routes require `X-Internal-API-Key`. The key is a client identifier,
-not a security boundary; rate limiting is configured at Cloud Armor. `/healthz`
-is intentionally unauthenticated for the Cloud Run health check.
+not a security boundary. The service uses Cloud Run's public `run.app` URL and
+does not have Cloud Armor rate limiting; `/healthz` is intentionally
+unauthenticated for the Cloud Run health check.
 
 ### Local development
 
@@ -66,9 +67,10 @@ transaction then checks active Firestore locks and writes the session lock.
 
 The Terraform configuration enables required Google APIs and provisions
 Firestore, a private GCS snapshot bucket, Secret Manager secrets, Artifact
-Registry, the backend Cloud Run service, and an external HTTPS load balancer
-with Cloud Armor IP throttling. It does not create placeholder frontend or
-data-ingestion services.
+Registry, and a publicly reachable backend Cloud Run service. Cloud Run provides
+the service's generated HTTPS `run.app` URL; no custom domain, DNS record,
+external load balancer, or Cloud Armor policy is configured. It does not create
+placeholder frontend or data-ingestion services.
 
 ### 1. Prepare the GCP project
 
@@ -88,22 +90,20 @@ gcloud billing projects describe YOUR_GCP_PROJECT_ID
 
 Confirm billing is enabled. The deployer needs permission to enable project
 services, create service accounts and IAM bindings, and administer Cloud Run,
-Firestore, Cloud Storage, Secret Manager, Artifact Registry, Cloud Build, and
-Compute/Cloud Armor resources. A project Owner can bootstrap the stack; an
+Firestore, Cloud Storage, Secret Manager, Artifact Registry, and Cloud Build
+resources. A project Owner can bootstrap the stack; an
 administrator can instead grant narrower roles according to organization
 policy.
 
 ### 2. Configure Terraform and create the foundation
 
 Copy [`terraform.tfvars.example`](./terraform.tfvars.example) to
-`terraform.tfvars` and replace the project ID, domain, and bucket name. Bucket
-names are globally unique, lowercase, and cannot be changed after creation.
-Use a DNS domain that you own; the HTTPS certificate will not become active
-until its DNS A record points to the load balancer IP.
+`terraform.tfvars` and replace the project ID and bucket name. Bucket names are
+globally unique, lowercase, and cannot be changed after creation.
 
 ```sh
 cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars with your project, DNS name, and unique bucket name.
+# Edit terraform.tfvars with your project ID and unique bucket name.
 terraform init
 terraform plan
 ```
@@ -152,24 +152,22 @@ gcloud builds submit server \
   --tag "asia-east2-docker.pkg.dev/YOUR_GCP_PROJECT_ID/hkparking/server:2.9.1"
 ```
 
-### 4. Deploy and connect DNS
+### 4. Deploy and get the Cloud Run URL
 
 Review the full plan, then create the remaining resources:
 
 ```sh
 terraform plan
 terraform apply
-terraform output api_ip_address
+terraform output -raw api_base_url
 ```
 
-Create an `A` record for `api_domain` pointing at `api_ip_address`. Wait for
-DNS propagation and Google-managed certificate provisioning before testing
-HTTPS. The backend permits unauthenticated invocation at IAM only because the
-Cloud Run ingress setting rejects traffic that does not arrive through the
-load balancer. Cloud Armor handles IP throttling; the API does not add a
-second in-container rate limiter. The HTTPS load balancer injects
-`X-Load-Balancer-Client-IP`; the API uses that header for crowd-report grouping
-and does not accept a client-supplied IP in JSON.
+The backend permits unauthenticated invocation at IAM so that the generated
+Cloud Run URL is reachable. The application still requires
+`X-Internal-API-Key`, but this is not a security boundary. There is no Cloud
+Armor IP throttling. Crowd-report grouping currently depends on the
+`X-Load-Balancer-Client-IP` header, so that endpoint requires additional
+configuration before it can be used safely without the load balancer.
 
 ### 5. Deploy Firestore rules and indexes
 
@@ -190,10 +188,9 @@ Terraform workspace for both the foundation and full applies. Never commit
 
 ### Cost and remaining setup
 
-Cloud Run can scale to zero, but Firestore, storage, Cloud Armor, and especially
-the external HTTPS load balancer can incur charges. Check current GCP pricing
-and set project budgets/alerts before applying. No resources are created in
-GCP by this repository until you run `terraform apply`.
+Cloud Run can scale to zero, but Firestore and storage can incur charges. Check
+current GCP pricing and set project budgets/alerts before applying. No resources
+are created in GCP by this repository until you run `terraform apply`.
 
 The current scope does not include DATA.GOV.HK ingestion/history workers,
 official POI data, Gemini perk reconciliation, or the 7-day/14-day chronic
