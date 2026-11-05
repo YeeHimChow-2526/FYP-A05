@@ -16,7 +16,7 @@ The API source is in [`server/`](./server/). It implements:
 
 All API routes require `X-Internal-API-Key`. The key is a client identifier,
 not a security boundary. The service uses Cloud Run's public `run.app` URL and
-does not have Cloud Armor rate limiting; `/healthz` is intentionally
+does not have Cloud Armor rate limiting; `/health` is intentionally
 unauthenticated for the Cloud Run health check.
 
 ### Local development
