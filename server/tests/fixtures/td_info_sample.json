@@ -1,0 +1,84 @@
+﻿{
+ "car_park": [
+  {
+   "park_id": "tdc_a_fresh",
+   "name_tc": "apm 停車場",
+   "name_en": "apm Car Park",
+   "latitude": 22.31255,
+   "longitude": 114.22512,
+   "district_tc": "",
+   "district_en": "Kwun Tong",
+   "opening_status": "OPEN"
+  },
+  {
+   "park_id": "tdc_b_full",
+   "name_tc": "裕民坊停車場",
+   "name_en": "Yue Man Square Car Park",
+   "latitude": 22.3133,
+   "longitude": 114.2255,
+   "district_tc": "",
+   "district_en": "Kwun Tong",
+   "opening_status": "OPEN"
+  },
+  {
+   "park_id": "tdc_b_flag",
+   "name_tc": "創紀之城停車場",
+   "name_en": "Millennium City Car Park",
+   "latitude": 22.311,
+   "longitude": 114.224,
+   "district_tc": "",
+   "district_en": "Kwun Tong",
+   "opening_status": "OPEN"
+  },
+  {
+   "park_id": "tdc_c_closed",
+   "name_tc": "海富中心停車場",
+   "name_en": "Admiralty Centre Car Park",
+   "latitude": 22.279,
+   "longitude": 114.165,
+   "district_tc": "",
+   "district_en": "Central & Western",
+   "opening_status": "OPEN"
+  },
+  {
+   "park_id": "tdc_a_stale",
+   "name_tc": "新城市廣場停車場",
+   "name_en": "New Town Plaza Car Park",
+   "latitude": 22.3818,
+   "longitude": 114.1888,
+   "district_tc": "",
+   "district_en": "Sha Tin",
+   "opening_status": "OPEN"
+  },
+  {
+   "park_id": "tdc_out_bbox",
+   "name_tc": "界外停車場",
+   "name_en": "Out Of Bbox Car Park",
+   "latitude": 23.1291,
+   "longitude": 113.2644,
+   "district_tc": "",
+   "district_en": "Guangzhou",
+   "opening_status": "OPEN"
+  },
+  {
+   "park_id": "tdc_moto_only",
+   "name_tc": "電單車場",
+   "name_en": "Motorcycle Car Park",
+   "latitude": 22.32,
+   "longitude": 114.17,
+   "district_tc": "",
+   "district_en": "Yau Tsim Mong",
+   "opening_status": "OPEN"
+  },
+  {
+   "park_id": "tdc_monthly_only",
+   "name_tc": "月租場",
+   "name_en": "Monthly Car Park",
+   "latitude": 22.32,
+   "longitude": 114.17,
+   "district_tc": "",
+   "district_en": "Yau Tsim Mong",
+   "opening_status": "OPEN"
+  }
+ ]
+}

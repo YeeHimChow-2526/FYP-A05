@@ -1,0 +1,159 @@
+﻿{
+ "car_park": [
+  {
+   "park_id": "tdc_a_fresh",
+   "vehicle_type": [
+    {
+     "type": "P",
+     "service_category": [
+      {
+       "category": "HOURLY",
+       "vacancy_type": "A",
+       "vacancy": 42,
+       "lastupdate": "2026-11-05 22:25:00"
+      }
+     ]
+    },
+    {
+     "type": "M",
+     "service_category": [
+      {
+       "category": "HOURLY",
+       "vacancy_type": "A",
+       "vacancy": 3,
+       "lastupdate": "2026-11-05 22:25:00"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "park_id": "tdc_b_full",
+   "vehicle_type": [
+    {
+     "type": "P",
+     "service_category": [
+      {
+       "category": "HOURLY",
+       "vacancy_type": "B",
+       "vacancy": 0,
+       "lastupdate": "2026-11-05 22:25:00"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "park_id": "tdc_b_flag",
+   "vehicle_type": [
+    {
+     "type": "P",
+     "service_category": [
+      {
+       "category": "HOURLY",
+       "vacancy_type": "B",
+       "vacancy": 1,
+       "lastupdate": "2026-11-05 22:25:00"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "park_id": "tdc_c_closed",
+   "vehicle_type": [
+    {
+     "type": "P",
+     "service_category": [
+      {
+       "category": "HOURLY",
+       "vacancy_type": "C",
+       "vacancy": 0,
+       "lastupdate": "2026-11-05 22:25:00"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "park_id": "tdc_a_stale",
+   "vehicle_type": [
+    {
+     "type": "P",
+     "service_category": [
+      {
+       "category": "HOURLY",
+       "vacancy_type": "A",
+       "vacancy": 17,
+       "lastupdate": "2026-11-05 21:40:00"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "park_id": "tdc_out_bbox",
+   "vehicle_type": [
+    {
+     "type": "P",
+     "service_category": [
+      {
+       "category": "HOURLY",
+       "vacancy_type": "A",
+       "vacancy": 5,
+       "lastupdate": "2026-11-05 22:25:00"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "park_id": "tdc_no_info",
+   "vehicle_type": [
+    {
+     "type": "P",
+     "service_category": [
+      {
+       "category": "HOURLY",
+       "vacancy_type": "A",
+       "vacancy": 9,
+       "lastupdate": "2026-11-05 22:25:00"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "park_id": "tdc_moto_only",
+   "vehicle_type": [
+    {
+     "type": "M",
+     "service_category": [
+      {
+       "category": "HOURLY",
+       "vacancy_type": "A",
+       "vacancy": 4,
+       "lastupdate": "2026-11-05 22:25:00"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "park_id": "tdc_monthly_only",
+   "vehicle_type": [
+    {
+     "type": "P",
+     "service_category": [
+      {
+       "category": "MONTHLY",
+       "vacancy_type": "A",
+       "vacancy": 8,
+       "lastupdate": "2026-11-05 22:25:00"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

@@ -55,13 +55,46 @@ Each referenced snapshot must contain `region_id`, timezone-aware
 `server/assets/hk_poi_master.json` currently contains no POIs because the
 specified Hong Kong POI master was not included. Supply records with
 `poi_id`, `name`, `aliases`, `lat`, and `lng` before enabling name-only
-destination resolution. The government data URLs, their source schemas, and
-the ingestion workers are also not present; the API does not fabricate data
+destination resolution. Only the TD car park ingest (below) exists so far; other
+government sources and scheduled workers are not present; the API does not fabricate data
 when the manifest is missing and returns `503` instead.
 Name-only destination requests also return `503` until the POI file is seeded.
 The commit endpoint reads the latest GCS vacancy value before opening the
 Firestore transaction because Firestore cannot transact on GCS objects; the
 transaction then checks active Firestore locks and writes the session lock.
+
+### Real vacancy ingest (TD)
+
+`server/app/ingest/td_carpark.py` turns the Transport Department open-data
+car park feeds into one citywide region snapshot. It uses no AI and needs no API key.
+
+- Sources (env-overridable `TD_VACANCY_URL` / `TD_INFO_URL`):
+  `https://resource.data.one.gov.hk/td/carpark/vacancy_all.json` (≈1 min updates, ETag)
+  and `https://resource.data.one.gov.hk/td/carpark/basic_info_all.json` (names, WGS84 coords).
+- Mapping: `carpark_id=park_id`, `name=name_tc`, lat/lng from basic info (rows outside the
+  HK bbox are dropped). Private car (`P`) + `HOURLY` only: type `A` → count, `B` with 0 → 0,
+  otherwise `-1`; `C` → `is_open=false`, `-1`; per-carpark `lastupdate` older than 30 min → `-1`.
+  Per-carpark `region_id` = district (e.g. `KWUN_TONG`); the snapshot region is `HK_TD`, and
+  `source_snapshot_ts` = the feed's `Last-Modified`. `source_status` is `degraded` when fewer
+  than 300 car parks map, or after 3 consecutive fetch failures (the last snapshot is kept, and
+  the API marks it stale after 600 s anyway).
+- Writes: `regions/HK_TD/snapshot.json`, then `manifest.json` (only when it changes), then
+  `state/td_carpark.json` (ETag, sha256, failure count). All writes use `if_generation_match`, and a
+  412 means another run won (exit 0). A 304 or an unchanged body writes nothing. Manifest region values
+  are strings only. `INCLUDE_DEMO_REGION=1` keeps `MK_DEMO` listed next to `HK_TD`.
+- Run:
+
+```sh
+cd server && python -m app.ingest.td_carpark --dry-run --out /tmp/s.json   # no GCS
+bash scripts/run_ingest_once.sh [gs://bucket]                             # writes + lists bucket
+```
+
+  `scripts/upload_demo_seed.sh` no longer replaces a real (`is_demo: false`) manifest unless
+  `FORCE_DEMO=1`. Without that flag it refreshes only `regions/MK_DEMO/snapshot.json`.
+- Cost: about 100 KB per snapshot. At a 2-minute day / 5-minute night cadence that is roughly 1–2 GCS Class A
+  writes per run, well under US$1/month, plus Cloud Run Job time once it's scheduled. The
+  Scheduler and Job are not in Terraform yet. Until they are, the data goes stale 10 minutes after the last
+  manual run.
 
 ## Cloud deployment
 

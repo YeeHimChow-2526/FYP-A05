@@ -140,6 +140,23 @@ class ApiTests(unittest.TestCase):
         self.assertTrue(payload["server_now"].endswith("+08:00"))
         self.assertTrue(payload["await_voice_reply"])
 
+    def test_recommend_cards_include_carpark_lat_lng(self):
+        response = self.client.post(
+            "/v1/recommend-and-route",
+            headers=self.headers,
+            json={
+                "session_id": "sess_1",
+                "origin_lat": 22.3,
+                "origin_lng": 114.16,
+                "dest_lat": 22.3152,
+                "dest_lng": 114.1685,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        card = response.json()["cards"][0]
+        self.assertEqual(card["lat"], 22.3152)
+        self.assertEqual(card["lng"], 114.1685)
+
     def test_name_only_recommend_requires_a_poi_catalog(self):
         response = self.client.post(
             "/v1/recommend-and-route",
