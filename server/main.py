@@ -59,7 +59,7 @@ def create_app(
         if close is not None:
             await close()
 
-    app = FastAPI(title="Hong Kong Parking API", version="2.9.1", lifespan=lifespan)
+    app = FastAPI(title="Hong Kong Parking API", version="2.9.2", lifespan=lifespan)
     app.state.settings = config
 
     @app.middleware("http")
