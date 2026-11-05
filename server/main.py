@@ -59,12 +59,13 @@ def create_app(
         if close is not None:
             await close()
 
-    app = FastAPI(title="Hong Kong Parking API", version="2.9.1", lifespan=lifespan)
+    app = FastAPI(title="Hong Kong Parking API", version="2.9.2", lifespan=lifespan, redirect_slashes=False)
     app.state.settings = config
 
     @app.middleware("http")
     async def authenticate_client(request: Request, call_next):
-        if request.url.path == "/healthz":
+        # /health only — Cloud Run GFE intercepts paths ending in "z" (e.g. /healthz).
+        if request.url.path.rstrip("/") == "/health":
             return await call_next(request)
         if not config.internal_api_key:
             return JSONResponse(
@@ -76,8 +77,8 @@ def create_app(
             return JSONResponse(status_code=401, content={"detail": "Invalid API key"})
         return await call_next(request)
 
-    @app.get("/healthz")
-    async def healthz():
+    @app.get("/health")
+    async def health():
         return {"status": "ok"}
 
     @app.post("/v1/recommend-and-route")

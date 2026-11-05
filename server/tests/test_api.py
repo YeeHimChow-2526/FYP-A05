@@ -101,7 +101,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
 
     def test_health_check_does_not_require_api_key(self):
-        response = self.client.get("/healthz")
+        response = self.client.get("/health")
         self.assertEqual(response.status_code, 200)
 
     def test_client_ip_comes_from_load_balancer_header(self):
