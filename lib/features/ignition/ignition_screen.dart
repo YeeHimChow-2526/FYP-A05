@@ -2,11 +2,14 @@ import 'dart:async';
 
 import 'package:copilot/app/trip_runtime.dart';
 import 'package:copilot/core/constants/app_colors.dart';
+import 'package:copilot/core/nav/nav_engine.dart';
 import 'package:copilot/core/platform/overlay_channel.dart';
 import 'package:copilot/core/preferences/preference_manager.dart';
 import 'package:copilot/core/trip/trip_controller.dart';
 import 'package:copilot/core/trip/trip_types.dart';
+import 'package:copilot/features/nav_shell/home_map_backdrop.dart';
 import 'package:copilot/features/nav_shell/nav_shell_screen.dart';
+import 'package:copilot/features/nav_shell/pre_trip_bottom_bar.dart';
 import 'package:copilot/features/trip_history/today_trip_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -26,14 +29,16 @@ class _IgnitionScreenState extends State<IgnitionScreen> {
   TripController? _watched;
   StreamSubscription<TripSnapshot>? _tripChanges;
 
-  bool get _tripStarted => TripRuntime.instance.controller?.snapshot.sessionId != null;
+  NavEngine? get _navEngine =>
+      TripRuntime.instance.navEngine ??
+      TripRuntime.instance.controller?.navEngine;
 
   @override
   void initState() {
     super.initState();
     OverlayChannel.attach();
     OverlayChannel.tripStateListeners.add(_onTripStateChanged);
-    _watchTrip();
+    unawaited(_ensureRuntime());
   }
 
   @override
@@ -41,6 +46,18 @@ class _IgnitionScreenState extends State<IgnitionScreen> {
     _tripChanges?.cancel();
     OverlayChannel.tripStateListeners.remove(_onTripStateChanged);
     super.dispose();
+  }
+
+  Future<void> _ensureRuntime() async {
+    try {
+      await TripRuntime.instance.attach();
+      final engine = _navEngine;
+      if (engine != null) {
+        unawaited(engine.ensureInitialized());
+      }
+    } catch (_) {}
+    _watchTrip();
+    if (mounted) setState(() {});
   }
 
   void _watchTrip() {
@@ -66,7 +83,9 @@ class _IgnitionScreenState extends State<IgnitionScreen> {
       await TripRuntime.instance.attach();
       _watchTrip();
       await TripRuntime.instance.platform!.checkStartGate();
-      final outcome = await TripRuntime.instance.controller!.start(StartupEntry.a2);
+      final outcome = await TripRuntime.instance.controller!.start(
+        StartupEntry.a2,
+      );
       if (!mounted) return;
       setState(() {
         _permissionBanner = outcome.accepted ? null : '未能開始行程';
@@ -115,127 +134,158 @@ class _IgnitionScreenState extends State<IgnitionScreen> {
       status = null;
     }
     if (!mounted) return;
-    final missing = error.details is Map ? (error.details as Map)['missingItems'] : null;
+    final missing = error.details is Map
+        ? (error.details as Map)['missingItems']
+        : null;
     final banner = missing == null
         ? '請查看主畫面頂部權限狀態橫額。請泊好車後再處理。'
         : '權限未齊：$missing。請查看主畫面頂部權限狀態橫額。請泊好車後再處理。';
     setState(() {
       _permissionBanner = status == null ? banner : '$banner $status';
     });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('請查看主畫面頂部權限狀態橫額。請泊好車後再處理。')),
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('請查看主畫面頂部權限狀態橫額。請泊好車後再處理。')));
+  }
+
+  void _openToday() {
+    Navigator.of(context)
+        .push(MaterialPageRoute<void>(builder: (_) => const TodayTripScreen()));
+  }
+
+  void _openSettings() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.cardBackgroundSolid,
+      builder: (context) {
+        return SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            padding: const EdgeInsets.all(16),
+            children: [
+              Text(
+                '設定',
+                style: TextStyle(color: AppColors.textPrimary, fontSize: 18),
+              ),
+              const SizedBox(height: 12),
+              for (final item in _preferenceItems)
+                ListTile(
+                  title: Text(
+                    item.$2,
+                    style: TextStyle(
+                      color: _preferences.preference == item.$1
+                          ? AppColors.amberSteady
+                          : AppColors.textPrimary,
+                    ),
+                  ),
+                  onTap: () {
+                    unawaited(_selectPreference(item.$1));
+                    Navigator.of(context).pop();
+                  },
+                ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(
+                  '本程熱詞',
+                  style: TextStyle(color: AppColors.textPrimary),
+                ),
+                value: _preferences.hotwordEnabled,
+                activeThumbColor: AppColors.statusVacancyGreen,
+                onChanged: (enabled) {
+                  unawaited(_toggleHotword(enabled));
+                },
+              ),
+              Text(
+                _nativeState.isEmpty ? '原生狀態 —' : '原生狀態 $_nativeState',
+                style: TextStyle(color: AppColors.textSecondary),
+              ),
+              if (_nativeDataJson.isNotEmpty)
+                Text(
+                  _nativeDataJson,
+                  style: TextStyle(color: AppColors.textSecondary),
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final controller = TripRuntime.instance.controller;
-    if (controller != null && controller.snapshot.sessionId != null) {
-      return NavShellScreen(
-        controller: controller,
-        navEngine: TripRuntime.instance.navEngine ?? controller.navEngine,
-      );
-    }
+    final inTrip = controller != null && controller.snapshot.sessionId != null;
+    final engine = _navEngine ?? controller?.navEngine;
     return Scaffold(
       backgroundColor: AppColors.surface,
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(24),
-          children: [
-            Text(
-              '泊車副駕',
-              style: TextStyle(
-                color: AppColors.textPrimary,
-                fontSize: 28,
-                fontWeight: FontWeight.w700,
-              ),
+      extendBody: true,
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: HomeMapBackdrop(
+              key: const Key('stable_nav_view'),
+              navEngine: engine,
             ),
-            const SizedBox(height: 24),
-            if (_permissionBanner != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 16),
-                child: Text(
-                  _permissionBanner!,
-                  style: TextStyle(color: AppColors.amberSteady, fontSize: 16),
+          ),
+          if (inTrip)
+            InTripOverlay(
+              controller: controller,
+              navEngine: engine ?? controller.navEngine,
+            )
+          else
+            SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  children: [
+                    if (_permissionBanner != null)
+                      Material(
+                        color: AppColors.cardBackground,
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Text(
+                            _permissionBanner!,
+                            style: TextStyle(
+                              color: AppColors.amberSteady,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      ),
+                    const Spacer(),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: Material(
+                        color: AppColors.cardBackground,
+                        shape: const CircleBorder(),
+                        child: IconButton(
+                          key: const Key('pre_trip_settings'),
+                          tooltip: '設定',
+                          onPressed: _openSettings,
+                          icon: const Icon(
+                            Icons.tune,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            Text(
-              _tripStarted ? '已開程' : '未開程',
-              style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
             ),
-            const SizedBox(height: 12),
-            Text(
-              '三段偏好',
-              style: TextStyle(color: AppColors.textSecondary, fontSize: 16),
-            ),
-            const SizedBox(height: 12),
-            for (final item in _preferenceItems)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: _PreferenceTile(
-                  label: item.$2,
-                  selected: _preferences.preference == item.$1,
-                  onTap: () {
-                    unawaited(_selectPreference(item.$1));
-                  },
-                ),
-              ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(
-                '本程熱詞',
-                style: TextStyle(color: AppColors.textPrimary),
-              ),
-              value: _preferences.hotwordEnabled,
-              activeThumbColor: AppColors.statusVacancyGreen,
-              onChanged: (enabled) {
-                unawaited(_toggleHotword(enabled));
-              },
-            ),
-            const SizedBox(height: 24),
-            FilledButton(
-              onPressed: () {
-                unawaited(_startFromGesture());
-              },
-              child: const Text('出發'),
-            ),
-            const SizedBox(height: 12),
-            FilledButton(
-              onPressed: () {
-                unawaited(_startFromGesture());
-              },
-              child: const Text('現場即泊'),
-            ),
-            const SizedBox(height: 12),
-            OutlinedButton(
-              key: const ValueKey('open_today_trips'),
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const TodayTripScreen(),
-                  ),
-                );
-              },
-              child: const Text('今日行程'),
-            ),
-            const SizedBox(height: 32),
-            Text(
-              '原生狀態',
-              style: TextStyle(color: AppColors.textSecondary, fontSize: 16),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              _nativeState.isEmpty ? '—' : _nativeState,
-              style: TextStyle(color: AppColors.greySteady, fontSize: 20),
-            ),
-            if (_nativeDataJson.isNotEmpty)
-              Text(
-                _nativeDataJson,
-                style: TextStyle(color: AppColors.textSecondary),
-              ),
-          ],
-        ),
+        ],
       ),
+      bottomNavigationBar: inTrip
+          ? null
+          : PreTripBottomBar(
+              onDepart: () {
+                unawaited(_startFromGesture());
+              },
+              onHere: () {
+                unawaited(_startFromGesture());
+              },
+              onToday: _openToday,
+            ),
     );
   }
 }
@@ -245,35 +295,3 @@ const _preferenceItems = <(DriverPreference, String)>[
   (DriverPreference.smartHybrid, 'SMART_HYBRID'),
   (DriverPreference.metersFocus, 'METERS_FOCUS'),
 ];
-
-class _PreferenceTile extends StatelessWidget {
-  const _PreferenceTile({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: selected ? AppColors.cardBackgroundSolid : AppColors.cardBackground,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          child: Text(
-            label,
-            style: TextStyle(
-              color: selected ? AppColors.amberSteady : AppColors.textPrimary,
-              fontSize: 18,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}

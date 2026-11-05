@@ -61,6 +61,8 @@ class TripRuntime {
     final baseUrl = rawBase is String ? rawBase : '';
     final rawKey = config['apiKey'];
     final useReal = config['useRealApi'] == true;
+    final engine = config['useRealNavigation'] == true ? GoogleNavEngine() : FakeNavEngine();
+    navEngine = engine;
     final transport = useReal
         ? HttpApiTransport(
             baseUrl: baseUrl,
@@ -78,7 +80,6 @@ class TripRuntime {
     } catch (_) {
       resolver = null;
     }
-    final engine = config['useRealNavigation'] == true ? GoogleNavEngine() : FakeNavEngine();
     final tripController = TripController(
       platform: tripPlatform,
       api: api,

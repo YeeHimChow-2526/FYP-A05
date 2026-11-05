@@ -102,6 +102,7 @@
 | Step 4 | In-app Nav embed shell＋recommend 卡可見＋終點輸入；5 掣 stub | operable on `review/step4` |
 
 - [x] Step 4 operable：卡可見、圖打開（真 Nav 或 FakeNavEngine）、終點輸入可用 — commit: review/step4
+- [x] Step 4-fix operable：開機 HK map、兩態 chrome、in-repo compileSdk 36；**未 merge**（等 emulator＋Kenny） — commit: review/step4-fix
 
 - [x] Step 1 必做：原生 sim/ 模擬殼＋mock/*.json fixtures＋注入事件（屬 W-A.18；規格 docs/specs/04_mock_and_sim_shell.md），Step 1 完成前交付 — commit: dff84d8, 97bb2e6
 

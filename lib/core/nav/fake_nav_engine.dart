@@ -81,11 +81,11 @@ class _FakeNavPanel extends StatelessWidget {
     final origin = engine.userLat == null ? '—' : '${engine.userLat}, ${engine.userLng}';
     final dest = engine.activeTitle ?? '—';
     return ColoredBox(
-      color: const Color(0xFF101418),
+      color: const Color(0xFF1B4F72),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Text(
-          'FAKE NAV MAP\norigin $origin\nwaypoint $dest\nguidance ${engine.guidanceRunning}\nmute ${!engine.turnByTurnAudioEnabled}',
+          'HK map\n22.3193, 114.1694\nFAKE NAV MAP\norigin $origin\nwaypoint $dest\nguidance ${engine.guidanceRunning}\nmute ${!engine.turnByTurnAudioEnabled}',
           style: const TextStyle(color: Color(0xFFE0E0E0), fontSize: 16),
         ),
       ),

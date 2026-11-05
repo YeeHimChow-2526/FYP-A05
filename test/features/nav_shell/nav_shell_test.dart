@@ -132,4 +132,35 @@ void main() {
     await tester.pump();
     expect(controller.submitted, ['朗豪坊']);
   });
+
+  testWidgets('F-T2 in-trip circular chrome has no label bar', (tester) async {
+    final controller = _RecordingController();
+    final nav = FakeNavEngine();
+    await tester.pumpWidget(MaterialApp(home: NavShellScreen(controller: controller, navEngine: nav)));
+    expect(find.byKey(const Key('pre_trip_bottom_bar')), findsNothing);
+    expect(find.byKey(const Key('chrome_park')), findsOneWidget);
+    expect(find.byKey(const Key('chrome_exit')), findsOneWidget);
+    expect(find.text('羅盤'), findsNothing);
+    expect(find.text('搵位'), findsNothing);
+    expect(find.text('車場'), findsNothing);
+    expect(find.text('結束'), findsNothing);
+  });
+
+  testWidgets('F-T3 recommend strip hidden until cards exist', (tester) async {
+    final controller = _RecordingController();
+    final nav = FakeNavEngine();
+    await tester.pumpWidget(MaterialApp(home: NavShellScreen(controller: controller, navEngine: nav)));
+    expect(find.byKey(const Key('recommend_cards_strip')), findsNothing);
+    expect(find.byType(RecommendCardsStrip), findsNothing);
+
+  });
+
+  testWidgets('F-T3b non-empty cards show recommend strip', (tester) async {
+    final controller = _RecordingController();
+    controller.cards.add(_card());
+    final nav = FakeNavEngine();
+    await tester.pumpWidget(MaterialApp(home: NavShellScreen(controller: controller, navEngine: nav)));
+    expect(find.byKey(const Key('recommend_cards_strip')), findsOneWidget);
+    expect(find.byType(RecommendCardsStrip), findsOneWidget);
+  });
 }

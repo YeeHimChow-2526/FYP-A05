@@ -1,30 +1,52 @@
+import 'package:copilot/app/trip_runtime.dart';
 import 'package:copilot/features/ignition/ignition_screen.dart';
 import 'package:copilot/platform/trip_platform_channel.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+Future<void> _attach(WidgetTester tester) {
+  return tester.runAsync(() => TripRuntime.instance.attach());
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('C19 onFgsStopped shows trip not started', (tester) async {
+  testWidgets('F-T1 pre-trip shows HK map and bottom bar', (tester) async {
+    final channel = MethodChannel(ChannelTripPlatform.name);
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async => null);
+    await _attach(tester);
+    await tester.pumpWidget(const MaterialApp(home: IgnitionScreen()));
+    await tester.pumpAndSettle(const Duration(milliseconds: 50));
+    expect(find.byKey(const Key('home_map_backdrop')), findsOneWidget);
+    expect(find.byKey(const Key('fake_nav_view')), findsOneWidget);
+    expect(find.textContaining('22.3193, 114.1694'), findsWidgets);
+    expect(find.byKey(const Key('pre_trip_bottom_bar')), findsOneWidget);
+    expect(find.byKey(const Key('chrome_park')), findsNothing);
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
+  });
+
+  testWidgets('C19 onFgsStopped returns pre-trip bar and keeps map', (tester) async {
     final channel = MethodChannel(ChannelTripPlatform.name);
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
       if (call.method == 'startTripFgs') return true;
       return null;
     });
+    await _attach(tester);
     await tester.pumpWidget(const MaterialApp(home: IgnitionScreen()));
-    expect(find.text('未開程'), findsOneWidget);
+    await tester.pumpAndSettle(const Duration(milliseconds: 50));
+    expect(find.byKey(const Key('pre_trip_bottom_bar')), findsOneWidget);
+    expect(find.byKey(const Key('fake_nav_view')), findsOneWidget);
 
-    await tester.ensureVisible(find.widgetWithText(FilledButton, '出發'));
     await tester.tap(find.widgetWithText(FilledButton, '出發'));
     await tester.pump();
     await tester.runAsync(() async {
       await Future<void>.delayed(const Duration(milliseconds: 200));
     });
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('fake_nav_view')), findsOneWidget);
-    expect(find.text('已開程'), findsNothing);
+    expect(find.byKey(const Key('chrome_exit')), findsOneWidget);
+    expect(find.byKey(const Key('pre_trip_bottom_bar')), findsNothing);
+    expect(find.byKey(const Key('fake_nav_view')), findsOneWidget);
 
     const codec = StandardMethodCodec();
     await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
@@ -33,8 +55,9 @@ void main() {
       (_) {},
     );
     await tester.pump();
-    expect(find.text('未開程'), findsOneWidget);
-    expect(find.byKey(const ValueKey('fake_nav_view')), findsNothing);
+    expect(find.byKey(const Key('pre_trip_bottom_bar')), findsOneWidget);
+    expect(find.byKey(const Key('fake_nav_view')), findsOneWidget);
+    expect(find.byKey(const Key('chrome_exit')), findsNothing);
 
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
   });

@@ -110,3 +110,12 @@
 - 無 fix 時 origin 用 0,0，log 一次；主動推介先口播一次「暫時搵唔到你位置，請稍後再講一次」。
 - SIM_EVENT 例子：`adb emu geo fix 114.1686 22.3186` 然後 `adb shell am broadcast -a com.hkparking.copilot.SIM_EVENT --es event FIX --es value "22.3186,114.1686,20,8"`。無搖桿。
 - 清理延後（另 PR）：FBS overlay／膠囊／`SimJoystick*`／`SYSTEM_ALERT_WINDOW` 主路徑。本 PR 唔刪舊 Kotlin 檔。
+
+## V2 Step 4-fix（pending merge）
+
+- B1：冷啟動 `IgnitionScreen` 底層 `buildNavView()`，HK `22.3193, 114.1694`；Fake 文案含座標。偏好收入設定 sheet。
+- B2：`sessionId == null` → `PreTripBottomBar`；開程後底欄消失，`InTripCircularChrome`（無長 label 列）。
+- B3：compileSdk 36 in-repo＝`android/build.gradle.kts` `withPlugin` + `finalizeDsl(Action)`（唔用 afterEvaluate；上游 plugin compileSdk 35 時 `:google_navigation_flutter:checkDebugAarMetadata --rerun-tasks` 已過）。minSdk 33。pub-cache 手改已還原，唔係交差手段。
+- B4：真圖要 `local.properties` `MAPS_API_KEY` + `HKP_USE_REAL_NAVIGATION=true`。黑圖／`notAuthorized`＝未過。
+- B5：**未 merge**。Emulator API 35 `emulator-5554` 已見：冷啟動香港地圖（石硤尾／旺角，非黑圖）＋底欄；出發後底欄消失、圓形掣、地圖仍滿屏；輸入 Langham＋FIX／P 後見「朗豪坊停車場」卡。T&C 要手動同意一次。**等 Kenny 批准**先入 `v2-nav-embed`。
+- 單元測試：`HKP_USE_REAL_NAVIGATION=true` 時 `Step35NavigationSwitchTest` 會因 JVM 強制 sim 同 BuildConfig 不一致而紅；`-PHKP_USE_REAL_NAVIGATION=false` 全綠。呢個係既有測試假設，唔係今次殼回歸。
