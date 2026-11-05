@@ -180,6 +180,8 @@ class RecommendationService:
                     "carpark_id": carpark.carpark_id,
                     "name": carpark.name,
                     "type": carpark.type,
+                    "lat": carpark.lat,
+                    "lng": carpark.lng,
                     "vacancies": effective_vacancies,
                     "distance_meters": distance,
                     "fee_summary": perk.get("fee_summary", carpark.fee_summary),
