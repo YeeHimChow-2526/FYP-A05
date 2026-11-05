@@ -42,6 +42,7 @@ object Bindings {
   val navigation: NavigationPort = IntentNavigationPort { appContext }
   // Step 3.5（SC-018）：同 debug 對齊；release 永遠用真 Intent 導航。
   val activeNavigation: NavigationPort get() = navigation
+  val useRealNavigation: Boolean = true
   var todayTripStore: TodayTripStore? = null
     private set
   var todayTripSync: TodayTripSync? = null

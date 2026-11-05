@@ -26,7 +26,7 @@ abstract class TripPlatform {
   void setNotificationText(String text);
   void speak(String text);
   void interruptSpeech();
-  void launchGateNavigation(String label);
+  void launchGateNavigation(String label, {double? lat, double? lng});
 }
 
 typedef NowMs = int Function();

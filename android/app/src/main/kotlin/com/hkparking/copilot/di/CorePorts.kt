@@ -367,16 +367,17 @@ class HttpApiTransport(
   }
 }
 
-fun interface NavigationPort {
-  fun launchGateNavigation(carparkName: String): Boolean
+interface NavigationPort {
+  fun launchGateNavigation(carparkName: String, lat: Double? = null, lng: Double? = null): Boolean
 }
 
 class IntentNavigationPort(
   private val contextProvider: () -> android.content.Context?,
 ) : NavigationPort {
-  override fun launchGateNavigation(carparkName: String): Boolean {
+  override fun launchGateNavigation(carparkName: String, lat: Double?, lng: Double?): Boolean {
     val ctx = contextProvider() ?: return false
-    val q = java.net.URLEncoder.encode(carparkName, Charsets.UTF_8.name()).replace("+", "%20")
+    val query = if (lat != null && lng != null) "$lat,$lng" else carparkName
+    val q = java.net.URLEncoder.encode(query, Charsets.UTF_8.name()).replace("+", "%20")
     val uri = android.net.Uri.parse("google.navigation:q=$q&mode=d")
     val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, uri).apply {
       setPackage("com.google.android.apps.maps")
@@ -384,7 +385,7 @@ class IntentNavigationPort(
     }
     return runCatching {
       ctx.startActivity(intent)
-      android.util.Log.i("NavigationPort", "launchGateNavigation ok name=$carparkName")
+      android.util.Log.i("NavigationPort", "launchGateNavigation ok name=$carparkName lat=$lat lng=$lng")
       true
     }.getOrElse { err ->
       runCatching {

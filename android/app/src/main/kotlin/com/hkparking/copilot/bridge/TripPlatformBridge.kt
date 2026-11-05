@@ -266,7 +266,11 @@ object TripPlatformBridge {
         ok(null)
       }
       "launchGateNavigation" -> {
-        runtime?.launchGateNavigation(args["label"] as? String ?: "")
+        runtime?.launchGateNavigation(
+          args["label"] as? String ?: "",
+          (args["lat"] as? Number)?.toDouble(),
+          (args["lng"] as? Number)?.toDouble(),
+        )
         ok(null)
       }
       "getVoiceCapability" -> ok(runtime?.voiceCapability() ?: mapOf(
@@ -277,6 +281,7 @@ object TripPlatformBridge {
       ))
       "getTransportConfig" -> ok(mapOf(
         "useRealApi" to if (com.hkparking.copilot.BuildConfig.DEBUG) Bindings.transportUseRealApi() else true,
+        "useRealNavigation" to if (com.hkparking.copilot.BuildConfig.DEBUG) Bindings.useRealNavigation else true,
         "baseUrl" to com.hkparking.copilot.BuildConfig.HKP_API_BASE_URL,
         "apiKey" to com.hkparking.copilot.BuildConfig.HKP_API_KEY,
       ))

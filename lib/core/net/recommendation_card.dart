@@ -8,6 +8,8 @@ class RecommendationCard {
     required this.feeSummary,
     required this.spokenCue,
     required this.isStale,
+    this.gateLat,
+    this.gateLng,
   });
 
   final String carparkId;
@@ -18,6 +20,8 @@ class RecommendationCard {
   final String feeSummary;
   final String spokenCue;
   final bool isStale;
+  final double? gateLat;
+  final double? gateLng;
 
   RecommendationCard copyWith({int? vacancies, String? spokenCue}) {
     return RecommendationCard(
@@ -29,6 +33,8 @@ class RecommendationCard {
       feeSummary: feeSummary,
       spokenCue: spokenCue ?? this.spokenCue,
       isStale: isStale,
+      gateLat: gateLat,
+      gateLng: gateLng,
     );
   }
 }

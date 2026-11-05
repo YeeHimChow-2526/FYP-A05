@@ -34,6 +34,9 @@ dependencies:
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
+  # pub.dev 2026-11-05：stable 0.11.2（published 2026-10-13）。禁止同時加 google_maps_flutter。
+  # pub 無 tilde；~0.11.2 等價 >=0.11.2 <0.12.0。
+  google_navigation_flutter: ">=0.11.2 <0.12.0"
 
 dev_dependencies:
   flutter_test:

@@ -30,6 +30,7 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        isCoreLibraryDesugaringEnabled = true
     }
 
     defaultConfig {
@@ -50,6 +51,7 @@ android {
         // 只影響 debug：true = 改用 HttpApiTransport；release 一律打真雲端。
         buildConfigField("boolean", "HKP_USE_REAL_API", hkpSetting("HKP_USE_REAL_API").equals("true", ignoreCase = true).toString())
         buildConfigField("boolean", "HKP_USE_REAL_NAVIGATION", hkpSetting("HKP_USE_REAL_NAVIGATION").equals("true", ignoreCase = true).toString())
+        manifestPlaceholders["MAPS_API_KEY"] = hkpSetting("MAPS_API_KEY")
         // debug 橋模式：true = SimLocationSource；預設 false = 模擬器真 GPS。JVM 單測強制 true。
         buildConfigField("boolean", "HKP_USE_SIM_LOCATION", hkpSetting("HKP_USE_SIM_LOCATION").equals("true", ignoreCase = true).toString())
     }
@@ -77,6 +79,8 @@ flutter {
 }
 
 dependencies {
+    // google_navigation_flutter 0.11.2 pulls navigation:7.9.0, which rejects desugar_jdk_libs < 2.1.5.
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")
     testImplementation(kotlin("test"))
     testImplementation("junit:junit:4.13.2")
 }

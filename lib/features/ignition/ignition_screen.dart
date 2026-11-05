@@ -6,6 +6,7 @@ import 'package:copilot/core/platform/overlay_channel.dart';
 import 'package:copilot/core/preferences/preference_manager.dart';
 import 'package:copilot/core/trip/trip_controller.dart';
 import 'package:copilot/core/trip/trip_types.dart';
+import 'package:copilot/features/nav_shell/nav_shell_screen.dart';
 import 'package:copilot/features/trip_history/today_trip_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -25,7 +26,7 @@ class _IgnitionScreenState extends State<IgnitionScreen> {
   TripController? _watched;
   StreamSubscription<TripSnapshot>? _tripChanges;
 
-  bool get _tripStarted => TripRuntime.instance.controller?.tripRunning == true;
+  bool get _tripStarted => TripRuntime.instance.controller?.snapshot.sessionId != null;
 
   @override
   void initState() {
@@ -128,6 +129,13 @@ class _IgnitionScreenState extends State<IgnitionScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final controller = TripRuntime.instance.controller;
+    if (controller != null && controller.snapshot.sessionId != null) {
+      return NavShellScreen(
+        controller: controller,
+        navEngine: TripRuntime.instance.navEngine ?? controller.navEngine,
+      );
+    }
     return Scaffold(
       backgroundColor: AppColors.surface,
       body: SafeArea(

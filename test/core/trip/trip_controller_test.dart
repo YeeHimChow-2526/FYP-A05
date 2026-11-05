@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:copilot/core/nav/fake_nav_engine.dart';
+import 'package:copilot/core/nav/gate_coord_resolver.dart';
 import 'package:copilot/core/constants/native_config.dart';
 import 'package:copilot/core/net/api_client.dart';
 import 'package:copilot/core/net/api_transport.dart';
@@ -69,7 +71,7 @@ class FakePlatform implements TripPlatform {
   @override
   void interruptSpeech() => interrupts += 1;
   @override
-  void launchGateNavigation(String label) => nav.add(label);
+  void launchGateNavigation(String label, {double? lat, double? lng}) => nav.add(label);
 }
 
 const CapabilitySnapshot speakingMode = CapabilitySnapshot(
@@ -95,6 +97,13 @@ class _Online implements NetworkStatusProvider {
   bool isOnline() => true;
 }
 
+PoiNameResolver _langhamResolver() {
+  final trie = LocalPoiTrie.fromJsonString(
+    '{"pois":[{"id":"ig:560878","t":"M","zh":"朗豪坊商場","en":"Langham","a":["朗豪坊"],"d":"YTM","la":22.31801,"lo":114.16864}]}',
+  );
+  return PoiNameResolver(trie: trie, typo: SttTypoCorpus(const {}));
+}
+
 RecommendationCard card(String id, [String name = '場']) => RecommendationCard(
       carparkId: id,
       name: name,
@@ -116,6 +125,7 @@ Future<TripController> boot(
   FakePlatform platform,
   ScriptDelay delay, {
   PoiNameResolver? resolver,
+  FakeNavEngine? navEngine,
   bool online = true,
   TripNetwork? network,
   String Function()? sessionIdFactory,
@@ -134,6 +144,7 @@ Future<TripController> boot(
     delay: delay.call,
     network: net,
     resolver: resolver,
+    navEngine: navEngine,
     sessionIdFactory: sessionIdFactory ?? () => 'sess_test',
   );
   if (startTrip) await controller.start(StartupEntry.a2);
@@ -212,8 +223,8 @@ void main() {
     expect(transport.calls.where((path) => path == ApiClient.RECOMMEND), hasLength(1));
     final body = jsonDecode(transport.bodies.single) as Map<String, Object?>;
     expect(body['session_id'], 'sess_test');
-    expect(body['origin_lat'], 0.0);
-    expect(body['origin_lng'], 0.0);
+    expect(body['origin_lat'], closeTo(destLat + delta1000 * 0.9, 1e-9));
+    expect(body['origin_lng'], destLng);
     expect(body['dest_lat'], destLat);
     expect(body['dest_lng'], destLng);
     expect(body['dest_name'], '尖沙咀');
@@ -244,7 +255,7 @@ void main() {
     await controller.requestRecommendation();
     await controller.confirmCandidate(0);
     expect(controller.state, TripState.navToGate);
-    expect(platform.nav, ['朗豪坊']);
+    expect(platform.nav, isEmpty);
     expect(controller.tsm.jitTriggered, isFalse);
     final recommends = transport.calls.where((path) => path == ApiClient.RECOMMEND).length;
     controller.onFix(LocFix(lat: destLat + delta1000 * 0.9, lng: destLng, accuracyM: 10, speedKmh: 20, timestampMs: 1000));
@@ -641,6 +652,7 @@ void main() {
     revokedController.onPermissionRevoked('RECORD_AUDIO');
     expect(revoked.stops, isEmpty);
     revokedController.onPermissionRevoked('ACCESS_FINE_LOCATION');
+    await Future<void>.delayed(Duration.zero);
     expect(revoked.stops, ['PERMISSION_REVOKED']);
     expect(revoked.interrupts, 1);
     expect(revokedController.sessionId, isNull);
@@ -648,6 +660,7 @@ void main() {
     final killed = FakePlatform();
     final killedController = await boot(HoldTransport(), killed, ScriptDelay());
     killedController.onOemKilled();
+    await Future<void>.delayed(Duration.zero);
     expect(killed.stops, ['ABANDONED_OEM_KILL']);
     expect(killed.interrupts, 1);
     expect(killedController.sessionId, isNull);
@@ -794,6 +807,81 @@ void main() {
     await pending;
     await done;
     expect(platform.stops, isNot(contains('ENGINE_SHUTDOWN')));
+  });
+
+  test('N-T2 confirmCandidate starts guidance once', () async {
+    final nav = FakeNavEngine();
+    final transport = HoldTransport()..next = ok([card('CP_LANGHAM', '朗豪坊商場停車場')]);
+    final platform = FakePlatform();
+    final controller = await boot(transport, platform, ScriptDelay(), navEngine: nav);
+    controller.lockDestinationAt('朗豪坊', destLat, destLng);
+    await controller.requestRecommendation();
+    await controller.confirmCandidate(0);
+    expect(controller.state, TripState.navToGate);
+    expect(nav.calls.where((call) => call == 'startGuidance'), ['startGuidance']);
+    expect(platform.nav, isEmpty);
+    expect(nav.activeLat, kDemoCarparkCoords['CP_LANGHAM']!.lat);
+    expect(nav.activeLng, kDemoCarparkCoords['CP_LANGHAM']!.lng);
+  });
+
+  test('N-T3 recommend success emits cards on the snapshot', () async {
+    final transport = HoldTransport()..next = ok([card('CP', '朗豪坊')]);
+    final controller = await boot(transport, FakePlatform(), ScriptDelay());
+    final seen = <TripSnapshot>[];
+    final sub = controller.changes.listen(seen.add);
+    controller.lockDestinationAt('朗豪坊', destLat, destLng);
+    await controller.requestRecommendation();
+    await sub.cancel();
+    expect(controller.snapshot.cards, isNotEmpty);
+    expect(controller.snapshot.destinationName, '朗豪坊');
+    expect(seen.any((item) => item.cards.isNotEmpty), isTrue);
+  });
+
+  test('N-T4 origin uses last fix and missing fix does not throw', () async {
+    final transport = HoldTransport()..next = ok([card('CP')]);
+    final controller = await boot(transport, FakePlatform(), ScriptDelay());
+    controller.onFix(const LocFix(lat: 22.32, lng: 114.17, accuracyM: 8, speedKmh: 10, timestampMs: 1000));
+    controller.lockDestinationAt('場', destLat, destLng);
+    await controller.requestRecommendation();
+    final body = jsonDecode(transport.bodies.last) as Map<String, Object?>;
+    expect(body['origin_lat'], 22.32);
+    expect(body['origin_lng'], 114.17);
+
+    final bareTransport = HoldTransport()..next = ok([card('CP')]);
+    final barePlatform = FakePlatform();
+    final bare = await boot(bareTransport, barePlatform, ScriptDelay());
+    bare.tsm.applyVoiceCapability(speakingMode, true);
+    await bare.requestRecommendation();
+    final bareBody = jsonDecode(bareTransport.bodies.single) as Map<String, Object?>;
+    expect(bareBody['origin_lat'], 0.0);
+    expect(bareBody['origin_lng'], 0.0);
+    expect(barePlatform.spoken, [ZhHkTemplates.ON_SITE_LOCATION_MISSED, '去CP']);
+    await bare.requestRecommendation();
+    expect(barePlatform.spoken.where((line) => line == ZhHkTemplates.ON_SITE_LOCATION_MISSED), hasLength(1));
+  });
+
+  test('N-T7 fix then destination text prefetches without a second fix', () async {
+    final transport = HoldTransport()..next = ok([card('CP_LANGHAM', '朗豪坊商場停車場')]);
+    final controller = await boot(transport, FakePlatform(), ScriptDelay(), resolver: _langhamResolver());
+    controller.onFix(const LocFix(lat: 22.3186, lng: 114.1686, accuracyM: 8, speedKmh: 20, timestampMs: 5000));
+    expect(transport.calls, isEmpty);
+    await controller.submitDestinationText('朗豪坊');
+    expect(transport.calls.where((path) => path == ApiClient.RECOMMEND), hasLength(1));
+    expect(controller.snapshot.cards, isNotEmpty);
+    expect(controller.snapshot.lastOriginLat, 22.3186);
+  });
+
+  test('N-T8 guidance failure keeps nav to gate and falls back once', () async {
+    final nav = FakeNavEngine()..shouldFailGuidance = true;
+    final transport = HoldTransport()..next = ok([card('CP', '朗豪坊')]);
+    final platform = FakePlatform();
+    final controller = await boot(transport, platform, ScriptDelay(), navEngine: nav);
+    controller.lockDestinationAt('朗豪坊', destLat, destLng);
+    await controller.requestRecommendation();
+    await controller.confirmCandidate(0);
+    expect(controller.state, TripState.navToGate);
+    expect(platform.nav, ['朗豪坊']);
+    expect(nav.calls.where((call) => call == 'startGuidance'), ['startGuidance']);
   });
 }
 

@@ -23,7 +23,8 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 200));
     });
     await tester.pumpAndSettle();
-    expect(find.text('已開程'), findsOneWidget);
+    expect(find.byKey(const ValueKey('fake_nav_view')), findsOneWidget);
+    expect(find.text('已開程'), findsNothing);
 
     const codec = StandardMethodCodec();
     await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
@@ -33,7 +34,7 @@ void main() {
     );
     await tester.pump();
     expect(find.text('未開程'), findsOneWidget);
-    expect(find.text('已開程'), findsNothing);
+    expect(find.byKey(const ValueKey('fake_nav_view')), findsNothing);
 
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
   });

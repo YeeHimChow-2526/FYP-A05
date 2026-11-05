@@ -20,6 +20,9 @@ class ApiResponses {
     final topCue = _nonBlankString(root['spoken_cue']);
     final cards = cardItems.map((item) {
       final card = Map<String, Object?>.from(item as Map);
+      final gateLat = _coordOrNull(card['gate_lat'] ?? card['lat']);
+      final gateLng = _coordOrNull(card['gate_lng'] ?? card['lng']);
+      final hasGate = gateLat != null && gateLng != null;
       return RecommendationCard(
         carparkId: _stringOr(card['carpark_id'], ''),
         name: _stringOr(card['name'], ''),
@@ -29,6 +32,8 @@ class ApiResponses {
         feeSummary: _stringOr(card['fee_summary'], ''),
         spokenCue: _nonBlankString(card['spoken_cue']) ?? topCue ?? '',
         isStale: card['is_stale'] == true,
+        gateLat: hasGate ? gateLat : null,
+        gateLng: hasGate ? gateLng : null,
       );
     }).toList();
     return RecommendResponse(
@@ -116,6 +121,11 @@ class ApiResponses {
   }
 
   static String _stringOr(Object? value, String fallback) => value is String ? value : fallback;
+
+  static double? _coordOrNull(Object? value) {
+    if (value is! num || !value.isFinite) return null;
+    return value.toDouble();
+  }
 
   static int _intOr(Object? value, int fallback) {
     if (value is int) {

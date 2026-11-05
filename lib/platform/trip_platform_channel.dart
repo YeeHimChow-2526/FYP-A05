@@ -57,8 +57,12 @@ class ChannelTripPlatform implements TripPlatform {
   }
 
   @override
-  void launchGateNavigation(String label) {
-    channel.invokeMethod<void>('launchGateNavigation', {'label': label});
+  void launchGateNavigation(String label, {double? lat, double? lng}) {
+    channel.invokeMethod<void>('launchGateNavigation', {
+      'label': label,
+      'lat': ?lat,
+      'lng': ?lng,
+    });
   }
 
   Future<Map<String, Object?>> transportConfig() async {

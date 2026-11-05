@@ -92,8 +92,8 @@ class DartBridgeRuntime(private val service: FloatingBubbleService) {
     service.ttsService.interrupt()
   }
 
-  fun launchGateNavigation(label: String) {
-    Bindings.activeNavigation.launchGateNavigation(label)
+  fun launchGateNavigation(label: String, lat: Double? = null, lng: Double? = null) {
+    Bindings.activeNavigation.launchGateNavigation(label, lat, lng)
   }
 
   fun voiceCapability(): Map<String, Any?> {

@@ -2,6 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 
+import '../core/nav/fake_nav_engine.dart';
+import '../core/nav/google_nav_engine.dart';
+import '../core/nav/nav_engine.dart';
 import '../core/net/api_client.dart';
 import '../core/net/channel_fixture_transport.dart';
 import '../core/net/http_api_transport.dart';
@@ -24,6 +27,7 @@ class TripRuntime {
   TodayTripStore? store;
   TodayTripSync? sync;
   ChannelTripPlatform? platform;
+  NavEngine? navEngine;
   Future<void>? _attachFuture;
 
   Future<void> attach() {
@@ -74,6 +78,7 @@ class TripRuntime {
     } catch (_) {
       resolver = null;
     }
+    final engine = config['useRealNavigation'] == true ? GoogleNavEngine() : FakeNavEngine();
     final tripController = TripController(
       platform: tripPlatform,
       api: api,
@@ -83,7 +88,9 @@ class TripRuntime {
       delay: (ms) => Future<void>.delayed(Duration(milliseconds: ms)),
       network: network,
       resolver: resolver,
+      navEngine: engine,
     );
+    navEngine = engine;
     tripPlatform.bind(tripController);
     controller = tripController;
     store = tripStore;

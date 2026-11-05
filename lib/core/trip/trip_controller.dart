@@ -1,6 +1,10 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 
 import '../constants/native_config.dart';
+import '../nav/fake_nav_engine.dart';
+import '../nav/gate_coord_resolver.dart';
+import '../nav/nav_engine.dart';
 import '../net/api_client.dart';
 import '../net/recommendation_card.dart';
 import '../poi/poi_name_resolver.dart';
@@ -16,11 +20,27 @@ import 'trip_state_machine.dart';
 import 'trip_types.dart';
 
 class TripSnapshot {
-  const TripSnapshot({required this.state, required this.capsuleLight, required this.sessionId});
+  const TripSnapshot({
+    required this.state,
+    required this.capsuleLight,
+    required this.sessionId,
+    this.cards = const [],
+    this.destinationName,
+    this.destLat,
+    this.destLng,
+    this.lastOriginLat,
+    this.lastOriginLng,
+  });
 
   final TripState state;
   final CapsuleLight capsuleLight;
   final String? sessionId;
+  final List<RecommendationCard> cards;
+  final String? destinationName;
+  final double? destLat;
+  final double? destLng;
+  final double? lastOriginLat;
+  final double? lastOriginLng;
 }
 
 class TripNetwork implements NetworkStatusProvider {
@@ -42,8 +62,10 @@ class TripController {
     required this.delay,
     NetworkStatusProvider? network,
     this.resolver,
+    NavEngine? navEngine,
     String Function()? sessionIdFactory,
-  }) : network = network ?? TripNetwork() {
+  }) : network = network ?? TripNetwork(),
+       navEngine = navEngine ?? FakeNavEngine() {
     tsm = TripStateMachine(onTripEnded: _handleTripEnded, sessionIdFactory: sessionIdFactory);
     tracker = DistanceTracker(DistanceTrackerListener(onSample: _onSample, onTierChanged: platform.applySamplingTier));
     detector = EngineShutdownDetector(nowMs: nowMs);
@@ -59,6 +81,7 @@ class TripController {
   final Delay delay;
   final NetworkStatusProvider network;
   final PoiNameResolver? resolver;
+  final NavEngine navEngine;
 
   late final TripStateMachine tsm;
   late final DistanceTracker tracker;
@@ -66,7 +89,7 @@ class TripController {
 
   final List<RecommendationCard> cards = [];
   final Set<String> fullCarparkIds = {};
-  final StreamController<TripSnapshot> _changes = StreamController<TripSnapshot>.broadcast();
+  final StreamController<TripSnapshot> _changes = StreamController<TripSnapshot>.broadcast(sync: true);
 
   int destinationEpoch = 0;
   int _lifecycleToken = 0;
@@ -77,9 +100,24 @@ class TripController {
   bool _commitInFlight = false;
   bool _driverAsked = false;
   bool _disposed = false;
+  bool _loggedMissingOrigin = false;
+  bool _spokeMissingOrigin = false;
   String? shareDroppedReason;
+  LocFix? _lastFix;
+  Future<void>? _jitRecommend;
 
   Stream<TripSnapshot> get changes => _changes.stream;
+  TripSnapshot get snapshot => TripSnapshot(
+        state: tsm.state,
+        capsuleLight: tsm.capsuleLight,
+        sessionId: tsm.sessionId,
+        cards: List<RecommendationCard>.unmodifiable(cards),
+        destinationName: tsm.destinationName,
+        destLat: tsm.destLat,
+        destLng: tsm.destLng,
+        lastOriginLat: _lastFix?.lat,
+        lastOriginLng: _lastFix?.lng,
+      );
   bool get tripRunning => tsm.fgsRunning;
   TripState get state => tsm.state;
   CapsuleLight get capsuleLight => tsm.capsuleLight;
@@ -128,7 +166,25 @@ class TripController {
       destLng: lng,
       destinationPoiId: poiId,
     );
+    _rearmDistanceFromLastFix();
     _publishJitEdge(wasJitTriggered);
+    _emit();
+  }
+
+  Future<void> submitDestinationText(String raw) async {
+    final text = raw.trim();
+    if (text.isEmpty) {
+      tsm.onPlaceClarificationNeeded();
+      _emit();
+      return;
+    }
+    final resolved = resolver?.resolve(text);
+    if (resolved is Hit) {
+      lockDestinationAt(text, resolved.poi.lat, resolved.poi.lng, poiId: resolved.poi.id);
+      await _jitRecommend;
+      return;
+    }
+    tsm.onPlaceClarificationNeeded();
     _emit();
   }
 
@@ -143,7 +199,9 @@ class TripController {
 
   void onFix(LocFix fix) {
     if (!tsm.fgsRunning || shutdownInProgress) return;
+    _lastFix = fix;
     tracker.onFix(fix);
+    unawaited(navEngine.syncUserLocation(fix.lat, fix.lng));
   }
 
   void onTick(int nowMs) {
@@ -186,13 +244,40 @@ class TripController {
         committedCarparkName = card.name;
         tsm.onCommitSucceeded();
         final label = card.name.trim().isEmpty ? card.carparkId : card.name;
-        platform.launchGateNavigation(label);
+        final gate = GateCoordResolver.resolve(
+          card,
+          trie: resolver?.trie,
+          fallbackLat: tsm.destLat,
+          fallbackLng: tsm.destLng,
+        );
+        developer.log('gate coord layer=${gate.layer} id=${card.carparkId}', name: 'TripController');
+        var guided = false;
+        try {
+          guided = await navEngine.startGuidanceTo(title: label, lat: gate.lat, lng: gate.lng);
+        } catch (error) {
+          developer.log('startGuidanceTo threw $error', name: 'TripController');
+          guided = false;
+        }
+        if (!guided) {
+          developer.log('startGuidanceTo failed; fallback launchGateNavigation', name: 'TripController');
+          platform.launchGateNavigation(label, lat: gate.lat, lng: gate.lng);
+        }
+        _emit();
         return;
       }
       _speak(ZhHkTemplates.NETWORK_FAILED, driverAsked: true);
     } finally {
       _commitInFlight = false;
     }
+  }
+
+  Future<void> abortTripByUser() async {
+    if (_disposed || shutdownInProgress) return;
+    if (tsm.sessionId == null && !tsm.fgsRunning && !tsm.fgsStartAccepted) return;
+    shutdownInProgress = true;
+    _lifecycleToken += 1;
+    tsm.clearSession();
+    await _teardownSession('USER_ABORT');
   }
 
   Future<String> onEngineSignal(EngineSignal signal, {required bool disconnected}) async {
@@ -230,7 +315,7 @@ class TripController {
     final fadeToken = _lifecycleToken;
     await delay(NativeConfig.TEARDOWN_FADE_MS);
     if (_disposed || fadeToken != _lifecycleToken) return within ? 'PARKED' : 'OUTSIDE';
-    _finishTeardown(within ? 'PARKED_CONFIRMED' : 'ENGINE_SHUTDOWN');
+    await _teardownSession(within ? 'PARKED_CONFIRMED' : 'ENGINE_SHUTDOWN');
     return within ? 'PARKED' : 'OUTSIDE';
   }
 
@@ -286,7 +371,7 @@ class TripController {
     if (!inTrip) return;
     tsm.onOemKilled();
     if (_disposed) return;
-    _finishTeardown('ABANDONED_OEM_KILL');
+    unawaited(_teardownSession('ABANDONED_OEM_KILL'));
   }
 
   void onFgsStopped() {
@@ -326,21 +411,34 @@ class TripController {
     _emit();
   }
 
+  void _rearmDistanceFromLastFix() {
+    if (_lastFix == null || !tsm.fgsRunning || shutdownInProgress) return;
+    if (tsm.state == TripState.navToGate || tsm.state == TripState.approachMuted || tsm.state == TripState.parkedConfirmed) return;
+    final distance = tracker.distanceToDestinationM();
+    if (distance == null) return;
+    tsm.onDistanceToDestination(distance);
+  }
+
   void _publishJitEdge(bool wasJitTriggered) {
     if (_disposed || shutdownInProgress || !tsm.fgsRunning) return;
     if (!wasJitTriggered && tsm.jitTriggered && tsm.recommend) {
-      unawaited(_recommend(QueryTriggerMode.backgroundPrefetch, driverAsked: false));
+      _jitRecommend = _recommend(QueryTriggerMode.backgroundPrefetch, driverAsked: false);
     }
   }
 
   Future<void> _recommend(QueryTriggerMode mode, {required bool driverAsked}) async {
     final capturedSession = tsm.sessionId;
     final capturedEpoch = destinationEpoch;
+    final fix = _lastFix;
+    if (fix == null && !_loggedMissingOrigin) {
+      _loggedMissingOrigin = true;
+      developer.log('recommend origin missing; using 0,0', name: 'TripController');
+    }
     final outcome = await api.recommendAndRoute(
       RecommendRequest(
         sessionId: capturedSession ?? '',
-        originLat: 0,
-        originLng: 0,
+        originLat: fix?.lat ?? 0,
+        originLng: fix?.lng ?? 0,
         destLat: tsm.destLat ?? 0,
         destLng: tsm.destLng ?? 0,
         destName: tsm.destinationName ?? '',
@@ -350,6 +448,10 @@ class TripController {
       mode,
     );
     if (!_stillCurrent(capturedSession, capturedEpoch)) return;
+    if (fix == null && !_spokeMissingOrigin) {
+      _spokeMissingOrigin = true;
+      _speak(ZhHkTemplates.ON_SITE_LOCATION_MISSED, driverAsked: true);
+    }
     _driverAsked = driverAsked;
     try {
       _applyNetworkOutcome(outcome);
@@ -413,6 +515,16 @@ class TripController {
       platform.interruptSpeech();
       return;
     }
+    unawaited(_teardownSession(reason));
+  }
+
+  Future<void> _teardownSession(String reason) async {
+    try {
+      await navEngine.stopGuidance();
+    } catch (error) {
+      developer.log('stopGuidance failed $error', name: 'TripController');
+    }
+    if (_disposed) return;
     _finishTeardown(reason);
   }
 
@@ -440,12 +552,15 @@ class TripController {
     committedCarparkId = null;
     committedCarparkName = null;
     shutdownInProgress = false;
+    _lastFix = null;
+    _loggedMissingOrigin = false;
+    _spokeMissingOrigin = false;
     tracker.reset();
     detector.reset();
   }
 
   void _emit() {
     if (_disposed || _changes.isClosed) return;
-    _changes.add(TripSnapshot(state: tsm.state, capsuleLight: tsm.capsuleLight, sessionId: tsm.sessionId));
+    _changes.add(snapshot);
   }
 }
