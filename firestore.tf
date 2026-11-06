@@ -1,10 +1,22 @@
 resource "google_firestore_database" "database" {
-  project     = var.project_id
-  name        = "(default)"
-  location_id = var.region
-  type        = "FIRESTORE_NATIVE"
+  project                           = var.project_id
+  name                              = "(default)"
+  location_id                       = var.region
+  type                              = "FIRESTORE_NATIVE"
+  point_in_time_recovery_enablement = var.firestore_enable_point_in_time_recovery ? "POINT_IN_TIME_RECOVERY_ENABLED" : "POINT_IN_TIME_RECOVERY_DISABLED"
+  delete_protection_state           = "DELETE_PROTECTION_ENABLED"
+  deletion_policy                   = "ABANDON"
 
   depends_on = [google_project_service.required_apis]
+}
+
+resource "google_firestore_backup_schedule" "daily" {
+  count     = var.firestore_enable_daily_backups ? 1 : 0
+  project   = var.project_id
+  database  = google_firestore_database.database.name
+  retention = "${var.firestore_backup_retention_days * 24}h"
+
+  daily_recurrence {}
 }
 
 resource "google_firestore_field" "active_sessions_ttl" {

@@ -19,6 +19,11 @@ not a security boundary. The service uses Cloud Run's public `run.app` URL and
 does not have Cloud Armor rate limiting; `/health` is intentionally
 unauthenticated for the Cloud Run health check.
 
+Firestore collections, fields, indexes, TTL policies, and access controls are
+documented in [DATABASE.md](./DATABASE.md). The collection creation plan is
+in [DATABASE_TABLE_PLAN.md](./DATABASE_TABLE_PLAN.md), with a collection and
+relationship reference in [database_table.txt](./database_table.txt).
+
 ### Local development
 
 ```sh
@@ -149,6 +154,10 @@ resources first:
 terraform apply \
   -target=google_project_service.required_apis \
   -target=google_firestore_database.database \
+  -target=google_firestore_backup_schedule.daily \
+  -target=google_firestore_field.active_sessions_ttl \
+  -target=google_firestore_field.virtual_locks_ttl \
+  -target=google_firestore_field.crowd_reports_ttl \
   -target=google_storage_bucket.state_snapshots \
   -target=google_secret_manager_secret.internal_api_key \
   -target=google_secret_manager_secret.crowd_ip_hash_secret \
@@ -176,6 +185,12 @@ gcloud secrets versions add hkparking-crowd-ip-hash-secret \
 The API key is also needed by the app client. Transfer it through your private
 development workflow; it is only a basic client identifier, not a security
 boundary. Do not commit the key or either local secret file.
+
+Firestore is configured with delete protection, a Terraform `ABANDON`
+deletion policy, seven-day point-in-time recovery, and daily backups retained
+for 14 days by default. These protection and backup features may incur
+additional charges; review the settings and estimated costs in `terraform plan`
+before applying.
 
 Build and push the image, then set `backend_image` in `terraform.tfvars` to the
 same image URI:

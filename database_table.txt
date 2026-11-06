@@ -1,0 +1,208 @@
+HONG KONG PARKING VOICE COPILOT
+FIRESTORE TABLES (COLLECTIONS) AND RELATIONSHIPS
+
+1. DATABASE MODEL
+
+Database: Cloud Firestore, Native mode, database ID: (default)
+
+Firestore is a document database, not a relational SQL database. The entries
+below are logical tables (collections); Firestore creates each collection
+automatically when its first real document is written. Do not create fake
+placeholder rows just to make a collection appear.
+
+All timestamp fields use Firestore Timestamp values in UTC. Document IDs are
+the primary identifiers. Firestore does not enforce foreign keys or joins;
+relationships below are application-level references by document ID.
+
+2. COLLECTIONS AND FIELDS
+
+2.1 active_sessions/{session_id}
+
+Purpose: One document per app trip/session.
+Document ID: session_id supplied by the API.
+
+Field                         Type        Required / meaning
+----------------------------  ----------  -------------------------------------
+status                        string      ACTIVE, COMMITTED, PARKED_CONFIRMED
+ratable                       boolean     True only after driver confirmation
+destination                   map         Optional recommendation destination
+target_carpark_id             string      Selected carpark, when available
+last_seen_at                  timestamp   Last API activity
+updated_at                    timestamp   Last document update
+expire_at                     timestamp   Idle or end-of-day expiration
+completed_at                  timestamp   Present for a completed trip
+trip_report                   map         Optional rating and submission time
+
+Lifecycle:
+- ACTIVE sessions expire after 30 minutes idle.
+- COMMITTED sessions expire after 3 hours idle.
+- PARKED_CONFIRMED sessions expire at midnight Hong Kong time that day.
+- Expired sessions are rejected by API checks; TTL performs asynchronous
+  physical cleanup.
+- Trip reports are accepted only for an unexpired, PARKED_CONFIRMED,
+  ratable session. The report is stored in this session document.
+
+2.2 virtual_locks/{session_id}
+
+Purpose: Temporary in-flight vacancy lock; at most one lock per session.
+Document ID: Same session_id as active_sessions.
+
+Field                         Type        Required / meaning
+----------------------------  ----------  -------------------------------------
+carpark_id                    string      Target parking facility identifier
+created_at                    timestamp   Start of the active lock window
+expire_at                     timestamp   TTL cleanup time (normally +30 min)
+
+The API counts locks by carpark_id and created_at. Commit transactionally
+checks the vacancy count and writes both the lock and session. A lock is
+deleted on release/parking confirmation. Lock validity is determined by the
+created_at time window, not by whether TTL has already deleted the document.
+
+2.3 carpark_pain_points/{carpark_id}
+
+Purpose: Current parking-facility pain-point and crowd-report summary.
+Document ID: carpark_id from the official/GCS carpark data.
+
+Field                                  Type        Meaning
+-------------------------------------  ----------  -----------------------------
+recent_independent_report_sources     integer     Independent source count
+crowd_rank_capped                     boolean     Whether ranking cap applies
+crowd_warning                         boolean     Whether to show warning
+crowd_penalty_points                  integer     Ranking penalty
+crowd_window_expires_at               timestamp   End of current crowd window
+updated_at                            timestamp   Last summary update
+
+The API currently writes the crowd summary fields above. Long-term hotspot
+fields and chronic-report processing are not implemented yet.
+
+2.4 carpark_pain_points/{carpark_id}/reports/{report_id}
+
+Purpose: Individual short-lived crowd reports nested under a carpark.
+Document ID: {session_id}_{server_time_bucket}; time bucket is five minutes.
+
+Field                         Type        Required / meaning
+----------------------------  ----------  -------------------------------------
+session_id                    string      Reporting app session
+report_type                   string      Submitted report category
+source_ip_hash                string      HMAC digest; never store raw IP
+ip_bucket                     integer     Server-side five-minute bucket
+created_at                    timestamp   Server receive time
+expire_at                     timestamp   created_at plus seven days
+client_timestamp              integer     Client event timestamp
+
+The parent/child relation is carpark_pain_points/{carpark_id} to reports.
+Reports contribute to the one-hour crowd summary and do not exclude a carpark.
+
+2.5 carpark_perks_master/{carpark_id}
+
+Purpose: Per-carpark perk/offer master document read by recommendation API.
+Document ID: carpark_id.
+
+The repository does not yet define the authoritative perk source schema or
+its reconciliation/import process. Do not import guessed fields or sample
+offers. Define the source contract before enabling production imports.
+
+3. RELATIONSHIPS
+
+active_sessions/{session_id}
+    1 ---- 0..1 virtual_locks/{session_id}
+          Session ID links the trip and its temporary lock.
+
+active_sessions.target_carpark_id
+    * ---- 1 carpark_pain_points/{carpark_id}
+          Application-level reference to the selected facility.
+
+virtual_locks.carpark_id
+    * ---- 1 carpark_pain_points/{carpark_id}
+          Application-level reference used to group active locks by facility.
+
+carpark_pain_points/{carpark_id}
+    1 ---- 0..* reports/{report_id}
+          Reports are a subcollection of the facility's summary document.
+
+carpark_perks_master/{carpark_id}
+    1 ---- 0..1 carpark_pain_points/{carpark_id}
+          Same carpark document ID; independent optional data documents.
+
+Carpark identity and live vacancy details come from GCS regional snapshots.
+Firestore stores references by carpark_id; it is not the live vacancy store.
+POI identity/name resolution comes from the API POI master file, not Firestore.
+
+4. INDEXES, TTL, AND ACCESS CONTROL
+
+Composite index:
+  virtual_locks: carpark_id ASCENDING, created_at ASCENDING
+  Source: firestore.indexes.json
+
+TTL policies:
+  active_sessions.expire_at
+  virtual_locks.expire_at
+  reports.expire_at (collection group; applies to nested reports)
+  Source: firestore.tf
+
+Production data protection:
+  Point-in-Time Recovery: enabled (up to 7 days), configurable in terraform.tfvars
+  Scheduled backups: daily, default retention 14 days (configurable 1-98 days)
+  Database deletion protection: enabled
+  Terraform deletion policy: ABANDON; terraform destroy leaves the database
+  and its data in GCP instead of deleting it.
+  Backup/PITR storage and operations can incur additional GCP charges.
+
+Client security:
+  firestore.rules denies all client reads and writes.
+  Cloud Run accesses Firestore using its service account and roles/datastore.user.
+  The mobile app must use the backend API and must not connect to Firestore.
+
+5. DEPLOYMENT
+
+Run from the repository root with Terraform, gcloud, and Firebase CLI installed
+and authenticated to the intended GCP project. Review terraform.tfvars and
+terraform plan before applying; Firestore and other GCP resources may incur
+charges.
+
+  terraform init
+  terraform plan
+
+The foundation apply creates the protected Firestore database, daily backups,
+and TTL policies:
+
+  terraform apply \
+    -target=google_project_service.required_apis \
+    -target=google_firestore_database.database \
+    -target=google_firestore_backup_schedule.daily \
+    -target=google_firestore_field.active_sessions_ttl \
+    -target=google_firestore_field.virtual_locks_ttl \
+    -target=google_firestore_field.crowd_reports_ttl
+
+After completing the remaining Terraform deployment and registering the GCP
+project with Firebase if required, deploy the checked-in client rules and
+composite index:
+
+  firebase deploy --only firestore:rules,firestore:indexes \
+    --project YOUR_GCP_PROJECT_ID
+
+Terraform creates the protected database, daily backup schedule, and TTL
+policies; Firebase CLI deploys rules and indexes. Collections/documents appear only when the API or an authorized
+data-import process writes real data. The first valid API operations create
+active_sessions, virtual_locks, and crowd-report documents as needed.
+carpark_perks_master requires an approved source and import process.
+
+6. DEPLOYMENT VERIFICATION
+
+- Confirm Firestore database (default) exists in Native mode and the intended
+  location.
+- Confirm each TTL policy is enabled and the virtual_locks composite index is
+  Enabled.
+- Confirm point-in-time recovery, daily backup retention, and delete protection
+  match the approved production settings and budget.
+- For a recovery test, restore a scheduled backup/PITR point to a separate
+  database, validate it, and document a controlled cutover; do not overwrite
+  the live database as an unreviewed test.
+- Confirm unauthenticated/mobile clients cannot read or write Firestore.
+- Confirm Cloud Run's service account has datastore.user and can access
+  Firestore through the API.
+- Exercise session lifecycle, lock commit/release, expiry checks, and crowd
+  report creation using the test environment before production traffic.
+- Confirm crowd report documents contain only source_ip_hash, not raw IP data.
+- Do not treat a successful infrastructure deployment as proof that live
+  parking, POI, or perk source data has been loaded.
