@@ -1,5 +1,5 @@
 import unittest
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 from starlette.requests import Request
@@ -26,13 +26,15 @@ class FakeRepository:
     async def get_perk(self, carpark_id):
         return {}
 
-    async def commit_lock(self, session_id, carpark_id, vacancies):
+    async def commit_lock(self, session_id, carpark_id, vacancies, **kwargs):
         self.committed = (session_id, carpark_id, vacancies)
+        self.commit_kwargs = kwargs
 
-    async def release_lock(self, session_id, target_carpark_id):
+    async def release_lock(self, session_id, target_carpark_id, **kwargs):
         self.released = (session_id, target_carpark_id)
+        self.release_kwargs = kwargs
 
-    async def confirm_parked(self, session_id, timestamp):
+    async def confirm_parked(self, session_id, timestamp, **kwargs):
         self.confirmed = (session_id, timestamp)
 
     async def add_crowd_report(self, **kwargs):
@@ -119,6 +121,8 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(client_ip_from_request(request), "198.51.100.12")
 
     def test_recommend_returns_server_freshness_and_cantonese_fallback(self):
+        # Fresh official 0 is excluded (§9.3); a stale 0 stays and triggers the full-scarcity prompt.
+        self.snapshots.regions[0].source_snapshot_ts = (datetime.now(UTC) - timedelta(minutes=20)).isoformat()
         response = self.client.post(
             "/v1/recommend-and-route",
             headers=self.headers,
@@ -141,6 +145,8 @@ class ApiTests(unittest.TestCase):
         self.assertTrue(payload["await_voice_reply"])
 
     def test_recommend_cards_include_carpark_lat_lng(self):
+        # Fresh official 0 is excluded (§9.3); use a valid fresh count.
+        self.snapshots.regions[0].carparks[0].vacancies = 5
         response = self.client.post(
             "/v1/recommend-and-route",
             headers=self.headers,
@@ -172,7 +178,7 @@ class ApiTests(unittest.TestCase):
 
     def test_commit_uses_snapshot_and_returns_lock_conflict(self):
         class FullRepository(FakeRepository):
-            async def commit_lock(self, session_id, carpark_id, vacancies):
+            async def commit_lock(self, session_id, carpark_id, vacancies, **kwargs):
                 self.vacancies = vacancies
                 raise LockFullError("full")
 
@@ -190,7 +196,7 @@ class ApiTests(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()["status"], "LOCK_FULL")
-        self.assertEqual(full_repository.vacancies, 0)
+        self.assertEqual(full_repository.vacancies.value, 0)
 
     def test_invalid_release_reason_is_rejected(self):
         response = self.client.post(

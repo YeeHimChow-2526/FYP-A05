@@ -7,7 +7,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from app.config import Settings
-from app.firestore import FirestoreRepository, LockFullError
+from app.firestore import ContentionError, FirestoreRepository, LockFullError
+from app.lock_policy import LockConflictError
 from app.models import (
     CommitRequest,
     CrowdReportRequest,
@@ -45,6 +46,7 @@ def create_app(
             snapshot_source = GcsSnapshotSource(
                 config.gcs_state_bucket,
                 config.snapshot_memory_cache_ttl_seconds,
+                settings=config,
             )
         app.state.repository = firestore_repository
         app.state.snapshots = snapshot_source
@@ -59,7 +61,11 @@ def create_app(
         if close is not None:
             await close()
 
-    app = FastAPI(title="Hong Kong Parking API", version="2.9.2", lifespan=lifespan, redirect_slashes=False)
+    app = FastAPI(title="Hong Kong Parking API", version="2.11.0", lifespan=lifespan, redirect_slashes=False)
+
+    @app.exception_handler(ContentionError)
+    async def contention(_request: Request, _error: ContentionError):
+        return JSONResponse(status_code=503, content={"status": "CONTENTION"}, headers={"Retry-After": "1"})
     app.state.settings = config
 
     @app.middleware("http")
@@ -81,10 +87,18 @@ def create_app(
     async def health():
         return {"status": "ok"}
 
+    def conflict(error: LockConflictError) -> JSONResponse:
+        return JSONResponse(
+            status_code=error.http_status,
+            content={"status": error.code, "detail": str(error)},
+        )
+
     @app.post("/v1/recommend-and-route")
     async def recommend(body: RecommendRequest, request: Request):
         try:
             return await request.app.state.recommendations.recommend(body)
+        except LockConflictError as error:
+            return conflict(error)
         except SnapshotUnavailable as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
         except PoiCatalogUnavailable as error:
@@ -97,11 +111,15 @@ def create_app(
             vacancies = await request.app.state.recommendations.current_vacancies(
                 body.target_carpark_id
             )
-            await request.app.state.repository.commit_lock(
+            lock = await request.app.state.repository.commit_lock(
                 body.session_id,
                 body.target_carpark_id,
                 vacancies,
+                destination_epoch=body.destination_epoch,
+                idempotency_key=body.idempotency_key,
             )
+        except LockConflictError as error:
+            return conflict(error)
         except LockFullError:
             return JSONResponse(
                 status_code=409,
@@ -112,30 +130,53 @@ def create_app(
             )
         except SnapshotUnavailable as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
-        return {"status": "COMMITTED", "session_id": body.session_id}
+        response: dict[str, Any] = {"status": "COMMITTED", "session_id": body.session_id}
+        if body.destination_epoch is not None and isinstance(lock, dict):
+            response.update(
+                contract_version=2,
+                lock_id=lock["lock_id"],
+                lock_revision=lock["lock_revision"],
+                destination_epoch=lock["destination_epoch"],
+                replayed=lock["replayed"],
+            )
+        return response
 
     @app.post("/v1/session/release")
     async def release(body: ReleaseRequest, request: Request):
-        if body.reason != "PARKED_CONFIRMED":
-            raise HTTPException(status_code=422, detail="reason must be PARKED_CONFIRMED")
-        await request.app.state.repository.release_lock(
-            body.session_id,
-            body.target_carpark_id,
-        )
-        return {
-            "status": "PARKED_CONFIRMED",
+        try:
+            result = await request.app.state.repository.release_lock(
+                body.session_id,
+                body.target_carpark_id,
+                reason=body.reason.value,
+                lock_revision=body.lock_revision,
+                new_destination_epoch=body.new_destination_epoch,
+            )
+        except LockConflictError as error:
+            return conflict(error)
+        response: dict[str, Any] = {
+            "status": body.reason.value,
             "session_id": body.session_id,
             "ratable": False,
         }
+        if isinstance(result, dict):
+            response.update(result)
+            response["ratable"] = False
+        return response
 
     @app.post("/v1/sync/outbox")
     async def sync_outbox(body: SyncOutboxRequest, request: Request):
         if body.event_type != "DRIVER_CONFIRMED":
             raise HTTPException(status_code=422, detail="event_type must be DRIVER_CONFIRMED")
-        await request.app.state.repository.confirm_parked(
-            body.session_id,
-            body.timestamp,
-        )
+        try:
+            await request.app.state.repository.confirm_parked(
+                body.session_id,
+                body.timestamp,
+                lock_revision=body.lock_revision,
+                contract_version=body.contract_version,
+                destination_epoch=body.destination_epoch,
+            )
+        except LockConflictError as error:
+            return conflict(error)
         return {
             "status": "PARKED_CONFIRMED",
             "session_id": body.session_id,

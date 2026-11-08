@@ -5,8 +5,10 @@ from datetime import UTC, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from . import scoring
+from .lock_policy import CapacityReading
 from .config import Settings
-from .models import CarparkSnapshot, Preference, RecommendRequest, RegionSnapshot
+from .models import VacancyStatus, CarparkSnapshot, Preference, RecommendRequest, RegionSnapshot
 from .poi import PoiCatalog
 from .snapshots import SnapshotSource, snapshot_age_seconds
 
@@ -18,32 +20,47 @@ class RecommendationService:
         poi_catalog: PoiCatalog,
         snapshots: SnapshotSource,
         repository: Any,
+        jitter: scoring.Jitter | None = None,
+        clock=None,
     ) -> None:
         self._settings = settings
         self._poi_catalog = poi_catalog
         self._snapshots = snapshots
         self._repository = repository
+        self._jitter = jitter or scoring.default_jitter(settings)
+        self._clock = clock or (lambda: datetime.now(UTC))
         self._count_semaphore = asyncio.Semaphore(
             settings.firestore_max_concurrent_lock_counts
         )
         self._pain_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._perk_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
-    async def current_vacancies(self, carpark_id: str) -> int:
-        snapshots = await self._snapshots.load_regions()
-        now = datetime.now(UTC)
+    async def current_vacancies(self, carpark_id: str) -> CapacityReading:
+        """Last-known capacity for commit. Stale/degraded snapshots keep the last-known count
+        (flagged stale) instead of becoming unlimited; never-known (absent / negative) -> None."""
+        # Commit never triggers an upstream refresh (bounded latency inside the lock path); it
+        # reads the same published manifest pointer as recommend (memory cache never regresses).
+        snapshots = await (
+            self._snapshots.load_regions(refresh=False)
+            if getattr(self._snapshots, "supports_refresh_flag", False)
+            else self._snapshots.load_regions()
+        )
+        now = self._clock().astimezone(UTC)
         for region in snapshots:
             for carpark in region.carparks:
                 if carpark.carpark_id == carpark_id:
-                    if region.source_status == "degraded":
-                        return -1
-                    if (
-                        snapshot_age_seconds(region.source_snapshot_ts, now)
-                        > self._settings.source_stale_threshold_seconds
-                    ):
-                        return -1
-                    return carpark.vacancies
-        return -1
+                    counted = carpark.effective_status() == VacancyStatus.COUNT
+                    value = carpark.vacancies if counted and carpark.vacancies >= 0 else None
+                    age = scoring.record_age_seconds(
+                        snapshot_age_seconds(region.source_snapshot_ts, now), carpark.source_updated_at, now
+                    )
+                    stale = region.source_status == "degraded" or (
+                        age > self._settings.source_stale_threshold_seconds
+                    )
+                    if stale and scoring.is_meter(carpark.type):
+                        value = None  # card says UNCONFIRMED (classify); commit must agree, not lock a stale meter
+                    return CapacityReading(value, stale=stale)
+        return CapacityReading(None, stale=True)
 
     async def recommend(self, request: RecommendRequest) -> dict[str, Any]:
         destination = None
@@ -62,14 +79,24 @@ class RecommendationService:
                     "lng": poi.lng,
                 }
             elif status == "NEED_CLARIFICATION":
-                await self._repository.touch_session(request.session_id)
+                await self._repository.touch_session(
+                    request.session_id,
+                    destination_epoch=request.destination_epoch,
+                    require_open=True,
+                    session_started_at=request.started_at(),
+                )
                 return {
                     "status": status,
                     "clarification_prompt": "你想去邊一個地點？",
                     "options": options,
                 }
             else:
-                await self._repository.touch_session(request.session_id)
+                await self._repository.touch_session(
+                    request.session_id,
+                    destination_epoch=request.destination_epoch,
+                    require_open=True,
+                    session_started_at=request.started_at(),
+                )
                 return {"status": "NOT_FOUND", "suggestions": options}
 
         if destination is None:
@@ -79,10 +106,16 @@ class RecommendationService:
             "lng": destination[1],
             "name": request.dest_name or "",
         }
-        await self._repository.touch_session(request.session_id, destination_record)
+        await self._repository.touch_session(
+            request.session_id,
+            destination_record,
+            destination_epoch=request.destination_epoch,
+            require_open=True,
+            session_started_at=request.started_at(),
+        )
 
         snapshots = await self._snapshots.load_regions()
-        now = datetime.now(ZoneInfo("Asia/Hong_Kong"))
+        now = self._clock().astimezone(ZoneInfo("Asia/Hong_Kong"))
         flattened = [
             (region, carpark)
             for region in snapshots
@@ -98,83 +131,80 @@ class RecommendationService:
             if carpark.is_open
             and _distance_meters(destination, (carpark.lat, carpark.lng)) <= radius
         ]
-        candidates = [entry for entry in nearby if entry[1].vacancies != 0]
+        if request.preference == Preference.INDOOR_ONLY:
+            nearby = [entry for entry in nearby if not scoring.is_meter(entry[1].type)]
+        def build_pool(scarcity: bool):
+            pool, zeros = [], []
+            for region, carpark in nearby:
+                age = scoring.record_age_seconds(
+                    snapshot_age_seconds(region.source_snapshot_ts, now), carpark.source_updated_at, now
+                )
+                stale = scoring.is_stale(age, self._settings)
+                degraded = region.source_status == "degraded"
+                decision = scoring.pool_decision(carpark, stale, degraded, self._settings, scarcity)
+                if decision == scoring.VALID:
+                    pool.append((region, carpark, age, stale, degraded))
+                elif decision == scoring.REFERENCE_ONLY:
+                    zeros.append((region, carpark, age))
+            return pool, zeros
+
+        candidates, fresh_zero = build_pool(False)
+        # §9.7: scarcity is decided on the valid pool; it never re-admits excluded records.
         scarcity_mode = len(candidates) < self._settings.scarcity_pool_min_count
         if scarcity_mode:
-            candidates = nearby
+            candidates, fresh_zero = build_pool(True)  # only relaxes the meter >=2 -> >=1 rule
 
         candidate_scores = []
-        for region, carpark in candidates:
+        for region, carpark, age, stale, degraded in candidates:
             distance = _distance_meters(destination, (carpark.lat, carpark.lng))
-            age = snapshot_age_seconds(region.source_snapshot_ts, now)
-            preliminary = self._score(
-                carpark.vacancies,
-                0,
-                distance,
-                age,
-                request.preference,
-            )
-            if scarcity_mode:
-                preliminary += self._settings.scarcity_bonus_points
-            candidate_scores.append((preliminary, distance, region, carpark, age))
+            # Preliminary Top-K: distance + snapshot vacancies only (no remote reads).
+            preliminary = scoring.score(
+                vacancies=carpark.vacancies, locks=0, distance_m=distance,
+                age_seconds=age, settings=self._settings,
+            ).total
+            candidate_scores.append((preliminary, distance, region, carpark, age, stale, degraded))
         candidate_scores.sort(key=lambda entry: entry[0], reverse=True)
 
-        top = candidate_scores[: self._settings.lock_count_top_k_candidates]
+        k = self._settings.lock_count_top_k_candidates
+        if request.preference == Preference.METERS_FOCUS:
+            # Meters take the Top-K slots first (by score); indoor fills the rest as backup.
+            candidate_scores.sort(key=lambda e: not scoring.is_meter(e[3].type))
+        top = candidate_scores[:k]
+        fallback_id = None
+        if request.preference == Preference.SMART_HYBRID and not any(
+            scoring.is_meter(e[3].type) for e in top
+        ):
+            # Fallback meter: no meter made the primary Top-K by score. The best remaining
+            # meter takes the LOWEST preliminary slot (never adds a 6th card or extra reads),
+            # is flagged is_fallback, and is ordered after every viable primary.
+            best_meter = next((e for e in candidate_scores[k:] if scoring.is_meter(e[3].type)), None)
+            if best_meter is not None:
+                top = top[: k - 1] + [best_meter]
+                fallback_id = best_meter[3].carpark_id
+        # Bounded remote reads: exactly len(top) <= K lock/pain/perk lookups, no refill.
         lock_counts = await asyncio.gather(
-            *(
-                self._count_locks(carpark.carpark_id, request.session_id)
-                for _, _, _, carpark, _ in top
-            )
+            *(self._count_locks(e[3].carpark_id, request.session_id) for e in top)
         )
-        lock_by_id = {
-            entry[3].carpark_id: count
-            for entry, count in zip(top, lock_counts, strict=True)
-        }
-        pain_points = await asyncio.gather(
-            *(self._get_pain_point(carpark.carpark_id) for _, _, _, carpark, _ in top)
-        )
-        perks = await asyncio.gather(
-            *(self._get_perk(carpark.carpark_id) for _, _, _, carpark, _ in top)
-        )
-        pain_by_id = {
-            entry[3].carpark_id: pain
-            for entry, pain in zip(top, pain_points, strict=True)
-        }
-        perk_by_id = {
-            entry[3].carpark_id: perk
-            for entry, perk in zip(top, perks, strict=True)
-        }
+        pain_points = await asyncio.gather(*(self._get_pain_point(e[3].carpark_id) for e in top))
+        perks = await asyncio.gather(*(self._get_perk(e[3].carpark_id) for e in top))
 
         cards = []
-        for _, distance, region, carpark, age in candidate_scores[
-            : self._settings.lock_count_top_k_candidates
-        ]:
-            lock_count = lock_by_id.get(carpark.carpark_id, 0)
-            pain = pain_by_id.get(carpark.carpark_id, {})
-            perk = perk_by_id.get(carpark.carpark_id, {})
-            crowd_active = pain.get("crowd_window_expires_at", now) > now
+        for entry, lock_count, pain, perk in zip(top, lock_counts, pain_points, perks, strict=True):
+            _, distance, region, carpark, age, stale, degraded = entry
+            meter = scoring.is_meter(carpark.type)
+            breakdown = scoring.score(
+                vacancies=carpark.vacancies, locks=lock_count, distance_m=distance,
+                age_seconds=age, settings=self._settings, scarcity=scarcity_mode,
+                perk=perk, pain=pain, now=now, jitter=self._jitter(),
+            )
+            availability = scoring.classify(
+                vacancies=carpark.vacancies, locks=lock_count, stale=stale,
+                degraded=degraded, meter=meter, status=str(carpark.effective_status()),
+            )
+            meter_unknown = meter and availability == scoring.UNCONFIRMED
             effective_vacancies = (
-                -1 if carpark.vacancies == -1 else max(carpark.vacancies - lock_count, 0)
+                -1 if availability == scoring.UNCONFIRMED else max(carpark.vacancies - lock_count, 0)
             )
-            is_stale = age > self._settings.source_stale_threshold_seconds
-            degraded = region.source_status == "degraded"
-            is_meter = carpark.type.upper() in {"METER", "METERS"}
-            if is_meter and (is_stale or degraded):
-                effective_vacancies = -1
-                spoken_cue = "附近可能有咪錶，資料暫時未更新"
-            else:
-                spoken_cue = self._spoken_cue(carpark, effective_vacancies, distance)
-            score = self._score(
-                carpark.vacancies,
-                lock_count,
-                distance,
-                age,
-                request.preference,
-            )
-            if crowd_active:
-                score -= int(pain.get("crowd_penalty_points", 0))
-            if crowd_active and pain.get("crowd_rank_capped"):
-                spoken_cue += "近期有司機回報疑似霸位，請留意現場。"
             cards.append(
                 {
                     "carpark_id": carpark.carpark_id,
@@ -185,44 +215,38 @@ class RecommendationService:
                     "vacancies": effective_vacancies,
                     "distance_meters": distance,
                     "fee_summary": perk.get("fee_summary", carpark.fee_summary),
-                    "spoken_cue": spoken_cue,
-                    "is_stale": is_stale,
-                    "crowd_warning": bool(crowd_active and pain.get("crowd_warning", False)),
-                    "rank_capped": bool(crowd_active and pain.get("crowd_rank_capped", False)),
-                    "_score": score,
+                    "spoken_cue": "",
+                    "is_stale": stale,
+                    "crowd_warning": scoring.crowd_active(pain, now),
+                    "rank_capped": scoring.crowd_rank_capped(pain, now, self._settings),
+                    "_score": breakdown.total,
+                    "availability": availability,
+                    "vacancy_status": str(carpark.effective_status()),
+                    "data_source": region.source or region.region_id,
+                    "source_updated_at": carpark.source_updated_at,
+                    "commit_allowed": availability in scoring.COMMITTABLE,
+                    "is_fallback": carpark.carpark_id == fallback_id,
+                    "_meter_unknown": meter_unknown,
+                    "_stale": stale,
+                    "_degraded": degraded,
+                    "_age_seconds": age,
                 }
             )
         cards.sort(key=lambda card: card["_score"], reverse=True)
-        if any(card["rank_capped"] for card in cards) and any(
-            not card["rank_capped"] for card in cards
-        ):
-            unreported = [card for card in cards if not card["rank_capped"]]
-            capped = [card for card in cards if card["rank_capped"]]
-            cards = unreported + capped
-        low_watermark_card = next(
-            (
-                card
-                for card in cards
-                if 0 <= card["vacancies"] <= self._settings.low_watermark_vacancies
-            ),
-            None,
-        )
-        if low_watermark_card is not None:
-            backup = next(
-                (
-                    card
-                    for card in cards
-                    if card["carpark_id"] != low_watermark_card["carpark_id"]
-                ),
-                None,
-            )
-            if backup is not None:
-                low_watermark_card["spoken_cue"] += f" 後備可以去{backup['name']}。"
+        if scarcity_mode:
+            # Reference-only: fresh official 0 nearby, outside the valid pool, appended only to
+            # fill up to K cards (no remote reads; V=0 so no lock lookup is needed).
+            fresh_zero.sort(key=lambda e: _distance_meters(destination, (e[1].lat, e[1].lng)))
+            for region, carpark, age in fresh_zero[: max(k - len(cards), 0)]:
+                cards.append(self._reference_card(region, carpark, age, destination))
+        cards = scoring.arrange(cards, request.preference.value)
+        scoring.compose_cues(cards, self._settings)
         for card in cards:
-            card.pop("_score")
+            for key in [key for key in card if key.startswith("_")]:
+                card.pop(key)
 
         used_regions = []
-        for _, _, region, _, _ in top:
+        for _, _, region, *_ in top:
             if all(existing.region_id != region.region_id for existing in used_regions):
                 used_regions.append(region)
         if not used_regions:
@@ -266,7 +290,12 @@ class RecommendationService:
             response["speech_locale_fallback"] = True
         if clarification:
             response["resolved_destination"] = clarification["resolved_destination"]
-        response.update(self._scarcity_prompt(candidates, cards, request.expand_scarcity))
+        if not any(card["availability"] in scoring.VIABLE for card in cards):
+            response.update(_no_viable_prompt(request.expand_scarcity))
+        elif not any(card["commit_allowed"] for card in cards):
+            # Only unconfirmed options: say so up front; nothing here can be reserved.
+            response["spoken_cue"] = "附近暫時冇可以預留嘅車位，以下只係空位未確認嘅選擇。"
+            response["await_voice_reply"] = False
         return response
 
     async def _count_locks(self, carpark_id: str, session_id: str) -> int:
@@ -300,59 +329,29 @@ class RecommendationService:
         )
         return perk
 
-    def _score(
-        self,
-        vacancies: int,
-        lock_count: int,
-        distance: int,
-        age_seconds: int,
-        preference: Preference,
-    ) -> float:
-        remaining = max(vacancies - lock_count, 0) if vacancies >= 0 else -1
-        distance_score = 1 - min(distance / self._settings.d_max_meters, 1)
-        vacancy_score = (
-            min(remaining / self._settings.vacancy_score_denominator, 1)
-            if remaining >= 0
-            else 0.5
-        )
-        score = self._settings.w_dist * distance_score + self._settings.w_vac * vacancy_score
-        age_minutes = age_seconds / 60
-        if age_minutes >= self._settings.stale_tier2_minutes:
-            score -= self._settings.stale_tier2_penalty_points
-        elif age_minutes >= self._settings.stale_tier1_minutes:
-            score -= self._settings.stale_tier1_penalty_points
-        if preference == Preference.NEAREST:
-            score += self._settings.w_dist * distance_score
-        elif preference == Preference.MOST_VACANCIES and remaining >= 0:
-            score += self._settings.w_vac * vacancy_score
-        return score
+    def _reference_card(self, region, carpark, age, destination) -> dict[str, Any]:
+        return {
+            "carpark_id": carpark.carpark_id, "name": carpark.name, "type": carpark.type,
+            "lat": carpark.lat, "lng": carpark.lng, "vacancies": 0,
+            "distance_meters": _distance_meters(destination, (carpark.lat, carpark.lng)),
+            "fee_summary": carpark.fee_summary, "spoken_cue": "", "is_stale": False,
+            "crowd_warning": False, "rank_capped": False,
+            "availability": scoring.NO_AVAILABILITY, "commit_allowed": False, "is_fallback": False,
+            "vacancy_status": "COUNT", "data_source": region.source or region.region_id,
+            "source_updated_at": carpark.source_updated_at,
+            "_score": 0.0, "_meter_unknown": False, "_stale": False, "_degraded": False,
+            "_age_seconds": age,
+        }
 
-    def _spoken_cue(
-        self,
-        carpark: CarparkSnapshot,
-        vacancies: int,
-        distance: int,
-    ) -> str:
-        if vacancies == -1:
-            return f"前方首選{carpark.name}，{distance}米，空位資料暫時未更新。"
-        if vacancies <= self._settings.low_watermark_vacancies:
-            return f"{carpark.name}只剩{vacancies}個位，隨時會滿。"
-        return f"前方首選{carpark.name}，{distance}米，剩{vacancies}個位。"
 
-    def _scarcity_prompt(
-        self,
-        candidates: list[tuple[RegionSnapshot, CarparkSnapshot]],
-        cards: list[dict[str, Any]],
-        expanded: bool,
-    ) -> dict[str, Any]:
-        if expanded or len(candidates) >= self._settings.scarcity_pool_min_count:
-            return {}
-        if len(cards) == 1 and cards[0]["vacancies"] == 0:
-            return {
-                "spoken_cue": "該區僅有一場，目前已滿。要唔要幫你搵遠少少、大概三公里外嘅場？",
-                "await_voice_reply": True,
-            }
-        return {}
+def _no_viable_prompt(expanded: bool) -> dict[str, Any]:
+    """No actionable lead (every card is reference-only, or no card). Ask; never auto-expand."""
+    if expanded:
+        return {"spoken_cue": "擴大範圍後都冇確認有位嘅車場。", "await_voice_reply": False}
+    return {
+        "spoken_cue": "附近暫時冇確認有位嘅車場。要唔要幫你搵遠少少、大概三公里外嘅場？",
+        "await_voice_reply": True,
+    }
 
 
 def _distance_meters(start: tuple[float, float], end: tuple[float, float]) -> int:

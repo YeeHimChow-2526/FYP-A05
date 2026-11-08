@@ -42,6 +42,10 @@ class FakeStore:
             raise td.PreconditionFailed(name)
         self.objects[name] = (data, current + 1)
         self.writes.append(name)
+        return current + 1
+
+    def list(self, prefix):
+        return sorted((k, g) for k, (_, g) in self.objects.items() if k.startswith(prefix))
 
     def json(self, name):
         return json.loads(self.objects[name][0].decode("utf-8"))
@@ -127,98 +131,86 @@ class TransformTests(unittest.TestCase):
 
 
 class RunOnceTests(unittest.TestCase):
-    def test_first_run_writes_region_then_manifest_then_state(self):
+    """Job/CLI path now uses the shared lease/CAS protocol (app/shared_cache.py)."""
+
+    def snapshot_of(self, store):
+        return store.json(store.json(td.MANIFEST_OBJECT)["regions"]["HK_TD"]["object"])
+
+    def test_first_run_leases_writes_immutable_snapshot_then_publishes(self):
         store = FakeStore()
         result = td.run_once(store, FakeFetcher(), now=NOW)
-        self.assertEqual(result.exit_code, 0)
-        self.assertEqual(result.outcome, "written")
-        self.assertEqual(
-            store.writes, [td.SNAPSHOT_OBJECT, td.MANIFEST_OBJECT, td.STATE_OBJECT]
-        )
-        SnapshotManifest.model_validate(store.json(td.MANIFEST_OBJECT))
-        RegionSnapshot.model_validate(store.json(td.SNAPSHOT_OBJECT))
-        state = store.json(td.STATE_OBJECT)
-        self.assertEqual(state["etag"], '"v1"')
-        self.assertEqual(state["consecutive_failures"], 0)
+        self.assertEqual((result.exit_code, result.outcome), (0, "published"))
+        self.assertEqual(store.writes[0], td.MANIFEST_OBJECT)  # lease (ifGenerationMatch=0)
+        self.assertEqual(store.writes[-1], td.MANIFEST_OBJECT)  # publish (ifGenerationMatch=G1)
+        self.assertTrue(any(w.startswith("regions/HK_TD/snapshots/") for w in store.writes))
+        manifest = SnapshotManifest.model_validate(store.json(td.MANIFEST_OBJECT))
+        self.assertIsNone(manifest.owner_token)
+        self.assertEqual(manifest.sources["td_carpark"].etag, '"v1"')
+        RegionSnapshot.model_validate(self.snapshot_of(store))
+        self.assertNotIn(td.STATE_OBJECT, store.objects)  # old unmanaged state path retired
 
-    def test_not_modified_makes_no_writes(self):
+    def test_not_modified_only_advances_checked_at(self):
         store = FakeStore()
         fetcher = FakeFetcher(not_modified=True)
         td.run_once(store, fetcher, now=NOW)
-        store.writes.clear()
-        result = td.run_once(store, fetcher, now=NOW)
-        self.assertEqual(result.outcome, "not_modified")
-        self.assertEqual(store.writes, [])
+        before = store.json(td.MANIFEST_OBJECT)
+        later = NOW + timedelta(minutes=5)
+        result = td.run_once(store, fetcher, now=later)
+        after = store.json(td.MANIFEST_OBJECT)
+        self.assertEqual(result.outcome, "published")
+        self.assertEqual(after["regions"], before["regions"])  # source age unchanged
+        self.assertEqual(after["checked_at"], later.isoformat())
         self.assertEqual(fetcher.calls[-1], (td.VACANCY_URL, '"v1"'))
 
-    def test_same_hash_makes_no_writes(self):
+    def test_same_hash_does_not_refetch_info_or_republish(self):
         store = FakeStore()
         td.run_once(store, FakeFetcher(etag='"a"'), now=NOW)
-        store.writes.clear()
+        pointer = store.json(td.MANIFEST_OBJECT)["regions"]["HK_TD"]
         fetcher = FakeFetcher(etag='"b"')
-        result = td.run_once(store, fetcher, now=NOW)
-        self.assertEqual(result.outcome, "unchanged")
-        self.assertEqual(store.writes, [])
-        self.assertEqual(len(fetcher.calls), 1)  # info feed not fetched
+        td.run_once(store, fetcher, now=NOW + timedelta(minutes=2))
+        self.assertEqual(len(fetcher.calls), 1)
+        self.assertEqual(store.json(td.MANIFEST_OBJECT)["regions"]["HK_TD"], pointer)
 
-    def test_manifest_not_rewritten_when_unchanged(self):
-        store = FakeStore()
-        td.run_once(store, FakeFetcher(), now=NOW)
-        store.writes.clear()
-        changed = _load("td_vacancy_sample.json")
-        changed["car_park"][0]["vehicle_type"][0]["service_category"][0]["vacancy"] = 41
-        body = json.dumps(changed).encode()
-        result = td.run_once(store, FakeFetcher(vacancy=body, etag='"v2"'), now=NOW)
-        self.assertEqual(result.outcome, "written")
-        self.assertEqual(store.writes, [td.SNAPSHOT_OBJECT, td.STATE_OBJECT])
-
-    def test_existing_demo_manifest_is_replaced_unless_include_demo(self):
+    def test_existing_demo_region_is_preserved(self):
         demo = json.dumps(
             {"source": "DEMO", "is_demo": True,
              "regions": {"MK_DEMO": {"object": "regions/MK_DEMO/snapshot.json"}}}
         ).encode()
         store = FakeStore({td.MANIFEST_OBJECT: demo})
         td.run_once(store, FakeFetcher(), now=NOW)
-        self.assertEqual(list(store.json(td.MANIFEST_OBJECT)["regions"]), ["HK_TD"])
-
-        store = FakeStore({td.MANIFEST_OBJECT: demo})
+        manifest = store.json(td.MANIFEST_OBJECT)
+        self.assertEqual(sorted(manifest["regions"]), ["HK_TD", "MK_DEMO"])
+        self.assertFalse(manifest["is_demo"])
+        store = FakeStore({td.DEMO_REGION_OBJECT: b"{}"})
         td.run_once(store, FakeFetcher(), now=NOW, include_demo=True)
-        self.assertEqual(
-            sorted(store.json(td.MANIFEST_OBJECT)["regions"]), ["HK_TD", "MK_DEMO"]
-        )
+        self.assertIn("MK_DEMO", store.json(td.MANIFEST_OBJECT)["regions"])
 
-    def test_precondition_failure_means_another_run_won(self):
+    def test_lease_conflict_means_another_run_won(self):
         store = FakeStore()
-        store.fail_on.add(td.SNAPSHOT_OBJECT)
+        store.fail_on.add(td.MANIFEST_OBJECT)
         result = td.run_once(store, FakeFetcher(), now=NOW)
-        self.assertEqual(result.exit_code, 0)
-        self.assertTrue(result.outcome.startswith("precondition_failed"))
+        self.assertEqual((result.exit_code, result.outcome), (0, "lost_lease"))
         self.assertEqual(store.writes, [])
 
-    def test_fetch_failures_keep_snapshot_then_degrade(self):
+    def test_fetch_failures_keep_snapshot_backoff_then_degrade(self):
         store = FakeStore()
         td.run_once(store, FakeFetcher(), now=NOW)
-        good_snapshot = store.objects[td.SNAPSHOT_OBJECT][0]
-        for attempt in (1, 2):
-            store.writes.clear()
-            result = td.run_once(store, FakeFetcher(fail=True), now=NOW)
+        good = store.json(td.MANIFEST_OBJECT)["regions"]["HK_TD"]["object"]
+        t = NOW
+        for attempt in (1, 2, 3):
+            t += timedelta(hours=1)  # past any backoff
+            result = td.run_once(store, FakeFetcher(fail=True), now=t)
             self.assertEqual(result.exit_code, 1)
-            self.assertEqual(store.writes, [td.STATE_OBJECT])
-            self.assertEqual(store.objects[td.SNAPSHOT_OBJECT][0], good_snapshot)
-            self.assertEqual(store.json(td.STATE_OBJECT)["consecutive_failures"], attempt)
-        store.writes.clear()
-        result = td.run_once(store, FakeFetcher(fail=True), now=NOW)
-        self.assertEqual(result.exit_code, 1)
-        self.assertEqual(store.json(td.SNAPSHOT_OBJECT)["source_status"], "degraded")
-        self.assertEqual(
-            store.json(td.MANIFEST_OBJECT)["regions"]["HK_TD"]["source_status"], "degraded"
-        )
-        self.assertEqual(store.json(td.STATE_OBJECT)["consecutive_failures"], 3)
-        # recovery resets the counter
+            m = store.json(td.MANIFEST_OBJECT)
+            self.assertEqual(m["regions"]["HK_TD"]["object"], good)
+            self.assertEqual(m["sources"]["td_carpark"]["consecutive_failures"], attempt)
+        self.assertEqual(m["regions"]["HK_TD"]["source_status"], "degraded")
+        self.assertEqual(m["checked_at"], NOW.isoformat())  # failures never advance checked_at
         recovered = _load("td_vacancy_sample.json")
         recovered["car_park"][0]["vehicle_type"][0]["service_category"][0]["vacancy"] = 7
-        td.run_once(store, FakeFetcher(vacancy=json.dumps(recovered).encode(), etag='"v9"'), now=NOW)
-        self.assertEqual(store.json(td.STATE_OBJECT)["consecutive_failures"], 0)
+        td.run_once(store, FakeFetcher(vacancy=json.dumps(recovered).encode(), etag='"v9"'),
+                    now=t + timedelta(hours=1))
+        self.assertEqual(store.json(td.MANIFEST_OBJECT)["sources"]["td_carpark"]["consecutive_failures"], 0)
 
 
 class HttpFetchTests(unittest.TestCase):
