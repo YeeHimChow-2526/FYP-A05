@@ -12,6 +12,9 @@ sed "s/__NOW__/$NOW/g" "$SEED/regions/MK_DEMO/snapshot.json" > "$TMP/regions/MK_
 python3 -m json.tool "$TMP/regions/MK_DEMO/snapshot.json" >/dev/null 2>&1 || python -m json.tool "$TMP/regions/MK_DEMO/snapshot.json" >/dev/null
 # Guard: never clobber a real (non-DEMO) manifest written by the TD ingest unless FORCE_DEMO=1.
 REAL_MANIFEST=0
+# CAS like every other manifest writer (server/app/shared_cache.py): 0 = must not exist yet.
+GEN="$(gcloud storage objects describe "$BUCKET/manifest.json" --format='value(generation)' 2>/dev/null || true)"
+GEN="${GEN:-0}"
 if gcloud storage cat "$BUCKET/manifest.json" > "$TMP/current_manifest.json" 2>/dev/null; then
   if python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); sys.exit(0 if m.get("is_demo") is False else 1)' "$TMP/current_manifest.json"; then
     REAL_MANIFEST=1
@@ -24,7 +27,8 @@ if [[ "$REAL_MANIFEST" == 1 && "${FORCE_DEMO:-0}" != 1 ]]; then
   echo "Refreshed regions/MK_DEMO/snapshot.json only. Keep MK_DEMO listed with INCLUDE_DEMO_REGION=1 on the ingest," >&2
   echo "or rerun with FORCE_DEMO=1 to replace the manifest with the DEMO-only one." >&2
 else
-  gcloud storage cp --content-type=application/json "$TMP/manifest.json" "$BUCKET/manifest.json"
+  # Precondition: fails (412) if anyone (API refresh / ingest) changed the manifest since GEN.
+  gcloud storage cp --if-generation-match="$GEN" --content-type=application/json "$TMP/manifest.json" "$BUCKET/manifest.json"
 fi
 gcloud storage ls -l "$BUCKET/**"
 echo "Uploaded DEMO seed with timestamp $NOW"

@@ -49,6 +49,7 @@ BBOX = (22.153, 22.563, 113.835, 114.441)
 PER_CARPARK_STALE_MINUTES = 30
 MIN_OK_CARPARKS = 300
 DEGRADED_AFTER_FAILURES = 3
+JOB_LEASE_SECONDS = 180  # s; > 3 URLs x (4 attempts x 8 s + 3 x 2 s backoff)
 
 FETCH_TIMEOUT_SECONDS = 8
 FETCH_MAX_ATTEMPTS = 4
@@ -123,24 +124,33 @@ def transform(
             continue
         vtype, raw = hourly.get("vacancy_type"), hourly.get("vacancy")
         is_open = vtype != "C"
+        # Typed status: TD does not document what a negative count or a non-zero type-B flag
+        # means, so those are NO_COUNT (unknown), never "maintenance" and never healthy.
         if vtype == "A" and isinstance(raw, int) and not isinstance(raw, bool) and raw >= 0:
-            vacancies = raw
+            vacancies, status, reason = raw, "COUNT", "A_COUNT"
         elif vtype == "B" and raw == 0:  # B = flag only: 0 means full, else count unknown
-            vacancies = 0
+            vacancies, status, reason = 0, "COUNT", "B_FLAG_FULL"
+        elif vtype == "B":
+            vacancies, status, reason = -1, "NO_COUNT", "B_FLAG_NO_COUNT"
+        elif vtype == "A":
+            vacancies, status, reason = -1, "NO_COUNT", "A_NEGATIVE_OR_MALFORMED"
         else:
-            vacancies = -1
+            vacancies, status, reason = -1, "UNKNOWN", f"TYPE_{vtype}"
         if not is_open:
             stats["closed"] += 1
-            vacancies = -1
+            vacancies, status, reason = -1, "CLOSED", "C_CLOSED"
+        updated_at = None
         try:
-            if now - _parse_hkt(hourly["lastupdate"]) > timedelta(
-                minutes=PER_CARPARK_STALE_MINUTES
-            ):
+            updated = _parse_hkt(hourly["lastupdate"])
+            updated_at = updated.isoformat()
+            if now - updated > timedelta(minutes=PER_CARPARK_STALE_MINUTES):
                 if vacancies != -1:
                     stats["stale"] += 1
-                vacancies = -1
+                if status != "CLOSED":
+                    vacancies, status, reason = -1, "SOURCE_STALE", "LASTUPDATE_OVER_30_MIN"
         except (KeyError, TypeError, ValueError):
-            vacancies = -1
+            if status != "CLOSED":
+                vacancies, status, reason = -1, "UNKNOWN", "LASTUPDATE_MISSING"
         carparks.append(
             {
                 "carpark_id": str(park_id),
@@ -152,6 +162,9 @@ def transform(
                 "fee_summary": "",
                 "is_open": is_open,
                 "region_id": _region_key(m.get("district_en")),
+                "vacancy_status": status,
+                "vacancy_reason": reason,
+                "source_updated_at": updated_at,
             }
         )
     stats["out"] = len(carparks)
@@ -282,7 +295,9 @@ class ObjectStore(Protocol):
     def read(self, name: str) -> tuple[bytes | None, int]:
         """Return (data, generation); (None, 0) when the object is missing."""
 
-    def write(self, name: str, data: bytes, if_generation_match: int) -> None: ...
+    def write(self, name: str, data: bytes, if_generation_match: int) -> int:
+        """Create/replace only if the current generation matches (0 = must not exist).
+        Returns the new generation; raises PreconditionFailed on 412."""
 
 
 class GcsObjectStore:
@@ -303,7 +318,11 @@ class GcsObjectStore:
             raise PreconditionFailed(name) from error
         return data, int(blob.generation)
 
-    def write(self, name: str, data: bytes, if_generation_match: int) -> None:
+    def list(self, prefix: str) -> list[tuple[str, int]]:
+        """(name, generation) of objects under prefix (read-only)."""
+        return [(b.name, int(b.generation)) for b in self._bucket.list_blobs(prefix=prefix)]
+
+    def write(self, name: str, data: bytes, if_generation_match: int) -> int:
         blob = self._bucket.blob(name)
         blob.cache_control = "no-store"
         try:
@@ -314,6 +333,7 @@ class GcsObjectStore:
             )
         except self._gexc.PreconditionFailed as error:
             raise PreconditionFailed(name) from error
+        return int(blob.generation)
 
 
 def _dumps(payload: dict[str, Any]) -> bytes:
@@ -342,97 +362,29 @@ class RunResult:
     writes: list[str] = field(default_factory=list)
 
 
-def _write_manifest(
-    store: ObjectStore,
-    snapshot: dict[str, Any],
-    include_demo: bool,
-    writes: list[str],
-) -> None:
-    existing, generation = _read_json(store, MANIFEST_OBJECT)
-    demo_exists = False
-    if include_demo and not ((existing or {}).get("regions") or {}).get(DEMO_REGION_ID):
-        demo_exists = store.read(DEMO_REGION_OBJECT)[0] is not None
-    manifest = build_manifest(snapshot, existing, include_demo, demo_exists)
-    if existing == manifest:
-        return
-    store.write(MANIFEST_OBJECT, _dumps(manifest), generation)
-    writes.append(MANIFEST_OBJECT)
-
-
 def run_once(
     store: ObjectStore,
     fetch: Fetcher,
     *,
     now: datetime | None = None,
     include_demo: bool = False,
+    meters_enabled: bool = False,
 ) -> RunResult:
-    now = now or datetime.now(UTC)
-    writes: list[str] = []
-    state, state_gen = _read_json(store, STATE_OBJECT)
-    state = state or {}
-    try:
-        try:
-            vacancy_res = fetch(VACANCY_URL, state.get("etag"))
-            if vacancy_res.status == 304:
-                return RunResult(0, "not_modified")
-            digest = hashlib.sha256(vacancy_res.body).hexdigest()
-            if digest == state.get("sha256"):
-                return RunResult(0, "unchanged")
-            info_res = fetch(INFO_URL, None)
-            vacancy = _decode_json(vacancy_res.body)
-            info = _decode_json(info_res.body)
-        except (FetchError, ValueError) as error:
-            return _record_failure(store, state, state_gen, now, include_demo, str(error), writes)
+    """Job/CLI writer: the SAME lease/CAS protocol as the API (app/shared_cache.py), forced past
+    the 60 s interval but still honouring another writer's lease and the failure backoff.
+    There is no other manifest writer (the old state.json path is retired)."""
+    from .. import shared_cache
 
-        source_ts = vacancy_res.last_modified or now
-        snapshot, stats = transform(vacancy, info, now, source_ts)
-
-        _, snap_gen = store.read(SNAPSHOT_OBJECT)
-        store.write(SNAPSHOT_OBJECT, _dumps(snapshot), snap_gen)
-        writes.append(SNAPSHOT_OBJECT)
-        _write_manifest(store, snapshot, include_demo, writes)
-        new_state = {
-            "etag": vacancy_res.etag,
-            "sha256": digest,
-            "consecutive_failures": 0,
-            "last_success_at": now.isoformat(),
-            "last_source_snapshot_ts": snapshot["source_snapshot_ts"],
-            "last_carpark_count": stats["out"],
-        }
-        store.write(STATE_OBJECT, _dumps(new_state), state_gen)
-        writes.append(STATE_OBJECT)
-        return RunResult(0, "written", stats, writes)
-    except PreconditionFailed as error:
-        return RunResult(0, f"precondition_failed:{error}", {}, writes)
-
-
-def _record_failure(
-    store: ObjectStore,
-    state: dict[str, Any],
-    state_gen: int,
-    now: datetime,
-    include_demo: bool,
-    message: str,
-    writes: list[str],
-) -> RunResult:
-    failures = int(state.get("consecutive_failures") or 0) + 1
-    if failures >= DEGRADED_AFTER_FAILURES:
-        snapshot, snap_gen = _read_json(store, SNAPSHOT_OBJECT)
-        if snapshot and snapshot.get("source_status") != "degraded":
-            snapshot["source_status"] = "degraded"
-            store.write(SNAPSHOT_OBJECT, _dumps(snapshot), snap_gen)
-            writes.append(SNAPSHOT_OBJECT)
-        if snapshot:
-            _write_manifest(store, snapshot, include_demo, writes)
-    new_state = {
-        **state,
-        "consecutive_failures": failures,
-        "last_failure_at": now.isoformat(),
-        "last_error": message[:500],
-    }
-    store.write(STATE_OBJECT, _dumps(new_state), state_gen)
-    writes.append(STATE_OBJECT)
-    return RunResult(1, "fetch_failed", {"consecutive_failures": failures, "error": message}, writes)
+    extra: dict[str, dict[str, str]] = {}
+    if include_demo and store.read(DEMO_REGION_OBJECT)[0] is not None:
+        extra[DEMO_REGION_ID] = {"object": DEMO_REGION_OBJECT}
+    # Job fetches retry (FETCH_MAX_ATTEMPTS x timeout + backoff ~ 40 s per URL) -> longer lease.
+    cfg = shared_cache.RefreshConfig(lease_seconds=JOB_LEASE_SECONDS, meters_enabled=meters_enabled)
+    clock = (lambda: now) if now is not None else (lambda: datetime.now(UTC))
+    result = shared_cache.refresh_once(store, fetch, cfg, clock=clock, force=True, extra_regions=extra)
+    failed = [k for k, v in result.sources.items() if v == "failed"]
+    code = 1 if failed or result.outcome == "bad_manifest" else 0
+    return RunResult(code, result.outcome, {"sources": result.sources, "generation": result.generation})
 
 
 def dry_run(fetch: Fetcher, out_path: str | None, now: datetime | None = None) -> RunResult:
@@ -480,6 +432,7 @@ def main(argv: list[str] | None = None) -> int:
             GcsObjectStore(args.bucket),
             http_fetch,
             include_demo=_env_flag("INCLUDE_DEMO_REGION"),
+            meters_enabled=_env_flag("METER_REFRESH_ENABLED"),
         )
     print(
         json.dumps(
