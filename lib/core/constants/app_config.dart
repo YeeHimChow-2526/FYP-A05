@@ -5,4 +5,8 @@ class AppConfig {
   static const List<String> tripRatingTags = ['GOOD', 'OK', 'BAD'];
   static const List<String> tripPerkStatusTags = ['VALID', 'INVALID', 'NONE'];
   static const int tripPerkNotesMaxChars = 140;
+
+  /// 行程中圓形掣下面留白（邏輯像素），避開原生 Navigation SDK 底部 ETA footer。
+  /// GoogleMap.setPadding 只移 logo／重新置中，唔會移動 ETA 卡。
+  static const double inTripNavFooterClearance = 48;
 }

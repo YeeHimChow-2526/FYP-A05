@@ -24,7 +24,10 @@ class ConnectivityNetworkStatus : NetworkStatusProvider {
 }
 
 object Bindings {
-  val voiceInput: VoiceInput = SttVoiceInput()
+  // Phase 3c：真 Android SpeechRecognizer（one-shot；冇長開熱詞）。舊 SttVoiceInput stub 保留喺 CorePorts。
+  val voiceInput: VoiceInput = com.hkparking.copilot.voice.SpeechVoiceInput(
+    com.hkparking.copilot.voice.AndroidSpeechEngine { appContext },
+  )
   val locationSource: PlatformLocationSource = PlatformLocationSource()
   val bridgeLocationSource: LocationSource = locationSource
   private var bridgeLocationAttached = false
@@ -104,6 +107,8 @@ object Bindings {
   fun transportUseRealApi(): Boolean = true
 
   fun onBridgeStarted(service: com.hkparking.copilot.FloatingBubbleService) {
+    // 語音辨識（SpeechVoiceInput）都要 context；bridge 模式唔經 attachService。
+    if (appContext == null) appContext = service.applicationContext
     if (bridgeLocationAttached) return
     bridgeLocationAttached = true
     locationSource.attach(service)

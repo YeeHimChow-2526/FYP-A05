@@ -7,8 +7,8 @@ class ApiClientSyncApi implements SyncApi {
   final ApiClient client;
 
   @override
-  Future<CallOutcome> syncDriverConfirmed(String sessionId, int timestampSec) {
-    return client.syncDriverConfirmed(sessionId, timestampSec);
+  Future<CallOutcome> syncDriverConfirmed(String sessionId, int timestampSec, {ParkedEventIdentity identity = ParkedEventIdentity.legacy}) {
+    return client.syncDriverConfirmed(sessionId, timestampSec, identity: identity);
   }
 
   @override

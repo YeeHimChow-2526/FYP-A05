@@ -252,6 +252,8 @@ class AndroidTextToSpeechEngine(
   private var pendingDone: (() -> Unit)? = null
   private var pendingError: (() -> Unit)? = null
   private var utteranceSerial: Int = 0
+  // 只接受「而家嗰句」嘅回呼；stop() 後到嘅舊 onDone／onStop 唔會完成下一句（防誤開咪）。
+  private var currentUtteranceId: String? = null
   private val tts: android.speech.tts.TextToSpeech =
     android.speech.tts.TextToSpeech(context, this::onInit)
 
@@ -260,12 +262,20 @@ class AndroidTextToSpeechEngine(
       override fun onStart(utteranceId: String?) {}
 
       override fun onDone(utteranceId: String?) {
-        mainHandler.post { finishUtterance(success = true) }
+        mainHandler.post { finishUtterance(utteranceId, success = true) }
       }
 
-      @Deprecated("Use onError(utteranceId)")
+      @Deprecated("Use onError(utteranceId, errorCode)")
       override fun onError(utteranceId: String?) {
-        mainHandler.post { finishUtterance(success = false) }
+        mainHandler.post { finishUtterance(utteranceId, success = false) }
+      }
+
+      override fun onError(utteranceId: String?, errorCode: Int) {
+        mainHandler.post { finishUtterance(utteranceId, success = false) }
+      }
+
+      override fun onStop(utteranceId: String?, interrupted: Boolean) {
+        mainHandler.post { finishUtterance(utteranceId, success = false) }
       }
     })
   }
@@ -290,21 +300,25 @@ class AndroidTextToSpeechEngine(
     pendingError = onError
     utteranceSerial += 1
     val utteranceId = "cue-$utteranceSerial"
+    currentUtteranceId = utteranceId
     val code = runCatching {
       tts.speak(text, android.speech.tts.TextToSpeech.QUEUE_ADD, null, utteranceId)
     }.getOrNull()
     if (code == null || code == android.speech.tts.TextToSpeech.ERROR) {
-      mainHandler.post { finishUtterance(success = false) }
+      mainHandler.post { finishUtterance(utteranceId, success = false) }
     }
   }
 
   override fun stop() {
     pendingDone = null
     pendingError = null
+    currentUtteranceId = null
     runCatching { tts.stop() }
   }
 
-  private fun finishUtterance(success: Boolean) {
+  private fun finishUtterance(utteranceId: String?, success: Boolean) {
+    if (utteranceId == null || utteranceId != currentUtteranceId) return
+    currentUtteranceId = null
     val done = pendingDone
     val failed = pendingError
     pendingDone = null

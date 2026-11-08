@@ -17,7 +17,7 @@ class ReportOutcome {
 }
 
 abstract class SyncApi {
-  Future<CallOutcome> syncDriverConfirmed(String sessionId, int timestampSec);
+  Future<CallOutcome> syncDriverConfirmed(String sessionId, int timestampSec, {ParkedEventIdentity identity = ParkedEventIdentity.legacy});
   Future<CallOutcome> submitTripReport({
     required String sessionId,
     required String carparkId,

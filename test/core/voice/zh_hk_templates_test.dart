@@ -18,11 +18,15 @@ void main() {
 
   test('withVoiceReplyPrompt only appends when full voice and mic inactive', () {
     const cue = '去邊度？';
-    expect(ZhHkTemplates.withVoiceReplyPrompt(cue, TripVoiceMode.fullVoice, false), cue + ZhHkTemplates.TAP_CAPSULE);
-    expect(ZhHkTemplates.withVoiceReplyPrompt(cue, TripVoiceMode.fullVoice, true), cue);
-    expect(ZhHkTemplates.withVoiceReplyPrompt(cue, TripVoiceMode.announceManual, false), cue);
     expect(
-      ZhHkTemplates.withVoiceReplyPrompt(cue + ZhHkTemplates.TAP_CAPSULE, TripVoiceMode.fullVoice, false),
+      ZhHkTemplates.withVoiceReplyPrompt(cue, TripVoiceMode.fullVoice, false, canListen: true),
+      cue + ZhHkTemplates.TAP_CAPSULE,
+    );
+    expect(ZhHkTemplates.withVoiceReplyPrompt(cue, TripVoiceMode.fullVoice, false), cue);
+    expect(ZhHkTemplates.withVoiceReplyPrompt(cue, TripVoiceMode.fullVoice, true, canListen: true), cue);
+    expect(ZhHkTemplates.withVoiceReplyPrompt(cue, TripVoiceMode.announceManual, false, canListen: true), cue);
+    expect(
+      ZhHkTemplates.withVoiceReplyPrompt(cue + ZhHkTemplates.TAP_CAPSULE, TripVoiceMode.fullVoice, false, canListen: true),
       cue + ZhHkTemplates.TAP_CAPSULE,
     );
   });

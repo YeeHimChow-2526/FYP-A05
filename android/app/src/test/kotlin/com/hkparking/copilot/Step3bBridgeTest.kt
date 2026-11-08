@@ -4,6 +4,7 @@ import com.hkparking.copilot.bridge.BridgeSink
 import com.hkparking.copilot.bridge.TripPlatformBridge
 import com.hkparking.copilot.bridge.TripPlatformEvents
 import com.hkparking.copilot.di.Bindings
+import com.hkparking.copilot.trip.MemoryPrefsPort
 import com.hkparking.copilot.di.LocFix
 import com.hkparking.copilot.sim.SimLocationSource
 import com.hkparking.copilot.voice.LocaleProbe
@@ -107,6 +108,27 @@ class Step3bBridgeTest {
   }
 
   @Test
+  fun b12_appModePrefsRoundTripAndUnknownKeyStillRejected() {
+    val mem = MemoryPrefsPort()
+    TripPlatformBridge.prefsOverride = mem
+    val put = TripPlatformBridge.handleForTest(
+      "prefsPut",
+      mapOf("key" to TripPlatformBridge.APP_MODE_PREFS_KEY, "value" to "DEMO"),
+    )
+    assertTrue(put.ok)
+    val loaded = TripPlatformBridge.handleForTest("prefsLoad", emptyMap())
+    assertTrue(loaded.ok)
+    @Suppress("UNCHECKED_CAST")
+    val map = loaded.value as Map<String, String?>
+    assertEquals("DEMO", map[TripPlatformBridge.APP_MODE_PREFS_KEY])
+    assertEquals("DEMO", mem.getString(TripPlatformBridge.APP_MODE_PREFS_KEY))
+    val rejected = TripPlatformBridge.handleForTest("prefsPut", mapOf("key" to "other", "value" to "x"))
+    assertFalse(rejected.ok)
+    assertEquals("PREF_KEY", rejected.errorCode)
+    assertNull(mem.getString("other"))
+  }
+
+  @Test
   fun b8_fixturePostUnsupportedWhenDisabled() {
     val previous = Bindings.allowFixturePost
     Bindings.allowFixturePost = false
@@ -172,6 +194,29 @@ class Step3bBridgeTest {
     assertEquals("MISSING_PERMISSION", denied.error)
     val missing = denied.details as Map<*, *>
     assertFalse((missing["missingItems"] as List<*>).contains(StartupPermissionChecker.OVERLAY))
+  }
+
+  @Test
+  fun b13_startGateNotificationsOptionalButLocationServicesRequired() {
+    TripPlatformBridge.locationServicesOn = { true }
+    TripPlatformBridge.startGateInput = {
+      PermissionCheckInput(fineLocationGranted = true, postNotificationsGranted = false, systemAlertWindowGranted = false)
+    }
+    val allowed = RecResult()
+    TripPlatformBridge.checkStartGateForTest(allowed)
+    assertNull("通知拒絕唔阻開程", allowed.error)
+    TripPlatformBridge.locationServicesOn = { false }
+    val off = RecResult()
+    TripPlatformBridge.checkStartGateForTest(off)
+    assertEquals("MISSING_PERMISSION", off.error)
+    assertTrue(((off.details as Map<*, *>)["missingItems"] as List<*>).contains(TripPermissions.LOCATION_SERVICES_OFF))
+    TripPlatformBridge.locationServicesOn = { true }
+    TripPlatformBridge.startGateInput = {
+      PermissionCheckInput(fineLocationGranted = false, coarseLocationOnly = true, postNotificationsGranted = true, systemAlertWindowGranted = true)
+    }
+    val coarse = RecResult()
+    TripPlatformBridge.checkStartGateForTest(coarse)
+    assertEquals("只有大約位置唔夠", "MISSING_PERMISSION", coarse.error)
   }
 
   @Test

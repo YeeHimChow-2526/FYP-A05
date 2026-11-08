@@ -10,6 +10,8 @@ class ZhHkTemplates {
 
   static const String WAKE_ACK = '喺度，想去邊度？';
   static const String NO_MORE_OPTIONS = '暫時冇其他選擇';
+  static const String REFERENCE_NOT_COMMITTABLE = '呢個車場暫時唔確認有位，唔可以預留，請揀第二個或者再問一次。';
+  static const String NO_RESERVABLE_OPTION = '附近暫時冇可以預留嘅車位，以下只係空位未確認嘅選擇。';
   static const String PLACE_CLARIFY = '邊一區？';
   static const String SILENCE_DRIVE = '出發緊？去邊度等我睇定車位？';
   static const String NETWORK_SLOW = '網絡有啲慢，我再試吓';
@@ -42,8 +44,17 @@ class ZhHkTemplates {
 
   static String permissionRepair(String missing) => '泊車副駕需要補授權：$missing。請泊好車後再處理。';
 
-  static String withVoiceReplyPrompt(String cue, TripVoiceMode voiceMode, bool isMicFgsActive) {
-    if (voiceMode != TripVoiceMode.fullVoice || isMicFgsActive) return cue;
+  /// 同一行程第 3 個未成功選定嘅車場：問一句，等明確同意先轉線。
+  static String confirmSwitchAsk(String name) => '而家確認去$name嗎？';
+
+  /// [canListen] 係而家真係開到收音同辨識。全語音設定或者 debug 注入本身唔夠。
+  static String withVoiceReplyPrompt(
+    String cue,
+    TripVoiceMode voiceMode,
+    bool isMicFgsActive, {
+    bool canListen = false,
+  }) {
+    if (!canListen || voiceMode != TripVoiceMode.fullVoice || isMicFgsActive) return cue;
     if (cue.endsWith(TAP_CAPSULE)) return cue;
     return cue + TAP_CAPSULE;
   }

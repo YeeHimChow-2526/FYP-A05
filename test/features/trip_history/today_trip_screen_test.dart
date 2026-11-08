@@ -16,7 +16,7 @@ class _RecordingSync implements SyncApi {
   final reports = <Map<String, Object?>>[];
 
   @override
-  Future<CallOutcome> syncDriverConfirmed(String sessionId, int timestampSec) async {
+  Future<CallOutcome> syncDriverConfirmed(String sessionId, int timestampSec, {ParkedEventIdentity identity = ParkedEventIdentity.legacy}) async {
     return const CallOutcome(
       succeeded: true,
       httpStatus: 200,

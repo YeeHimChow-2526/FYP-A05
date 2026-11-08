@@ -9,12 +9,14 @@ class FakeNavEngine extends NavEngine {
   bool initialized = false;
   bool guidanceRunning = false;
   bool turnByTurnAudioEnabled = true;
+  bool audioSuspended = false;
   String? activeTitle;
   double? activeLat;
   double? activeLng;
   double? userLat;
   double? userLng;
   int overviewCount = 0;
+  EdgeInsets mapPadding = EdgeInsets.zero;
   final List<String> calls = [];
 
   @override
@@ -37,7 +39,11 @@ class FakeNavEngine extends NavEngine {
   }
 
   @override
-  Future<bool> startGuidanceTo({required String title, required double lat, required double lng}) async {
+  Future<bool> startGuidanceTo({
+    required String title,
+    required double lat,
+    required double lng,
+  }) async {
     calls.add('setDestinations');
     calls.add('startGuidance');
     activeTitle = title;
@@ -58,9 +64,29 @@ class FakeNavEngine extends NavEngine {
   }
 
   @override
+  Future<void> suspendTurnByTurnAudio() async {
+    calls.add('suspendAudio');
+    if (audioSuspended || !turnByTurnAudioEnabled) return;
+    audioSuspended = true;
+  }
+
+  @override
+  Future<void> resumeTurnByTurnAudio() async {
+    calls.add('resumeAudio');
+    if (!audioSuspended) return;
+    audioSuspended = false;
+  }
+
+  @override
   Future<void> showRouteOverview() async {
     calls.add('showRouteOverview');
     overviewCount += 1;
+  }
+
+  @override
+  Future<void> setMapPadding(EdgeInsets padding) async {
+    calls.add('setMapPadding');
+    mapPadding = padding;
   }
 
   @override
@@ -78,7 +104,9 @@ class _FakeNavPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final origin = engine.userLat == null ? '—' : '${engine.userLat}, ${engine.userLng}';
+    final origin = engine.userLat == null
+        ? '—'
+        : '${engine.userLat}, ${engine.userLng}';
     final dest = engine.activeTitle ?? '—';
     return ColoredBox(
       color: const Color(0xFF1B4F72),

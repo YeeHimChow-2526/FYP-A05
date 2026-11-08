@@ -1,4 +1,3 @@
-import 'dart:math';
 
 import 'package:copilot/core/constants/native_config.dart';
 import 'package:copilot/core/trip/distance_tracker.dart';

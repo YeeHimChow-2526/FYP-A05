@@ -61,6 +61,34 @@ class MainActivity : FlutterActivity() {
         is Map<*, *> -> raw.entries.associate { it.key.toString() to it.value }
         else -> emptyMap()
       }
+      if (call.method == "requestRecordAudioPermission") {
+        requestRecordAudio(result)
+        return@setMethodCallHandler
+      }
+      when (call.method) {
+        "getTripPermissions" -> {
+          result.success(TripPermissions.allStatus(permissionHost, locationServicesOn()))
+          return@setMethodCallHandler
+        }
+        "requestTripPermission" -> {
+          requestTripPermission(args["kind"] as? String ?: "", result)
+          return@setMethodCallHandler
+        }
+        "openAppSettings" -> {
+          val opened = runCatching {
+            startActivity(
+              Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                .setData(android.net.Uri.fromParts("package", packageName, null)),
+            )
+          }.isSuccess
+          result.success(opened)
+          return@setMethodCallHandler
+        }
+        "getVoiceFacts" -> {
+          result.success(voiceFacts())
+          return@setMethodCallHandler
+        }
+      }
       val outcome = bridge.handle(call.method, args)
       if (outcome.ok) {
         result.success(outcome.value)
@@ -70,7 +98,104 @@ class MainActivity : FlutterActivity() {
     }
   }
 
+  // t1253：通用執行期權限請求（location／notifications／bluetooth／microphone）。同一時間只處理一個；
+  // Activity 銷毀時回 false，唔會掛住 Dart。
+  private var pendingPermission: Pair<String, MethodChannel.Result>? = null
+
+  private val permissionHost = object : TripPermissions.Host {
+    override val sdk: Int get() = android.os.Build.VERSION.SDK_INT
+    override fun granted(permission: String): Boolean =
+      checkSelfPermission(permission) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    override fun rationale(permission: String): Boolean = shouldShowRequestPermissionRationale(permission)
+    override fun askedBefore(kind: String): Boolean =
+      getSharedPreferences(PERMISSION_PREFS, MODE_PRIVATE).getBoolean("asked_$kind", false)
+  }
+
+  private fun locationServicesOn(): Boolean = runCatching {
+    getSystemService(android.location.LocationManager::class.java)?.isLocationEnabled ?: false
+  }.getOrDefault(false)
+
+  private fun requestTripPermission(kind: String, result: MethodChannel.Result) {
+    if (kind !in TripPermissions.KINDS) {
+      result.error("UNKNOWN_KIND", kind, null)
+      return
+    }
+    val perms = TripPermissions.manifestPermissions(kind, android.os.Build.VERSION.SDK_INT)
+    if (perms.isEmpty() || TripPermissions.state(kind, permissionHost) == TripPermissions.GRANTED ||
+      !TripPermissions.canRequest(kind, permissionHost)
+    ) {
+      result.success(TripPermissions.status(kind, permissionHost))
+      return
+    }
+    if (pendingPermission != null || pendingAudioResult != null) {
+      result.error("IN_PROGRESS", "permission request already showing", null)
+      return
+    }
+    pendingPermission = kind to result
+    getSharedPreferences(PERMISSION_PREFS, MODE_PRIVATE).edit().putBoolean("asked_$kind", true).apply()
+    requestPermissions(perms.toTypedArray(), REQUEST_TRIP_PERMISSION)
+  }
+
+  private fun voiceFacts(): Map<String, Any?> {
+    val tts = runCatching {
+      packageManager.queryIntentServices(Intent("android.intent.action.TTS_SERVICE"), 0).isNotEmpty()
+    }.getOrDefault(false)
+    val recognizer = runCatching { android.speech.SpeechRecognizer.isRecognitionAvailable(this) }.getOrDefault(false)
+    return mapOf(
+      "ttsEngine" to tts,
+      "recognizer" to recognizer,
+      "recordAudio" to permissionHost.granted(android.Manifest.permission.RECORD_AUDIO),
+      // debug：語音輸入係 adb 模擬（SimVoiceInput），唔用咪；release：真 SpeechRecognizer。
+      "simulatedInput" to BuildConfig.DEBUG,
+    )
+  }
+
+  override fun onResume() {
+    super.onResume()
+    AppVisibility.foreground = true
+  }
+
+  override fun onPause() {
+    AppVisibility.foreground = false
+    super.onPause()
+  }
+
+  // Phase 3c：全語音用嘅 RECORD_AUDIO 執行期權限（系統對話框；冇新 UI）。結果 true/false 回 Dart。
+  private var pendingAudioResult: MethodChannel.Result? = null
+
+  private fun requestRecordAudio(result: MethodChannel.Result) {
+    val permission = android.Manifest.permission.RECORD_AUDIO
+    if (checkSelfPermission(permission) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+      result.success(true)
+      return
+    }
+    if (pendingAudioResult != null) {
+      result.error("IN_PROGRESS", "RECORD_AUDIO request already showing", null)
+      return
+    }
+    pendingAudioResult = result
+    requestPermissions(arrayOf(permission), REQUEST_RECORD_AUDIO)
+  }
+
+  override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+    super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+    if (requestCode == REQUEST_TRIP_PERMISSION) {
+      val pending = pendingPermission ?: return
+      pendingPermission = null
+      pending.second.success(TripPermissions.status(pending.first, permissionHost))
+      return
+    }
+    if (requestCode != REQUEST_RECORD_AUDIO) return
+    val granted = grantResults.isNotEmpty() && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED
+    pendingAudioResult?.success(granted)
+    pendingAudioResult = null
+  }
+
   override fun onDestroy() {
+    pendingAudioResult?.success(false)
+    pendingAudioResult = null
+    pendingPermission?.let { (kind, result) -> result.success(TripPermissions.status(kind, permissionHost)) }
+    pendingPermission = null
     // RT-6：卸 channel；背景 sync 完成後主線回呼見 channelMounted=false 就唔 emit。
     // today-trip-host-sync 已係 daemon 單線程 Executor，唔強制 shutdown 以免截斷 in-flight。
     overlayHost?.channelMounted = false
@@ -81,6 +206,9 @@ class MainActivity : FlutterActivity() {
 
   companion object {
     const val ENGINE_KEY = "trip_engine"
+    const val REQUEST_RECORD_AUDIO = 4107
+    const val REQUEST_TRIP_PERMISSION = 4108
+    const val PERMISSION_PREFS = "hkp_permission_requests"
   }
 }
 

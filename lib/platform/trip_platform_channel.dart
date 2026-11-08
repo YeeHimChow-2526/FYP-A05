@@ -32,6 +32,16 @@ class ChannelTripPlatform implements TripPlatform {
   }
 
   @override
+  void startListening({bool hotword = false}) {
+    channel.invokeMethod<bool>('startListening', {'hotword': hotword});
+  }
+
+  @override
+  void stopListening() {
+    channel.invokeMethod<void>('stopListening');
+  }
+
+  @override
   Future<void> stopForeground(String reason) {
     return channel.invokeMethod<void>('stopTripFgs', {'reason': reason});
   }
@@ -47,8 +57,8 @@ class ChannelTripPlatform implements TripPlatform {
   }
 
   @override
-  void speak(String text) {
-    channel.invokeMethod<void>('speak', {'text': text});
+  void speak(String text, {String? utteranceId}) {
+    channel.invokeMethod<void>('speak', {'text': text, 'utteranceId': ?utteranceId});
   }
 
   @override
@@ -119,13 +129,26 @@ class ChannelTripPlatform implements TripPlatform {
     switch (call.method) {
       case 'onFix':
         final speed = map['speedKmh'];
-        controller.onFix(LocFix(
+        controller.onDeviceFix(LocFix(
           lat: (map['lat'] as num?)?.toDouble() ?? 0,
           lng: (map['lng'] as num?)?.toDouble() ?? 0,
-          accuracyM: (map['accuracyM'] as num?)?.toDouble() ?? 0,
+          accuracyM: (map['accuracyM'] as num?)?.toDouble() ?? double.infinity, // 缺精度＝唔可信（現場即泊唔會誤鎖）
           speedKmh: speed == null ? double.nan : (speed as num).toDouble(),
           timestampMs: (map['timestampMs'] as num?)?.toInt() ?? 0,
         ));
+      case 'onVoiceUtterance':
+        controller.onVoiceUtterance(
+          code: map['code'] as String? ?? 'UNKNOWN',
+          text: map['text'] as String? ?? '',
+          destinationName: map['destinationName'] as String?,
+          confirmed: map['confirmed'] == true,
+          lowConfidence: map['lowConfidence'] == true,
+          blockedAsSelfHearing: map['blockedAsSelfHearing'] == true,
+        );
+      case 'onSpeechDone':
+        controller.onSpeechDone(map['utteranceId'] as String? ?? '', played: map['played'] == true);
+      case 'onVoiceError':
+        controller.onVoiceError(map['code'] as String? ?? 'UNKNOWN', permanent: map['permanent'] == true);
       case 'onTick':
         controller.onTick((map['nowMs'] as num?)?.toInt() ?? 0);
       case 'onEngineSignal':

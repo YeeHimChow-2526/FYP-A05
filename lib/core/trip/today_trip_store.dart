@@ -47,7 +47,14 @@ class TodayTripStore {
 
   List<Map<String, Object?>> asBridgeMaps(int nowMs) => list(nowMs).map((row) => row.toJson()).toList();
 
-  void upsertCandidate(String sessionId, String carparkId, String carparkName, int parkedAtEpochMs) {
+  void upsertCandidate(
+    String sessionId,
+    String carparkId,
+    String carparkName,
+    int parkedAtEpochMs, {
+    int? lockRevision,
+    int? destinationEpoch,
+  }) {
     purgeIfNewHktDay(parkedAtEpochMs);
     final records = _load();
     final idx = records.indexWhere((row) => row.sessionId == sessionId);
@@ -59,13 +66,17 @@ class TodayTripStore {
           carparkName: carparkName.trim().isEmpty ? existing.carparkName : carparkName,
         );
       } else {
-        final updated = existing.copyWith(
+        final updated = TodayTripRecord(
+          sessionId: sessionId,
           carparkId: carparkId,
           carparkName: carparkName,
           parkedAtEpochMs: parkedAtEpochMs,
           status: statusCandidate,
           confirmSyncPending: false,
           feedbackSubmitted: false,
+          contractVersion: 2,
+          lockRevision: lockRevision,
+          destinationEpoch: destinationEpoch,
         );
         records.removeAt(idx);
         records.insert(0, updated);
@@ -81,6 +92,9 @@ class TodayTripStore {
           status: statusCandidate,
           confirmSyncPending: false,
           feedbackSubmitted: false,
+          contractVersion: 2,
+          lockRevision: lockRevision,
+          destinationEpoch: destinationEpoch,
         ),
       );
     }
@@ -97,6 +111,16 @@ class TodayTripStore {
     _save(records, prefs.getString(NativeConfig.TODAY_TRIPS_HKT_DATE_KEY));
     _notify();
     return true;
+  }
+
+  /// 伺服器明確拒絕（4xx typed）→ 停止重試、保留原因。
+  void markSyncRejected(String sessionId, String code) {
+    final records = _load();
+    final idx = records.indexWhere((row) => row.sessionId == sessionId);
+    if (idx < 0) return;
+    records[idx] = records[idx].copyWith(confirmSyncPending: false, syncRejected: code);
+    _save(records, prefs.getString(NativeConfig.TODAY_TRIPS_HKT_DATE_KEY));
+    _notify();
   }
 
   void markSyncSent(String sessionId) {

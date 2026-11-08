@@ -138,3 +138,32 @@
 ## 8. 無 Firestore SDK
 
 客戶端**不**嵌入 Firestore SDK；全部經 Cloud Run REST（原生 `ApiClient.kt`）。Security Rules 禁止前端直連（雲端責任；App 只需遵守「只打 REST」）。
+
+## Phase 3b 補充：Contract v2（改目的地釋放舊鎖）— 2026-11-08
+
+- `recommend-and-route` / `session/commit` 帶 `destination_epoch`（int）；commit 再帶 `idempotency_key`（`c{epoch}-{carpark}`，同 key 同內容＝重播，同 key 異內容＝409 `IDEMPOTENCY_KEY_REUSED`）。
+- commit 成功回 `contract_version:2`、`destination_epoch`、`lock_revision`（session 文件內單調遞增，唔喺可刪嘅 lock 文件）、`lock_id`。冇 `lock_revision`＝舊後端 → App 顯示「伺服器唔支援即時釋放」，唔假裝成功。
+- `session/release` 新增 `reason`：`DESTINATION_CHANGED`（非終結，session 保持 ACTIVE，需 `new_destination_epoch`，只刪 epoch 較舊嘅鎖；有 `lock_revision` 就要相符）、`USER_ABORTED`／`PARKED_CONFIRMED`（終結 tombstone，之後 touch/commit 一律 409 `SESSION_CLOSED`）。v2 鎖做終結釋放要帶 `lock_revision`（否則 409 `REVISION_REQUIRED`）。
+- 409 `{"status": code}`：`STALE_EPOCH`、`SESSION_CLOSED`、`SESSION_EXPIRED`、`EPOCH_REQUIRED`、`REVISION_REQUIRED`、`LOCK_FULL`；404 `SESSION_NOT_FOUND`（commit 唔會自動開 session）。
+- 冇版本（v1）請求：只可以操作 v1 session／鎖；唔可以刪 v2 鎖或者繞過 epoch 檢查。
+
+### Phase 3c 參數表（2026-11-08，未部署）
+
+| 欄位 | 端點 | 用途 | 單位 | 限制 |
+|---|---|---|---|---|
+| `session_started_at` | recommend-and-route | 證明 session id 係近期新開（防 TTL 後復活） | Unix 秒 | 1.5e9–4.1e9；開新 session 必填；`now - x ≤ session_create_window_hours`（12h），未來 ≤ `client_clock_skew_seconds`（300s）；同一 id 再送唔同值 → 409 `SESSION_ID_REUSED` |
+| `destination_epoch` | recommend／commit | 目的地世代 | 整數 | 0–2^31-1；只可向前 |
+| `idempotency_key` | commit | 重試冪等 | 字串 | 8–128，`[A-Za-z0-9_.:-]`，要同 epoch 一齊 |
+| `lock_revision` | release／sync/outbox | 精確對鎖 | 整數 | ≥1；sync 可選：冇就只刪 `committed_at ≤ timestamp + skew` 嘅鎖，否則 409 `STALE_PARKED` |
+| `new_destination_epoch` | release（DESTINATION_CHANGED） | 新目的地世代 | 整數 | 必填於 DESTINATION_CHANGED，其他 reason 唔准 |
+
+新增錯誤：409 `SESSION_START_REQUIRED`／`SESSION_START_EXPIRED`／`SESSION_START_INVALID`／`SESSION_ID_REUSED`／`CAPACITY_UNKNOWN`（從未知空位）／`CAPACITY_NOT_READY`（容量帳未 bootstrap，fail closed）／`CAPACITY_LEDGER_FULL`／`STALE_PARKED`；503 `CONTENTION`（同一車場文件爭用重試用盡，可重試）。
+App（Phase 3d）用 `lib/core/net/server_issue.dart` 分類：typed 回應唔變灰、唔講網絡斷，狀態列顯示用戶動作；容量類（`CAPACITY_*`）同 LOCK_FULL 一樣剔走該卡等用戶揀；只有 503 `CONTENTION` 喺 `API_MAX_ATTEMPTS` 內用同一 body（同一 idempotency_key）重試；唔自動換目的地／開新 session。
+
+### Phase 3d：`/v1/sync/outbox` 泊車確認（v2）
+| 欄位 | 用途 | 單位 | 限制 |
+|---|---|---|---|
+| `contract_version` | 2＝新事件 | int | 有下面兩欄就必須係 2 |
+| `destination_epoch` | engine-off 嗰刻嘅目的地世代 | int | v2 必填 |
+| `lock_revision` | engine-off 嗰刻持有嘅鎖 | int ≥1 | 冇鎖就唔送；伺服器要求完全相同，冇時間 fallback |
+身份喺 `TodayTripRecord`（`contractVersion`／`lockRevision`／`destinationEpoch`）建立時寫入 prefs，重播原封不動；4xx typed 拒絕 → `syncRejected`，唔再重試；503／網絡 → 保留待重試。

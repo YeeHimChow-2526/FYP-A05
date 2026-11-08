@@ -24,6 +24,17 @@ class SimVoiceInput : VoiceInput {
     }
   }
 
+  private var errorListener: ((String) -> Unit)? = null
+
+  override fun setErrorListener(listener: ((String) -> Unit)?) {
+    errorListener = listener
+  }
+
+  /** SIM：模擬原生辨識錯誤（唔代表真咪）。 */
+  fun injectError(code: String) {
+    errorListener?.invoke(code)
+  }
+
   fun setSimControlListener(listener: ((event: String, intValue: Int?, stringValue: String?) -> Unit)?) {
     controlListener = listener
   }

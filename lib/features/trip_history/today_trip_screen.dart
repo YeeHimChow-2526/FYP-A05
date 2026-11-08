@@ -139,7 +139,7 @@ class _TodayTripScreenState extends State<TodayTripScreen> {
               : ListView.separated(
                   padding: const EdgeInsets.all(16),
                   itemCount: _trips.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 12),
+                  separatorBuilder: (_, _) => const SizedBox(height: 12),
                   itemBuilder: (context, index) {
                     final trip = _trips[index];
                     return _TripCard(

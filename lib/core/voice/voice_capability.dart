@@ -41,6 +41,7 @@ class CapabilitySnapshot {
     required this.mode,
     required this.voiceInputEnabled,
     this.timedOut = false,
+    this.canListen = false,
   });
 
   final CapabilityStatus stt;
@@ -48,6 +49,9 @@ class CapabilitySnapshot {
   final TripVoiceMode mode;
   final bool voiceInputEnabled;
   final bool timedOut;
+
+  /// 真係有辨識器同咪權限。debug 注入（simulatedInput）唔算。
+  final bool canListen;
 }
 
 extension TripVoiceModeWire on TripVoiceMode {

@@ -486,7 +486,8 @@ object Bindings {
 
   fun fixturePostOrNull(path: String, body: String): Map<String, Any?>? {
     if (!allowFixturePost) return null
-    val result = com.hkparking.copilot.trip.runSuspendBlocking { activeApiTransport.post(path, body) }
+    // r9：fixturePost 係 DEMO 專用，永遠用本地 fixture；以前跟 activeApiTransport，真 API build 會打雲端。
+    val result = com.hkparking.copilot.trip.runSuspendBlocking { apiTransport.post(path, body) }
     return mapOf(
       "statusCode" to result.statusCode,
       "body" to result.bodyJson,

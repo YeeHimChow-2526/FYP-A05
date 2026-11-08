@@ -26,6 +26,10 @@ class TripStateMachine {
   bool recommend = false;
   bool jitTriggered = false;
   bool get jitRequested => jitTriggered;
+
+  /// 1 km 預備區「綠燈」（就緒，唔係空位 pip）：同一個已確認目的地一旦 ≤ TRIGGER_DISTANCE_M 就保持，
+  /// 之後距離變遠或網絡失敗都唔熄；只有改目的地或行程結束先重設。
+  bool readinessLatched = false;
   bool hasDestination = false;
   String? destinationName;
   double? destLat;
@@ -33,6 +37,9 @@ class TripStateMachine {
   String? destinationPoiId;
   bool isMicFgsActive = false;
   bool voiceInputEnabled = false;
+
+  /// 真收音＋辨識可用。全語音或 debug 注入唔算。
+  bool voiceReplyAvailable = false;
   TripVoiceMode tripVoiceMode = TripVoiceMode.manualOnly;
   String? lastSpokenCue;
   int alertSpeakCount = 0;
@@ -45,6 +52,9 @@ class TripStateMachine {
   int _lastApproachLowSpeedHoldS = 0;
   int _lastApproachFixAgeS = 0;
   bool _treatAsOnSite = false;
+
+  /// Phase 2「現場即泊」按鈕：行程前 Dart 冇定位，先開 FGS，等第一個精度合格嘅 fix 先鎖現場做目的地。
+  bool onSitePendingFix = false;
   AlertCause? _deferredAlert;
   final Set<AlertCause> _spokenAlerts = {};
   int _consecutiveHighSpeedS = 0;
@@ -58,6 +68,7 @@ class TripStateMachine {
     final mode = snapshot.timedOut && !hasConfirmed ? TripVoiceMode.manualOnly : snapshot.mode;
     tripVoiceMode = mode;
     voiceInputEnabled = snapshot.voiceInputEnabled && mode == TripVoiceMode.fullVoice;
+    voiceReplyAvailable = snapshot.canListen && voiceInputEnabled;
   }
 
   StartOutcome coldTapCapsule() => _rejected(null);
@@ -73,6 +84,7 @@ class TripStateMachine {
     bool gpsAvailable = true,
     double? gpsAccuracyM,
     int? distanceToDestinationM,
+    bool awaitOnSiteFix = false,
   }) {
     final namedDestination = destinationName != null && destinationName.trim().isNotEmpty;
     final onSite = entry == StartupEntry.onSite || (entry == StartupEntry.b1 && command == StartCommand.onSite);
@@ -86,7 +98,8 @@ class TripStateMachine {
         return _rejected(ZhHkTemplates.B1_DESTINATION_MISSED);
       }
     }
-    if (entry == StartupEntry.onSite && !_onSiteGpsOk(gpsAvailable, gpsAccuracyM)) {
+    final deferFix = entry == StartupEntry.onSite && awaitOnSiteFix;
+    if (entry == StartupEntry.onSite && !deferFix && !_onSiteGpsOk(gpsAvailable, gpsAccuracyM)) {
       return _rejected(ZhHkTemplates.ON_SITE_LOCATION_MISSED);
     }
     final id = _sessionIdFactory();
@@ -99,11 +112,14 @@ class TripStateMachine {
     destLng = null;
     destinationPoiId = null;
     _distanceToDestinationM = distanceToDestinationM;
-    _treatAsOnSite = onSite;
+    // deferFix：未有合格 fix 唔可以當現場（冇目的地）；fix 到咗由 controller lockDestinationAt(距離 0) 觸發 JIT。
+    _treatAsOnSite = onSite && !deferFix;
+    onSitePendingFix = deferFix;
     fgsStartAccepted = true;
     fgsRunning = false;
     recommend = false;
     jitTriggered = false;
+    readinessLatched = false;
     _assignStatusPip(StatusPip.none);
     isMicFgsActive = false;
     networkDegraded = false;
@@ -153,6 +169,27 @@ class TripStateMachine {
     _armBackgroundPrefetch(distance);
   }
 
+  /// 已確認目的地改咗（座標／POI 唔同）：清走上一個目的地嘅 JIT、就緒、pip、接近同導航狀態，
+  /// 等 onDestinationSet 按新目的地距離重新判斷（≤ TRIGGER_DISTANCE_M 即再觸發）。網絡狀態係真實狀態，唔重設。
+  void onDestinationChanged() {
+    if (!fgsRunning) return;
+    jitTriggered = false;
+    recommend = false;
+    readinessLatched = false;
+    _assignStatusPip(StatusPip.none);
+    _distanceToDestinationM = null;
+    _lastApproachDistanceM = null;
+    _lastApproachSpeedKmh = 0;
+    _lastApproachLowSpeedHoldS = 0;
+    _lastApproachFixAgeS = 0;
+    switch (state) {
+      case TripState.navToGate || TripState.approachMuted || TripState.expanded || TripState.nearbyReady || TripState.amberSteady:
+        _enter(networkDegraded ? TripState.greyBreathing : TripState.cruising);
+      default:
+        break;
+    }
+  }
+
   void onFgsStarted() {
     if (!fgsStartAccepted || sessionId == null || fgsRunning) return;
     fgsRunning = true;
@@ -160,6 +197,7 @@ class TripStateMachine {
     final withinTrigger = destinationLocked && distance != null && distance <= NativeConfig.TRIGGER_DISTANCE_M;
     if (_treatAsOnSite || withinTrigger) {
       jitTriggered = true;
+      readinessLatched = true;
       recommend = true;
       _enter(TripState.amberSteady);
     } else {
@@ -207,7 +245,8 @@ class TripStateMachine {
     if (!fgsRunning) return;
     networkDegraded = true;
     recommend = false;
-    if (state == TripState.approachMuted) return;
+    // r7：已確認車場導航中（例如轉場 commit 失敗）保持 navToGate，唔丟失已確認狀態。
+    if (state == TripState.approachMuted || state == TripState.navToGate) return;
     _enter(TripState.greyBreathing);
   }
 
@@ -368,6 +407,7 @@ class TripStateMachine {
     fgsStartAccepted = false;
     recommend = false;
     jitTriggered = false;
+    readinessLatched = false;
     _assignStatusPip(StatusPip.none);
     destinationLocked = false;
     hasDestination = false;
@@ -377,6 +417,7 @@ class TripStateMachine {
     destinationPoiId = null;
     isMicFgsActive = false;
     _treatAsOnSite = false;
+    onSitePendingFix = false;
     networkDegraded = false;
     backgroundResolvePending = false;
     _deferredAlert = null;
@@ -389,6 +430,7 @@ class TripStateMachine {
   void _armBackgroundPrefetch(int? distanceM) {
     if (state == TripState.navToGate || !_withinTriggerForJit(distanceM)) return;
     jitTriggered = true;
+    readinessLatched = true;
     recommend = true;
     if (!networkDegraded && state != TripState.alertBreathing && state != TripState.approachMuted && state != TripState.parkedConfirmed && state != TripState.navToGate) {
       _enter(TripState.amberSteady);
@@ -418,7 +460,12 @@ class TripStateMachine {
       AlertCause.placeClarification => ZhHkTemplates.PLACE_CLARIFY,
       AlertCause.driverActionFailed => ZhHkTemplates.ASK_DESTINATION,
     };
-    return ZhHkTemplates.withVoiceReplyPrompt(cue, tripVoiceMode, isMicFgsActive);
+    return ZhHkTemplates.withVoiceReplyPrompt(
+      cue,
+      tripVoiceMode,
+      isMicFgsActive,
+      canListen: voiceReplyAvailable,
+    );
   }
 
   bool _approachConditionsMet() {

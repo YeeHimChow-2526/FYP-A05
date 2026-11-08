@@ -52,6 +52,7 @@ android {
         buildConfigField("boolean", "HKP_USE_REAL_API", hkpSetting("HKP_USE_REAL_API").equals("true", ignoreCase = true).toString())
         buildConfigField("boolean", "HKP_USE_REAL_NAVIGATION", hkpSetting("HKP_USE_REAL_NAVIGATION").equals("true", ignoreCase = true).toString())
         manifestPlaceholders["MAPS_API_KEY"] = hkpSetting("MAPS_API_KEY")
+        manifestPlaceholders["HKP_APP_LABEL"] = "泊車副駕"
         // debug 橋模式：true = SimLocationSource；預設 false = 模擬器真 GPS。JVM 單測強制 true。
         buildConfigField("boolean", "HKP_USE_SIM_LOCATION", hkpSetting("HKP_USE_SIM_LOCATION").equals("true", ignoreCase = true).toString())
     }
@@ -61,6 +62,21 @@ android {
     }
 
     buildTypes {
+        // 驗收身份（只限 debug）：HKP_ACCEPTANCE_TAG=r3（＋可選 HKP_ACCEPTANCE_LABEL=r4） → applicationId com.hkparking.copilot.acceptance.r3、
+        // 名「泊車副駕測試 r3」，可以同正式／舊版 com.hkparking.copilot 並存。空白＝原本身份。release 永遠唔受影響。
+        debug {
+            val tag = hkpSetting("HKP_ACCEPTANCE_TAG").trim()
+            if (tag.isNotEmpty()) {
+                require(Regex("[a-z][a-z0-9]{0,15}").matches(tag)) { "HKP_ACCEPTANCE_TAG must match [a-z][a-z0-9]{0,15}" }
+                // 穩定 ID（tag）同顯示版本（HKP_ACCEPTANCE_LABEL，例如 r4）分開：
+                // 新一輪用同一個 tag＋更大 --build-number，adb install -r 就可以升級而唔清資料。
+                val label = hkpSetting("HKP_ACCEPTANCE_LABEL").trim().ifEmpty { tag }
+                require(Regex("[a-z][a-z0-9]{0,15}").matches(label)) { "HKP_ACCEPTANCE_LABEL must match [a-z][a-z0-9]{0,15}" }
+                applicationIdSuffix = ".acceptance.$tag"
+                versionNameSuffix = "-acceptance-$label"
+                manifestPlaceholders["HKP_APP_LABEL"] = "泊車副駕測試 $label"
+            }
+        }
         release {
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")

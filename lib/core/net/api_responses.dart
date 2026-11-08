@@ -23,22 +23,48 @@ class ApiResponses {
       final gateLat = _coordOrNull(card['gate_lat'] ?? card['lat']);
       final gateLng = _coordOrNull(card['gate_lng'] ?? card['lng']);
       final hasGate = gateLat != null && gateLng != null;
+      final vacancies = _intOr(card['vacancies'], -1);
+      final isStale = card['is_stale'] == true;
+      final rawAvailability = card['availability'];
+      final typed =
+          rawAvailability is String &&
+              CardAvailability.viable.contains(rawAvailability) ||
+          rawAvailability == CardAvailability.lastKnownZero ||
+          rawAvailability == CardAvailability.noAvailability;
+      // 未知／缺欄 availability：保守推斷，唔會靜靜當有位。
+      final availability = typed
+          ? rawAvailability as String
+          : CardAvailability.deriveLegacy(
+              vacancies: vacancies,
+              isStale: isStale,
+            );
+      final rawCommit = card['commit_allowed'];
+      final commitAllowed =
+          (rawCommit is bool ? rawCommit : true) &&
+          CardAvailability.committable.contains(availability);
       return RecommendationCard(
         carparkId: _stringOr(card['carpark_id'], ''),
         name: _stringOr(card['name'], ''),
         type: _stringOr(card['type'], ''),
-        vacancies: _intOr(card['vacancies'], -1),
+        vacancies: vacancies,
         distanceMeters: _intOr(card['distance_meters'], 0),
         feeSummary: _stringOr(card['fee_summary'], ''),
         spokenCue: _nonBlankString(card['spoken_cue']) ?? topCue ?? '',
-        isStale: card['is_stale'] == true,
+        isStale: isStale,
         gateLat: hasGate ? gateLat : null,
         gateLng: hasGate ? gateLng : null,
+        availability: availability,
+        commitAllowed: commitAllowed,
+        isFallback: card['is_fallback'] == true,
+        legacyContract: !typed || rawCommit is! bool,
       );
     }).toList();
     return RecommendResponse(
       status: status,
-      speechLocale: _stringOr(root['speech_locale'], NativeConfig.SPEECH_LOCALE_DEFAULT),
+      speechLocale: _stringOr(
+        root['speech_locale'],
+        NativeConfig.SPEECH_LOCALE_DEFAULT,
+      ),
       speechLocaleFallback: root['speech_locale_fallback'] == true,
       sourceStatus: _stringOr(root['source_status'], 'ok'),
       sourceSnapshotTs: _stringOr(root['source_snapshot_ts'], ''),
@@ -47,18 +73,33 @@ class ApiResponses {
       dataAgeSeconds: _intOr(root['data_age_seconds'], 0),
       cards: cards,
       awaitVoiceReply: root['await_voice_reply'] == true,
+      spokenCue: topCue,
     );
   }
 
-  static HttpResult buildResult(String path, int statusCode, String body, Map<String, String> headers) {
+  static HttpResult buildResult(
+    String path,
+    int statusCode,
+    String body,
+    Map<String, String> headers,
+  ) {
     if (path == kRecommendPath && statusCode >= 200 && statusCode <= 299) {
       final parsed = parseRecommend(body);
       if (parsed == null) {
-        return HttpResult(statusCode: 0, bodyJson: body, headers: headers, networkError: true);
+        return HttpResult(
+          statusCode: 0,
+          bodyJson: body,
+          headers: headers,
+          networkError: true,
+        );
       }
       final topCue = _nonBlankString(_objectOrNull(body)?['spoken_cue']);
-      final firstCue = parsed.cards.isEmpty ? null : parsed.cards.first.spokenCue;
-      final spokenCue = (firstCue != null && firstCue.trim().isNotEmpty) ? firstCue : topCue;
+      // 讀實際首選（第一張 viable），唔係 raw cards[0]；全部係參考卡 → 用頂層提示（擴大範圍）。
+      final lead = parsed.cards.where((card) => card.isViable).firstOrNull;
+      final firstCue = lead?.spokenCue;
+      final spokenCue = (firstCue != null && firstCue.trim().isNotEmpty)
+          ? firstCue
+          : topCue;
       return HttpResult(
         statusCode: statusCode,
         bodyJson: body,
@@ -80,7 +121,8 @@ class ApiResponses {
         statusCode: statusCode,
         bodyJson: body,
         headers: headers,
-        retryAfterSeconds: _headerRetrySeconds(headers) ?? _bodyRetrySeconds(body),
+        retryAfterSeconds:
+            _headerRetrySeconds(headers) ?? _bodyRetrySeconds(body),
       );
     }
     return HttpResult(statusCode: statusCode, bodyJson: body, headers: headers);
@@ -120,7 +162,8 @@ class ApiResponses {
     return value;
   }
 
-  static String _stringOr(Object? value, String fallback) => value is String ? value : fallback;
+  static String _stringOr(Object? value, String fallback) =>
+      value is String ? value : fallback;
 
   static double? _coordOrNull(Object? value) {
     if (value is! num || !value.isFinite) return null;

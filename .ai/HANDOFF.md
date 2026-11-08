@@ -108,7 +108,7 @@
 - Exit＝`abortTripByUser()`：停 guidance、`clearSession`、停 FGS，畫面退回起步。唔當熄匙泊車，唔寫今日行程、唔 release。熄匙／`PARKED_CONFIRMED` 仍走同一 `_teardownSession()`（先 `stopGuidance` 再停 FGS）。
 - N9：`GateCoordResolver` 次序 card `gate_lat/lng`（或 JSON `lat/lng`）→ `kDemoCarparkCoords`（必含 `CP_LANGHAM`，另有 `CP_APM`／`CP_INDOOR_*`／`CP_SCARCE_*`）→ trie 名 → 行程終點。guidance 失敗先 fallback `launchGateNavigation`。
 - 無 fix 時 origin 用 0,0，log 一次；主動推介先口播一次「暫時搵唔到你位置，請稍後再講一次」。
-- SIM_EVENT 例子：`adb emu geo fix 114.1686 22.3186` 然後 `adb shell am broadcast -a com.hkparking.copilot.SIM_EVENT --es event FIX --es value "22.3186,114.1686,20,8"`。無搖桿。
+- SIM_EVENT 例子：`adb emu geo fix 114.1686 22.3186` 然後 `adb shell am broadcast -a com.hkparking.copilot.SIM_EVENT --es event FIX --es value "22.3186,114.1686,20,8"`。無搖桿。（value 次序＝緯度,經度,速度km/h,精度m，見 `SimEventReceiver.kt` `parseFix`；呢個例子係速度 20、精度 8。）
 - 清理延後（另 PR）：FBS overlay／膠囊／`SimJoystick*`／`SYSTEM_ALERT_WINDOW` 主路徑。本 PR 唔刪舊 Kotlin 檔。
 
 ## V2 Step 4-fix（pending merge）

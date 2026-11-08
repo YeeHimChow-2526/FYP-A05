@@ -426,7 +426,13 @@ class FloatingBubbleService : android.app.Service {
       if (listening) {
         fgType = fgType or android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
       }
-      startForeground(NOTIFICATION_ID, notification, fgType)
+      try {
+        startForeground(NOTIFICATION_ID, notification, fgType)
+      } catch (e: SecurityException) {
+        // Android 14+：冇 RECORD_AUDIO 或 App 喺背景時唔可以要 microphone 類型；退返淨位置類型。
+        if (fgType == android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION) throw e
+        startForeground(NOTIFICATION_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+      }
     }
     return posted.isSuccess
   }
@@ -1538,8 +1544,34 @@ class FloatingBubbleService : android.app.Service {
     speakIfActive(cue, tripStateMachine.tripVoiceMode, isApproachMuted = false, driverAsked = true)
   }
 
+  /** r8：原生 TTS init 失敗過（onInit 非 SUCCESS）；Dart bridge 唔可以將佢當可用。 */
+  internal var ttsInitFailed: Boolean = false
+    private set
+
+  /**
+   * r8：Dart bridge 行程中，語音能力由 Flutter 側（MainActivity probe）確認；service 自己嘅 checker
+   * 冇人 check → ttsStatus 長期 UNKNOWN → 每句 speak 都 tts_unavailable（r7 log 10:45:37 證實）。
+   * Dart 只會喺 tripVoiceMode != manualOnly 先叫 speak，所以呢度只同步「TTS 可用」，唔改咪／音量／靜音。
+   * 原生 init 失敗過就唔覆蓋。
+   */
+  fun syncBridgeTtsAvailable(): Boolean {
+    if (ttsInitFailed) return false
+    if (capabilityChecker.ttsStatus == com.hkparking.copilot.voice.CapabilityStatus.AVAILABLE) return true
+    val current = capabilityChecker.currentSnapshot(timedOut = false)
+    capabilityChecker.applyExternalSnapshot(
+      current.copy(
+        tts = com.hkparking.copilot.voice.CapabilityStatus.AVAILABLE,
+        mode = if (current.mode == TripVoiceMode.MANUAL_ONLY) TripVoiceMode.ANNOUNCE_MANUAL else current.mode,
+        ttsUsable = true,
+      ),
+    )
+    runCatching { android.util.Log.i("TtsService", "bridge tts capability synced") }
+    return true
+  }
+
   fun onTtsInitFailed(reason: String) {
     ttsEngineReady = false
+    ttsInitFailed = true
     runCatching {
       android.util.Log.i("TtsService", "tts init failed reason=$reason")
     }
@@ -1629,6 +1661,8 @@ class FloatingBubbleService : android.app.Service {
 
   private fun attachCapsuleWindow() {
     if (capsuleView != null || !isFgsRunning) return
+    // 懸浮窗係可選（只畀將來 App 外膠囊）；未批就唔試 addView。
+    if (!runCatching { android.provider.Settings.canDrawOverlays(this) }.getOrDefault(false)) return
     val wm = runCatching { getSystemService(android.view.WindowManager::class.java) }.getOrNull() ?: return
     val view = android.widget.TextView(this).apply { text = CAPSULE_MARK }
     val params = android.view.WindowManager.LayoutParams(

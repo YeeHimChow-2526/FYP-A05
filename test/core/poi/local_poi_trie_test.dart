@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:copilot/core/constants/native_config.dart';
 import 'package:copilot/core/poi/local_poi_trie.dart';
-import 'package:copilot/core/poi/poi.dart';
 import 'package:copilot/core/poi/trie_result.dart';
 import 'package:flutter_test/flutter_test.dart';
 

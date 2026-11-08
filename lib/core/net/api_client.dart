@@ -2,9 +2,12 @@
 
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+
 import '../constants/native_config.dart';
 import '../voice/zh_hk_templates.dart';
 import 'api_responses.dart';
+import 'server_issue.dart';
 import 'api_transport.dart';
 import 'http_result.dart';
 import 'recommend_response.dart';
@@ -39,6 +42,8 @@ class RecommendRequest {
     required this.preference,
     this.expandScarcity = false,
     this.speechLocale = NativeConfig.SPEECH_LOCALE_DEFAULT,
+    this.destinationEpoch,
+    this.sessionStartedAtSec,
   });
 
   final String sessionId;
@@ -50,6 +55,23 @@ class RecommendRequest {
   final String preference;
   final bool expandScarcity;
   final String speechLocale;
+
+  /// 合約 v2：本機目的地 epoch（伺服器只會向前推，舊 epoch 回 409 STALE_EPOCH）。
+  final int? destinationEpoch;
+
+  /// 合約 v2：呢個 session id 喺本機開始嘅 Unix 秒。伺服器只會為「近期開始」嘅 id 開新 session（防 TTL 後復活）。
+  final int? sessionStartedAtSec;
+}
+
+/// 泊車確認事件身份（建立嗰刻鎖低）。v2：伺服器要求精確 lock_revision（null＝當時冇鎖）＋destination_epoch。
+class ParkedEventIdentity {
+  const ParkedEventIdentity({required this.contractVersion, this.lockRevision, this.destinationEpoch});
+
+  static const legacy = ParkedEventIdentity(contractVersion: 1);
+
+  final int contractVersion;
+  final int? lockRevision;
+  final int? destinationEpoch;
 }
 
 class CallOutcome {
@@ -63,6 +85,7 @@ class CallOutcome {
     required this.shouldTurnReady,
     this.response,
     this.actionSpokenCue,
+    this.bodyJson,
   });
 
   final bool succeeded;
@@ -74,6 +97,23 @@ class CallOutcome {
   final String? actionSpokenCue;
   final bool shouldTurnGrey;
   final bool shouldTurnReady;
+
+  /// 原始回應 body（合約 v2 欄位：status、lock_revision、destination_epoch…）。
+  final String? bodyJson;
+
+  /// typed 伺服器問題（CAPACITY_*／STALE_*／SESSION_*／CONTENTION／舊後端）；冇就 null。
+  ServerIssue? get serverIssue => succeeded ? null : ServerIssue.from(httpStatus, bodyJson);
+
+  Map<String, Object?> get bodyFields {
+    final raw = bodyJson;
+    if (raw == null || raw.isEmpty) return const {};
+    try {
+      final decoded = jsonDecode(raw);
+      return decoded is Map ? Map<String, Object?>.from(decoded) : const {};
+    } catch (_) {
+      return const {};
+    }
+  }
 }
 
 class ApiClient {
@@ -125,6 +165,8 @@ class ApiClient {
         'preference': request.preference,
         'expand_scarcity': request.expandScarcity,
         'speech_locale': request.speechLocale,
+        'destination_epoch': ?request.destinationEpoch,
+        'session_started_at': ?request.sessionStartedAtSec,
       },
       mode,
       graded: true,
@@ -132,10 +174,15 @@ class ApiClient {
     );
   }
 
-  Future<CallOutcome> commitSession(String sessionId, String targetCarparkId) {
+  Future<CallOutcome> commitSession(String sessionId, String targetCarparkId, {int? destinationEpoch, String? idempotencyKey}) {
     return _dispatch(
       COMMIT,
-      {'session_id': sessionId, 'target_carpark_id': targetCarparkId},
+      {
+        'session_id': sessionId,
+        'target_carpark_id': targetCarparkId,
+        'destination_epoch': ?destinationEpoch,
+        if (destinationEpoch != null && idempotencyKey != null) 'idempotency_key': idempotencyKey,
+      },
       null,
       graded: true,
       ready: false,
@@ -143,23 +190,47 @@ class ApiClient {
     );
   }
 
-  Future<CallOutcome> releaseSession(String sessionId, String targetCarparkId, {bool isOnline = true}) {
+  static const String RELEASE_PARKED = 'PARKED_CONFIRMED';
+  static const String RELEASE_USER_ABORTED = 'USER_ABORTED';
+  static const String RELEASE_DESTINATION_CHANGED = 'DESTINATION_CHANGED';
+
+  Future<CallOutcome> releaseSession(
+    String sessionId,
+    String targetCarparkId, {
+    bool isOnline = true,
+    String reason = RELEASE_PARKED,
+    int? lockRevision,
+    int? newDestinationEpoch,
+  }) {
     if (!isOnline) {
       return Future.value(_outcome(succeeded: false, httpStatus: null, attempts: 0));
     }
     return _dispatch(
       RELEASE,
-      {'session_id': sessionId, 'target_carpark_id': targetCarparkId, 'reason': 'PARKED_CONFIRMED'},
+      {
+        'session_id': sessionId,
+        'target_carpark_id': targetCarparkId,
+        'reason': reason,
+        'lock_revision': ?lockRevision,
+        'new_destination_epoch': ?newDestinationEpoch,
+      },
       null,
       graded: false,
       ready: false,
     );
   }
 
-  Future<CallOutcome> syncDriverConfirmed(String sessionId, int timestampSec) {
+  Future<CallOutcome> syncDriverConfirmed(String sessionId, int timestampSec, {ParkedEventIdentity identity = ParkedEventIdentity.legacy}) {
     return _dispatch(
       SYNC,
-      {'session_id': sessionId, 'event_type': 'DRIVER_CONFIRMED', 'timestamp': timestampSec},
+      {
+        'session_id': sessionId,
+        'event_type': 'DRIVER_CONFIRMED',
+        'timestamp': timestampSec,
+        if (identity.contractVersion >= 2) 'contract_version': identity.contractVersion,
+        if (identity.contractVersion >= 2) 'destination_epoch': identity.destinationEpoch ?? 0,
+        'lock_revision': ?identity.lockRevision,
+      },
       null,
       graded: true,
       ready: false,
@@ -220,6 +291,7 @@ class ApiClient {
     while (true) {
       attempts += 1;
       final result = await transport.post(endpoint, body);
+      if (endpoint == RECOMMEND) _logRecommend(mode, result);
       if (result.statusCode == _httpTooMany) {
         return _finishRateLimit(
           endpoint,
@@ -242,6 +314,21 @@ class ApiClient {
       if (_isOk(result)) {
         if (ready) turnedReady = true;
         return _success(result, cues, waits, attempts, turnedGrey, turnedReady);
+      }
+      // typed 合約回應：唔當網絡失敗（唔變灰、唔講網絡斷）；只有 CONTENTION 喺 graded 上限內用同一 body 重試。
+      final issue = ServerIssue.from(result.statusCode, result.bodyJson);
+      if (issue != null && !(issue.retryable && graded && attempts < NativeConfig.API_MAX_ATTEMPTS)) {
+        return _outcome(
+          succeeded: false,
+          httpStatus: result.statusCode,
+          cues: cues,
+          waits: waits,
+          attempts: attempts,
+          response: null,
+          shouldTurnGrey: turnedGrey,
+          shouldTurnReady: false,
+          bodyJson: result.bodyJson,
+        );
       }
       if (attempts == 1 && (result.timedOut || result.networkError)) {
         turnedGrey = true;
@@ -274,6 +361,7 @@ class ApiClient {
     waits.add(waitMs);
     final total = attempts + 1;
     final retry = await transport.post(endpoint, body);
+    if (endpoint == RECOMMEND) _logRecommend(mode, retry);
     if (_isConflict(retry, conflictCue, silentConflict)) {
       return _conflictOutcome(retry, conflictCue, cues, waits, total, turnedGrey, turnedReady);
     }
@@ -282,6 +370,22 @@ class ApiClient {
       return _success(retry, cues, waits, total, turnedGrey, turnedReady);
     }
     return _fail(retry, mode, cues, waits, total, turnedGrey);
+  }
+
+  /// 一行診斷：觸發來源、解析結果、卡數。唔寫 body、URL 或 key。
+  void _logRecommend(QueryTriggerMode? mode, HttpResult result) {
+    final parsed = result.recommendResponse;
+    final cards = parsed?.cards.length ?? 0;
+    final parse = parsed != null
+        ? (cards == 0 ? 'empty' : 'ok')
+        : result.timedOut
+            ? 'timeout'
+            : result.networkError && result.bodyJson.isNotEmpty
+                ? 'invalid'
+                : result.networkError
+                    ? 'network'
+                    : 'http${result.statusCode}';
+    debugPrint('HKP_RECOMMEND trigger=${mode?.wireName ?? 'none'} parse=$parse cards=$cards');
   }
 
   CallOutcome _fail(HttpResult result, QueryTriggerMode? mode, List<String> cues, List<int> waits, int attempts, bool turnedGrey) {
@@ -298,6 +402,7 @@ class ApiClient {
       response: _sanitize(result.recommendResponse),
       shouldTurnGrey: turnedGrey,
       shouldTurnReady: false,
+      bodyJson: result.bodyJson,
     );
   }
 
@@ -311,6 +416,7 @@ class ApiClient {
       response: _sanitize(result.recommendResponse),
       shouldTurnGrey: turnedGrey,
       shouldTurnReady: turnedReady,
+      bodyJson: result.bodyJson,
     );
   }
 
@@ -332,6 +438,7 @@ class ApiClient {
       actionSpokenCue: conflictCue ? result.spokenCue : null,
       shouldTurnGrey: turnedGrey,
       shouldTurnReady: turnedReady,
+      bodyJson: result.bodyJson,
     );
   }
 
@@ -345,6 +452,7 @@ class ApiClient {
     String? actionSpokenCue,
     bool shouldTurnGrey = false,
     bool shouldTurnReady = false,
+    String? bodyJson,
   }) {
     onNetworkEffects?.call(grey: shouldTurnGrey, ready: shouldTurnReady);
     return CallOutcome(
@@ -357,6 +465,7 @@ class ApiClient {
       actionSpokenCue: actionSpokenCue,
       shouldTurnGrey: shouldTurnGrey,
       shouldTurnReady: shouldTurnReady,
+      bodyJson: bodyJson,
     );
   }
 

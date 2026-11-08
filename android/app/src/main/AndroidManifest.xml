@@ -1,5 +1,8 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!-- 位置：只限使用期間 (While-in-use)；不宣告 ACCESS_BACKGROUND_LOCATION -->
+    <!-- t1253：冇背景位置（Navigation SDK 會 merge 入嚟；我哋從不要求，行程用 while-in-use＋位置 FGS）。 -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" tools:node="remove" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
@@ -17,7 +20,7 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <application
-        android:label="泊車副駕"
+        android:label="${HKP_APP_LABEL}"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
@@ -67,6 +70,14 @@
             android:value="2" />
     </application>
     <queries>
+        <!-- Android 11+ package visibility：SpeechRecognizer 要搵到系統辨識服務 -->
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <!-- TTS 引擎可見度（語音能力偵測） -->
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>

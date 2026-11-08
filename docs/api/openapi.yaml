@@ -45,11 +45,17 @@ components:
         carpark_id: { type: string }
         name: { type: string }
         type: { type: string, example: INDOOR }
-        vacancies: { type: integer, description: "-1＝未知；唔好用 null", default: -1 }
+        vacancies: { type: integer, description: "-1＝冇可用數字（唔代表維修）；唔好用 null", default: -1 }
         distance_meters: { type: integer, default: 0 }
         fee_summary: { type: string }
         spoken_cue: { type: string, description: 空就用頂層 spoken_cue }
         is_stale: { type: boolean, default: false }
+        availability: { type: string, enum: [AVAILABLE, STALE_ESTIMATE, UNCONFIRMED, LAST_KNOWN_ZERO, NO_AVAILABILITY], description: "後兩個＝參考卡：唔做首選、唔可以 commit。缺欄（舊後端）App 保守推斷：過期／-1→UNCONFIRMED，0→NO_AVAILABILITY，並標舊版伺服器" }
+        commit_allowed: { type: boolean, default: true, description: "false：App 唔送 commit（UNCONFIRMED 亦係 false，因 commit 拒容量未知）" }
+        is_fallback: { type: boolean, default: false, description: "SMART_HYBRID 咪錶後備：頂替最低分嘅初選位，總數仍 ≤5，排喺所有 viable 主選之後" }
+        vacancy_status: { type: string, enum: [COUNT, NO_COUNT, SOURCE_STALE, CLOSED, NOT_FOR_USE, UNKNOWN], description: 上游記錄講乜（見 cloud DATABASE.md provenance） }
+        data_source: { type: string, example: TD_DATA_GOV_HK }
+        source_updated_at: { type: string, nullable: true, description: 上游每條記錄嘅時間（ISO-8601） }
     RecommendResponse:
       type: object
       required: [status, cards]

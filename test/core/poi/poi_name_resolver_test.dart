@@ -29,7 +29,7 @@ void main() {
   test('single han never fuzzy', () {
     final resolver = PoiNameResolver(trie: trie, typo: SttTypoCorpus(const {}));
     final result = resolver.resolve('坊');
-    expect(result is Ambiguous && (result as Ambiguous).isFuzzy, isFalse);
+    expect(result is Ambiguous && result.isFuzzy, isFalse);
   });
 
   test('nfkc and punctuation strip before lookup', () {

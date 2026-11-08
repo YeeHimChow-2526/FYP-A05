@@ -35,4 +35,5 @@ App debug 版 fixture 仍然喺 `android/app/src/debug/assets/mock/`（Step22b �
 - recommend 回應嘅 `source_snapshot_ts`／`processed_at`／`server_now`：spec 03 寫 int（Unix 秒），但 mock 同 App parser 用 ISO-8601 字串（`+08:00`）。App 收到 int 唔會死，只係當空字串。**OPEN QUESTION**。
 - `crowd-report.request.json` 嘅 `report_type`：global §10.7 只有一個例子 `BLOCKED_OCCUPIED`，完整值集未定義；App 而家亦冇任何地方會送 crowd-report；範例用 `OPEN_QUESTION_REPORT_TYPE` 佔位。**OPEN QUESTION**。
 - `trip-report` 嘅 `rating_tag` 取 `GOOD`／`OK`／`BAD`，`perk_status_tag` 取 `VALID`／`INVALID`／`NONE`（SC-017）；`photo_url` App 本版唔會送。
+- `preference`：`INDOOR_ONLY`／`SMART_HYBRID`／`METERS_FOCUS`（App 必送；雲端缺省 `SMART_HYBRID`，其他值 422）。評分數值以 cloud `server/app/scoring.py` 為準。卡新增 `availability`／`commit_allowed`／`is_fallback`（見 openapi `Card`）。
 - 範例 `session_id` 只係示範字串。

@@ -14,6 +14,7 @@ class RecommendResponse {
     this.dataAgeSeconds = 0,
     this.cards = const [],
     this.awaitVoiceReply = false,
+    this.spokenCue,
   });
 
   final String status;
@@ -26,6 +27,9 @@ class RecommendResponse {
   final int dataAgeSeconds;
   final List<RecommendationCard> cards;
   final bool awaitVoiceReply;
+
+  /// 頂層 spoken_cue（例如冇 viable 卡時嘅擴大範圍提問）。
+  final String? spokenCue;
 
   List<RecommendationCard> sanitizedCards() {
     return cards.map((card) {
@@ -48,6 +52,7 @@ class RecommendResponse {
       dataAgeSeconds: dataAgeSeconds,
       cards: next,
       awaitVoiceReply: awaitVoiceReply,
+      spokenCue: spokenCue,
     );
   }
 }

@@ -1,0 +1,133 @@
+泊車副駕 r9 特殊情況／UI 交接風險驗收
+日期：2026-11-09
+裝置：emulator-5554（sdk_gphone64_x86_64）
+建置：debug，applicationId com.hkparking.copilot，正常模式（即時 API＋Google 導航）
+今輪冇改程式、冇改雲端、冇 commit／push。
+畫面檔喺本機 %TEMP%\hkp-risk\。日誌係該次 logcat 嘅 flutter／TtsService 行。
+真咪「好／唔好」未測。主機繪圖卡頓未改 App。
+
+預計核對（冇改呢啲檔）
+- lib/core/trip/trip_controller.dart：行程記憶、換場計數、待確認、確認後收卡、斷網、熄匙候選
+- lib/features/nav_shell/nav_shell_screen.dart：底欄、靜音、地圖 padding、確認唔再另開卡
+- lib/features/nav_shell/recommend_cards_strip.dart：原卡上嘅確認／取消、DEMO／過期文案
+- lib/features/nav_shell/in_trip_circular_chrome.dart：P／車場／靜音／結束
+- lib/app/trip_runtime.dart、lib/app/app_mode.dart：模式 prefs、DEMO 同即時來源
+- lib/features/ignition/ignition_screen.dart：行程中收起分頁、DEMO 掣
+- lib/features/trip_history/today_trip_screen.dart、quick_feedback_bar.dart
+- lib/core/trip/today_trip_sync.dart：確認後先可以交反饋
+- lib/core/voice/zh_hk_templates.dart：拍膠囊句
+- lib/core/nav/google_nav_engine.dart：setAudioGuidance 日誌
+
+結果
+
+A1 行程中殺 App 再開 — 通過
+恢復：模式標籤「正常｜即時數據｜Google 導航」（prefs）。
+清除：目的地、推薦卡、待確認、行程圓掣底欄。回到「出發／現場即泊」同四個分頁。
+靜音只存在行程 overlay，行程銷毀後下一程重新由有聲開始。
+DEBUG 角標係 debug build 恆在，唔係行程狀態殘留。
+證據：15 殺完係啟動畫面；16-reopened 已係正常模式、有分頁、冇目的地。殺前 pid 1976 最後係 awaiting_consent，新 pid 5430 只有 session initialized，冇自動 commit。
+
+A2 第三次待確認中途切背景／殺 App — 通過
+切走再返：戲曲中心張卡仍係「確認／取消」，狀態「未確認…保持原路線」，導航仍係 1 min／0 m 去目的地，日誌冇新 route request。
+逾時：switch_timeout，冇轉線。
+殺 App：靜音令 audio guidance enabled=false 之後先 awaiting_consent，其後冇 committed、冇 route request。
+證據：12、14；日誌 16:33:19 awaiting_consent、16:33:35 switch_timeout、16:34:15 awaiting_consent 後 force-stop。
+
+A3 結束後立刻開新行程 — 通過
+手動結束後「今日行程」係「今日未有行程」。
+新行程第一張成功卡只口播「已確認海富停車場，正在計算路線」，冇「而家確認」。換場計數已清。
+新行程開波時車場掣冇「5」徽章，狀態係「未到 1 km｜空位：未有數據」。
+DEBUG 角標仍然喺度（見 A1）。
+證據：27、28；日誌 16:42:08 committed、口播已確認海富，audio enabled=false 之後 enabled=true。
+
+A4 DEMO 同正常來回 — 通過（行程中去唔到掣）
+無行程切兩次：標籤由「正常｜即時數據｜Google 導航」變「DEMO｜示範數據（fixture）｜Google 導航」，再返正常。最終停喺正常。
+有行程：底部分頁收起，設定同 DEMO 掣唔喺畫面。程式有 session 時拒絕切模式。今次冇喺行程中成功切到。
+證據：18、19、21；行程畫面 04、11 冇設定分頁。
+
+B5 有預載卡但未開卡 — 失敗（佈局）
+卡列未開。轉向「Then」、4 min／1.0 km、五個圓掣都睇到，卡冇蓋住佢哋。
+ETA 面板同圓掣之間有大段深色空位，圓掣壓住 ETA 上緣。預載 5 張卡時徽章係 5，但 padding 唔啱。
+證據：04-prefetched-closed、06。交 UI 先處理，今輪冇改。
+
+B6 開卡、確認、連撳 — 通過
+確認海富後卡收起，路線變 7 min／1.8 km，口播只係已確認。
+同一張再撳：already_confirmed，冇第二個 route request。
+同一張連撳：先 busy，之後只 committed 一次。
+證據：06；日誌 16:19:33 committed、16:21:11 already_confirmed、16:23:04 busy、16:23:05 committed。
+
+B7 字級同橫屏 — 部分通過
+字級 1.3：去、結束、P、車場、靜音掣仍見，狀態行冇蓋住掣。已還原 font_scale=1.0。
+橫屏：user_rotation=1 之後畫面仍係直向，模擬器冇轉到。橫屏未測。已還原 user_rotation=0。
+證據：23-font、24-rotate。
+
+B8 長名同 DEMO／資料未更新 — 通過（長名會截斷）
+朗豪坊卡分行顯示「示範數據，唔係即時供應」、DEMO、「資料未更新」，按鈕係停用嘅「示範數據，唔可以預留」。幾行冇互相覆蓋。
+「旺角中心停車場（DEMO）」「高鐵香港段西九龍站」長名被卡邊截斷，冇蓋住空位行。
+證據：07、08、11、12。
+
+C9 行程中斷網 — 通過
+撳搵位：parse=network cards=0。口播「網絡有啲慢，我再試吓」，然後「網絡唔順，遲啲再試」。
+空位由「充足」改「資料未更新」。路線仍係 6 min／1.8 km 去海富，冇換線。
+恢復後 ping 8.8.8.8 成功。再搵位 parse=ok cards=5，口播「前方首選海富停車場…」。
+網絡已開返。
+證據：25、26；日誌 16:43:15–17、16:44:43。
+
+C10 正常模式仍見 DEMO／過期卡 — 通過（客戶端已隔離，目錄仍係雲端）
+正常模式即時 recommend 帶返朗豪坊、旺角中心。卡上 fee 行係 DEMO，並標資料未更新。
+客戶端唔當即時供應：按鈕停用，撳咗冇 commit 日誌。
+呢啲係雲端目錄同本機已知示範 id，唔係今次用 fixture transport。清目錄要改雲端，今次冇部署。
+證據：07、08。
+
+C11 空結果／零卡成功 — 未測到成功空包
+未有卡時畫面係「空位：未有數據」。成功 5 張先顯示「空位：充足」。斷網改「資料未更新」。冇假綠燈。
+日誌有 prefetch timeout cards=0，跟住先 parse=ok cards=5。冇一次 parse=ok 而且 cards=0 嘅畫面。
+證據：02、04、26；日誌 16:15:54 timeout、16:16:01 ok。
+
+D12 冇藍牙熄匙 — 缺口，唔當已有入口
+設定寫明：冇藍牙就唔會自動出現「可能已泊入」。
+行程畫面冇「泊好」掣。手動結束同殺 App 都唔會變成已泊妥。今次冇注入熄匙訊號。
+證據：18 藍牙句；22、27「今日未有行程」。
+
+D13 手動結束後今日行程 — 通過（符合而家設計）
+結束後同殺 App 後都係「今日未有行程」。冇「確認已泊妥」，所以三格反饋冇出現。
+證據：27。
+
+D14 重複提交／未確認就提交 — 裝置未測
+未有已泊妥紀錄，畫面冇反饋掣，所以睇唔到錯誤句。
+程式：未揀齊兩格時提交掣停用；已提交會變「已提交反饋」；提交例外係靜默，冇另外一行錯誤。今次行唔到。
+
+E15 冇咪時嘅提示 — 通過
+口播「邊一區？」，冇「請拍一拍膠囊答我」。合成係 yue-HKG。
+證據：日誌 16:38:59 speak cue=邊一區？
+
+E16 靜音同 SDK 聲 — 通過
+靜音後圖示帶斜線，日誌 audio guidance enabled=false ok=true。
+結束再出發，新行程圖示係有聲、冇斜線。
+確認口播：enabled=false ok=true，講完 enabled=true ok=true。海富 16:42:08 同 16:42:14 係一對。之前 MOKO 16:23:06 同 16:23:12 亦係一對。唔係靠「冇英文合成」嚟判斷。
+證據：25、28；上述日誌。
+
+E17 真咪 — 未測
+今次冇真咪，亦冇注入「好／唔好」。單元測試可以注入，但唔算呢次裝置通過。
+
+同學接手 UI 要注意
+- 第三次確認只可改原本嗰張停車場卡嘅按鈕做「確認／取消」。唔好再加一塊確認卡。
+- 卡未開時地圖 padding 偏大，圓掣會壓住導航 ETA。先量底欄高度再 setPadding。
+- 長停車場名會被卡寬截斷。DEMO、過期、空位未知要繼續分行，唔好疊字。
+- 正常模式都可以收到雲端 DEMO／過期卡。示範卡要保持唔可預留；過期但有最後已知空位唔好講成即時保證，亦唔好禁晒所有過期卡。
+- 模式標籤要同實際來源一致。行程中分頁會收起。
+- 手動結束唔係已泊妥。冇藍牙就冇「可能已泊入」。反饋只可以出現喺已確認之後。
+- 導航 SDK 畫面仍然係英文（Then）。App 口播先係粵語。唔好寫 SDK 已改粵語。
+- DEBUG 角標係 debug build 自帶，唔好當成行程殘留去修。
+- 靜音、換場計數、待確認、目的地、卡都唔會喺殺 App 後保留。模式先會。
+- 主機地圖卡頓唔好當 App 邏輯去改。
+
+唔好郁嘅接口
+- 雲端目錄、commit／recommend 合約、鎖位。DEMO 卡要清係雲端工作。
+- NativeConfig 行車門檻、收音計時。
+- CommandCodes、speech_locale=zh-HK、裝置端 STT，冇雲端 STT 後備。
+- 第 3 次起要明確同意先 commit／轉線；取消同逾時唔轉；同一場唔計次；改目的地唔重置；新行程先重置。
+- 正常模式先隔離示範卡。DEMO 行程先用 fixture。
+- 今日行程只讀本機。確認已泊妥先至可交反饋。填寫窗口係完成當日香港時間午夜前。
+- 熄匙候選只行現有 onEngineSignal。唔好把手動結束改成已泊妥。
+- FGS 握手、唔申請背景定位、唔直連 Firestore。

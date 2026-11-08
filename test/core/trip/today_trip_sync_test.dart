@@ -24,7 +24,7 @@ class _RecordingApi implements SyncApi {
   Completer<CallOutcome>? hold;
 
   @override
-  Future<CallOutcome> syncDriverConfirmed(String sessionId, int timestampSec) async {
+  Future<CallOutcome> syncDriverConfirmed(String sessionId, int timestampSec, {ParkedEventIdentity identity = ParkedEventIdentity.legacy}) async {
     syncPosts.add(sessionId);
     order.add('sync');
     final gate = hold;

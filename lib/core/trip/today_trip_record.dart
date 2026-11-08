@@ -7,7 +7,23 @@ class TodayTripRecord {
     required this.status,
     required this.confirmSyncPending,
     required this.feedbackSubmitted,
+    this.contractVersion = 1,
+    this.lockRevision,
+    this.destinationEpoch,
+    this.syncRejected,
   });
+
+  /// 泊車事件建立嗰刻（engine-off）鎖低嘅身份；之後重播原封不動。
+  /// contractVersion 2 = 新事件（伺服器要求精確 lock_revision／destination_epoch，冇時間 fallback）；
+  /// 1 = 舊版 App 留低嘅紀錄（冇身份）。
+  final int contractVersion;
+
+  /// 事件建立時持有嘅鎖 revision；null＝當時冇（已確認）鎖。
+  final int? lockRevision;
+  final int? destinationEpoch;
+
+  /// 伺服器明確拒絕（例如 STALE_REVISION）→ 唔再重試；值係錯誤碼。
+  final String? syncRejected;
 
   final String sessionId;
   final String carparkId;
@@ -24,6 +40,8 @@ class TodayTripRecord {
     String? status,
     bool? confirmSyncPending,
     bool? feedbackSubmitted,
+    String? syncRejected,
+    bool clearSyncRejected = false,
   }) {
     return TodayTripRecord(
       sessionId: sessionId,
@@ -33,6 +51,10 @@ class TodayTripRecord {
       status: status ?? this.status,
       confirmSyncPending: confirmSyncPending ?? this.confirmSyncPending,
       feedbackSubmitted: feedbackSubmitted ?? this.feedbackSubmitted,
+      contractVersion: contractVersion,
+      lockRevision: lockRevision,
+      destinationEpoch: destinationEpoch,
+      syncRejected: clearSyncRejected ? null : (syncRejected ?? this.syncRejected),
     );
   }
 
@@ -44,6 +66,10 @@ class TodayTripRecord {
         'status': status,
         'confirmSyncPending': confirmSyncPending,
         'feedbackSubmitted': feedbackSubmitted,
+        'contractVersion': contractVersion,
+        'lockRevision': lockRevision,
+        'destinationEpoch': destinationEpoch,
+        'syncRejected': syncRejected,
       };
 
   static TodayTripRecord? fromJson(Object? raw) {
@@ -58,6 +84,10 @@ class TodayTripRecord {
       status: raw['status'] is String ? raw['status'] as String : TodayTripStoreStatus.candidate,
       confirmSyncPending: raw['confirmSyncPending'] == true,
       feedbackSubmitted: raw['feedbackSubmitted'] == true,
+      contractVersion: raw['contractVersion'] is int ? raw['contractVersion'] as int : 1,
+      lockRevision: raw['lockRevision'] is int ? raw['lockRevision'] as int : null,
+      destinationEpoch: raw['destinationEpoch'] is int ? raw['destinationEpoch'] as int : null,
+      syncRejected: raw['syncRejected'] is String ? raw['syncRejected'] as String : null,
     );
   }
 }

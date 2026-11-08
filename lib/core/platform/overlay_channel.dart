@@ -42,6 +42,11 @@ class OverlayChannel {
     return channel.invokeMethod<dynamic>('getPermissionStatus');
   }
 
+  /// 全語音：彈系統 RECORD_AUDIO 對話框（已批即回 true）。
+  static Future<bool> requestRecordAudioPermission() async {
+    return await channel.invokeMethod<bool>('requestRecordAudioPermission') ?? false;
+  }
+
   static Future<dynamic> getVoiceCapability() {
     return channel.invokeMethod<dynamic>('getVoiceCapability');
   }

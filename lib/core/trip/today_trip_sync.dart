@@ -105,13 +105,28 @@ class TodayTripSync {
       final ts = record.parkedAtEpochMs > 0 ? record.parkedAtEpochMs ~/ 1000 : nowMs() ~/ 1000;
       CallOutcome? outcome;
       try {
-        outcome = await api.syncDriverConfirmed(sessionId, ts);
+        // 重播用建立嗰刻存低嘅身份，原封不動。
+        outcome = await api.syncDriverConfirmed(
+          sessionId,
+          ts,
+          identity: ParkedEventIdentity(
+            contractVersion: record.contractVersion,
+            lockRevision: record.lockRevision,
+            destinationEpoch: record.destinationEpoch,
+          ),
+        );
       } catch (_) {
         outcome = null;
       }
       if (outcome != null && _isHttp2xx(outcome)) {
         store.markSyncSent(sessionId);
         return true;
+      }
+      final code = outcome?.httpStatus;
+      if (outcome != null && (code == 409 || code == 404 || code == 422)) {
+        // 伺服器明確拒絕（STALE_REVISION／STALE_EPOCH／REVISION_REQUIRED／SESSION_CLOSED…）：重試都唔會變，停。
+        final status = outcome.bodyFields['status'];
+        store.markSyncRejected(sessionId, status is String ? status : 'HTTP_$code');
       }
       return false;
     } finally {

@@ -70,6 +70,12 @@ object TripPlatformBridge {
   const val CHANNEL = "com.hkparking.copilot/trip_platform"
 
   private var appContext: android.content.Context? = null
+
+  /** TripRuntime.modePrefKey。今日行程以外，只多呢個 App 模式 key。 */
+  internal const val APP_MODE_PREFS_KEY = "hkp_app_mode"
+
+  /** JVM 測試注入；正式路徑用 SharedPreferences。 */
+  internal var prefsOverride: com.hkparking.copilot.trip.PrefsPort? = null
   private var bound = false
   private var pendingResult: MethodChannel.Result? = null
   private var startTimedOut = false
@@ -87,6 +93,13 @@ object TripPlatformBridge {
 
   internal var starter: (android.content.Context, Intent) -> Unit = { context, intent ->
     context.startForegroundService(intent)
+  }
+
+  internal var locationServicesOn: () -> Boolean = {
+    val ctx = appContext
+    ctx == null || runCatching {
+      ctx.getSystemService(android.location.LocationManager::class.java)?.isLocationEnabled ?: true
+    }.getOrDefault(true)
   }
 
   internal var startGateInput: () -> PermissionCheckInput = {
@@ -159,6 +172,7 @@ object TripPlatformBridge {
     cancelTimeout?.invoke()
     cancelTimeout = null
     appContext = null
+    prefsOverride = null
   }
 
   private fun dispatch(method: String, raw: Any?, result: MethodChannel.Result) {
@@ -212,10 +226,11 @@ object TripPlatformBridge {
   }
 
   private fun checkStartGate(result: MethodChannel.Result) {
+    // t1253：只要求精確位置＋系統定位開咗；通知係可選（拒絕都照開程，FGS 通知照喺工作管理員）。
     val input = startGateInput()
     val missing = mutableListOf<String>()
     if (!input.fineLocationGranted || input.coarseLocationOnly) missing += StartupPermissionChecker.FINE_LOCATION
-    if (!input.postNotificationsGranted) missing += StartupPermissionChecker.NOTIFICATIONS
+    if (!locationServicesOn()) missing += com.hkparking.copilot.TripPermissions.LOCATION_SERVICES_OFF
     if (missing.isNotEmpty()) {
       result.error(
         "MISSING_PERMISSION",
@@ -257,8 +272,13 @@ object TripPlatformBridge {
         runtime?.setNotificationText(args["text"] as? String ?: "")
         ok(null)
       }
+      "startListening" -> ok(runtime?.startListening(args["hotword"] as? Boolean ?: false) == true)
+      "stopListening" -> {
+        runtime?.stopListening()
+        ok(null)
+      }
       "speak" -> {
-        runtime?.speak(args["text"] as? String ?: "")
+        runtime?.speak(args["text"] as? String ?: "", args["utteranceId"] as? String)
         ok(null)
       }
       "interruptSpeech" -> {
@@ -282,6 +302,8 @@ object TripPlatformBridge {
       "getTransportConfig" -> ok(mapOf(
         "useRealApi" to if (com.hkparking.copilot.BuildConfig.DEBUG) Bindings.transportUseRealApi() else true,
         "useRealNavigation" to if (com.hkparking.copilot.BuildConfig.DEBUG) Bindings.useRealNavigation else true,
+        // r8：真導航時，只有呢個 flag true 先將 app 嘅 fix 推入 Navigation SDK simulator。release 永遠 false。
+        "useSimLocation" to (com.hkparking.copilot.BuildConfig.DEBUG && com.hkparking.copilot.BuildConfig.HKP_USE_SIM_LOCATION),
         "baseUrl" to com.hkparking.copilot.BuildConfig.HKP_API_BASE_URL,
         "apiKey" to com.hkparking.copilot.BuildConfig.HKP_API_KEY,
       ))
@@ -293,26 +315,33 @@ object TripPlatformBridge {
   }
 
   private fun loadPrefs(): Map<String, String?> {
-    val prefs = prefs() ?: return emptyMap()
+    val prefs = prefStore() ?: return emptyMap()
     return mapOf(
-      NativeConfig.TODAY_TRIPS_JSON_KEY to prefs.getString(NativeConfig.TODAY_TRIPS_JSON_KEY, null),
-      NativeConfig.TODAY_TRIPS_HKT_DATE_KEY to prefs.getString(NativeConfig.TODAY_TRIPS_HKT_DATE_KEY, null),
+      NativeConfig.TODAY_TRIPS_JSON_KEY to prefs.getString(NativeConfig.TODAY_TRIPS_JSON_KEY),
+      NativeConfig.TODAY_TRIPS_HKT_DATE_KEY to prefs.getString(NativeConfig.TODAY_TRIPS_HKT_DATE_KEY),
+      APP_MODE_PREFS_KEY to prefs.getString(APP_MODE_PREFS_KEY),
     )
   }
 
   private fun mutatePrefs(args: Map<String, Any?>, remove: Boolean): com.hkparking.copilot.BridgeResult {
     val key = args["key"] as? String ?: ""
-    if (key != NativeConfig.TODAY_TRIPS_JSON_KEY && key != NativeConfig.TODAY_TRIPS_HKT_DATE_KEY) {
+    if (key != NativeConfig.TODAY_TRIPS_JSON_KEY &&
+      key != NativeConfig.TODAY_TRIPS_HKT_DATE_KEY &&
+      key != APP_MODE_PREFS_KEY
+    ) {
       return com.hkparking.copilot.BridgeResult(ok = false, errorCode = "PREF_KEY", message = key)
     }
-    val prefs = prefs() ?: return ok(null)
-    if (remove) prefs.edit().remove(key).apply() else prefs.edit().putString(key, args["value"] as? String ?: "").apply()
+    val prefs = prefStore() ?: return ok(null)
+    if (remove) prefs.remove(key) else prefs.putString(key, args["value"] as? String ?: "")
     return ok(null)
   }
 
-  private fun prefs(): android.content.SharedPreferences? {
+  private fun prefStore(): com.hkparking.copilot.trip.PrefsPort? {
+    prefsOverride?.let { return it }
     val ctx = appContext ?: return null
-    return ctx.getSharedPreferences(NativeConfig.TODAY_TRIPS_PREFS_NAME, android.content.Context.MODE_PRIVATE)
+    return com.hkparking.copilot.trip.SharedPrefsPort(
+      ctx.getSharedPreferences(NativeConfig.TODAY_TRIPS_PREFS_NAME, android.content.Context.MODE_PRIVATE),
+    )
   }
 
   private fun ok(value: Any?) = com.hkparking.copilot.BridgeResult(ok = true, value = value)

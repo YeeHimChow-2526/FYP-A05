@@ -19,6 +19,9 @@ interface VoiceInput {
   fun setUtteranceListener(listener: ((String, Double?) -> Unit)?)
   fun startListening(hotword: Boolean = false)
   fun stopListening()
+
+  /** 錯誤碼（NO_PERMISSION、NO_RECOGNIZER、LANGUAGE_UNAVAILABLE、NO_MATCH…）；預設唔支援。 */
+  fun setErrorListener(listener: ((String) -> Unit)?) {}
 }
 
 interface LocationSource {
@@ -47,6 +50,7 @@ data class LocFix(
   val fixAgeSeconds: Int = 0,
 )
 
+/** 舊 stub（保留唔刪）。Release 已改用 [com.hkparking.copilot.voice.SpeechVoiceInput]。 */
 class SttVoiceInput : VoiceInput {
   private var listener: ((String, Double?) -> Unit)? = null
   private var listening = false

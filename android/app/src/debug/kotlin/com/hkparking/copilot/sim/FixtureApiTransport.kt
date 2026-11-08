@@ -28,6 +28,7 @@ class FixtureApiTransport(
   private var scarcityArmed: Boolean = false
   private var scarcityExpandFixture: String? = null
   private var tripReportUnconfirmedArmed: Boolean = false
+  private var fixtureLockRevision: Long = 0
 
   fun setFixtureName(name: String) {
     fixtureName = name
@@ -84,6 +85,7 @@ class FixtureApiTransport(
     scarcityArmed = false
     scarcityExpandFixture = null
     tripReportUnconfirmedArmed = false
+    fixtureLockRevision = 0
     recommendBodies.clear()
     postBodies.clear()
     delayMs = {}
@@ -137,6 +139,22 @@ class FixtureApiTransport(
       scarcityExpandFixture = null
       fixtureName = DEFAULT_FIXTURE
       return responseFor(expandFixture)
+    }
+    // Phase 3b 版本化合約（DEMO fixture）：commit 回 lock_revision／lock_id／destination_epoch；release 照 reason 回狀態。
+    if (path.contains("session/commit")) {
+      fixtureLockRevision += 1
+      val epoch = intField(bodyJson, "destination_epoch") ?: 0
+      val session = stringField(bodyJson, "session_id").orEmpty()
+      return HttpResult(
+        statusCode = 200,
+        bodyJson = "{\"status\":\"COMMITTED\",\"session_id\":\"$session\",\"contract_version\":2," +
+          "\"destination_epoch\":$epoch,\"lock_revision\":$fixtureLockRevision,\"lock_id\":\"fx_$fixtureLockRevision\"}",
+      )
+    }
+    if (path.contains("session/release")) {
+      val reason = stringField(bodyJson, "reason").orEmpty()
+      val status = if (reason == "DESTINATION_CHANGED") "ACTIVE" else reason
+      return HttpResult(statusCode = 200, bodyJson = "{\"status\":\"$status\",\"released\":true}")
     }
     if (path.contains("sync/outbox") || path.contains("/sync/")) {
       val raw = fixtureLoader(SYNC_CONFIRMED_FIXTURE) ?: """{"status":"OK","ratable":true}"""
