@@ -7,5 +7,7 @@
   "dest_name": "朗豪坊",
   "preference": "SMART_HYBRID",
   "expand_scarcity": false,
-  "speech_locale": "zh-HK"
+  "speech_locale": "zh-HK",
+  "destination_epoch": 3,
+  "session_started_at": 1731139200
 }

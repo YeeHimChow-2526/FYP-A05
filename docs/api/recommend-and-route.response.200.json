@@ -6,6 +6,9 @@
   "processed_at": "2026-10-18T14:20:41+08:00",
   "server_now": "2026-10-18T14:21:30+08:00",
   "data_age_seconds": 90,
+  "speech_locale_fallback": false,
+  "await_voice_reply": false,
+  "spoken_cue": "前方首選朗豪坊停車場。",
   "cards": [
     {
       "carpark_id": "CP_LANGHAM",
@@ -15,7 +18,12 @@
       "distance_meters": 180,
       "fee_summary": "首小時 $32 / 消費滿 $200 免 1 小時",
       "spoken_cue": "前方首選朗豪坊停車場，一百八十米，剩十二個位，首小時三十二蚊。",
-      "is_stale": false
+      "is_stale": false,
+      "availability": "AVAILABLE",
+      "commit_allowed": true,
+      "is_fallback": false,
+      "gate_lat": 22.3188,
+      "gate_lng": 114.1688
     }
   ]
 }

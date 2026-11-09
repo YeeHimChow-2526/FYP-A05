@@ -5,7 +5,7 @@ info:
   title: 泊車副駕 客戶端 REST（Cloud Run）
   version: "0.3.5"
   description: >
-    由 Android 原生 net/ApiClient.kt 呼叫。成功＝HTTP 200。逾時 2500ms／次；
+    由 Dart lib/core/net/api_client.dart 送出、lib/core/net/api_responses.dart 解析。Kotlin net/ApiClient.kt 只係原生殘留。成功＝HTTP 200。逾時 2500ms／次；
     逾時、網絡錯誤、5xx 分級重試最多 3 次（間隔 1s）；429 等 Retry-After（上限 10s，冇就 5s）後只重試一次。
 servers:
   - url: "{baseUrl}"
@@ -39,6 +39,8 @@ components:
         preference: { type: string, enum: [INDOOR_ONLY, SMART_HYBRID, METERS_FOCUS] }
         expand_scarcity: { type: boolean, default: false }
         speech_locale: { type: string, default: zh-HK }
+        destination_epoch: { type: integer, description: "有值先送；null 唔入 body" }
+        session_started_at: { type: integer, format: int64, description: "Unix 秒。有值先送；null 唔入 body" }
     Card:
       type: object
       properties:
@@ -50,6 +52,10 @@ components:
         fee_summary: { type: string }
         spoken_cue: { type: string, description: 空就用頂層 spoken_cue }
         is_stale: { type: boolean, default: false }
+        gate_lat: { type: number, format: double, description: "有限數字先用；缺就讀 lat" }
+        gate_lng: { type: number, format: double, description: "有限數字先用；缺就讀 lng" }
+        lat: { type: number, format: double, description: "gate_lat 缺時嘅座標" }
+        lng: { type: number, format: double, description: "gate_lng 缺時嘅座標" }
         availability: { type: string, enum: [AVAILABLE, STALE_ESTIMATE, UNCONFIRMED, LAST_KNOWN_ZERO, NO_AVAILABILITY], description: "後兩個＝參考卡：唔做首選、唔可以 commit。缺欄（舊後端）App 保守推斷：過期／-1→UNCONFIRMED，0→NO_AVAILABILITY，並標舊版伺服器" }
         commit_allowed: { type: boolean, default: true, description: "false：App 唔送 commit（UNCONFIRMED 亦係 false，因 commit 拒容量未知）" }
         is_fallback: { type: boolean, default: false, description: "SMART_HYBRID 咪錶後備：頂替最低分嘅初選位，總數仍 ≤5，排喺所有 viable 主選之後" }

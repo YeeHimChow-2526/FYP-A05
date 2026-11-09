@@ -46,24 +46,25 @@ App 當時喺 `完整app` 工作樹。雲端紀錄見下面各節，**今輪冇�
 | Perks 爬蟲／AI、BigQuery 統計上線 | ✘ 唔喺範圍 | — | — |
 
 ## 2. 已部署（2026-11-08）
-- Live：`backend-ai-service-00008-vef` 100%，URL `https://backend-ai-service-4dc4y2pixq-df.a.run.app`，image `hkparking/server@sha256:578bba8d…2292`（tag `dest-15aab20`）。
+實值見 Kenny，唔放 repo。
+- Live：`<REVISION>` 100%，URL `<CLOUD_RUN_URL>`，image `<REGISTRY_PATH>`（tag `dest-15aab20`）。
 - 新 env：`SNAPSHOT_ON_DEMAND_REFRESH_ENABLED=true`、`CAPACITY_BOOTSTRAP_ENABLED=true`；其餘 env／secret／2 CPU 2Gi 保留。
-- Rollback：`gcloud run services update-traffic backend-ai-service --region asia-east2 --to-revisions backend-ai-service-00005-m4d=100`。舊版讀新 GCS 物件已測（`test_rollback_compat.py`）；Firestore 舊版用 dict `.get` 讀，鎖文件欄位一致。語義差異：新 session `expire_at` 較長、`USER_ABORTED` 舊版唔識當終結 → rollback 後舊鎖數可能偏寬，未 live 測。
+- Rollback：`gcloud run services update-traffic backend-ai-service --region asia-east2 --to-revisions <PREVIOUS_REVISION>=100`。舊版讀新 GCS 物件已測（`test_rollback_compat.py`）；Firestore 舊版用 dict `.get` 讀，鎖文件欄位一致。語義差異：新 session `expire_at` 較長、`USER_ABORTED` 舊版唔識當終結 → rollback 後舊鎖數可能偏寬，未 live 測。
 - 注意：`legacy_session_create_enabled=false` → 舊 App（`com.hkparking.copilot`，冇 session_started_at）開唔到新 session。
-- Image 係喺 `vacancy1`（同一 Python 依賴）上面加一層 app code（crane），因為 `grokbot-deploy` 冇 Cloud Build bucket `total-velocity-507606-q2_cloudbuild` 權限；之後正規做法係畀佢嗰個 bucket 權限再 `gcloud builds submit`。
+- Image 係喺 `vacancy1`（同一 Python 依賴）上面加一層 app code（crane），因為 `<DEPLOY_ACCOUNT>` 冇 Cloud Build bucket `<GCP_PROJECT_ID>_cloudbuild` 權限；之後正規做法係畀佢嗰個 bucket 權限再 `gcloud builds submit`。
 
 ## 2b. 舊後端（11/5）唔兼容嘅原因
-Cloud Run `backend-ai-service`（asia-east2）而家 100% traffic 喺 `backend-ai-service-00005-m4d`（2026-11-05 23:27 HKT，image `hkparking/server:vacancy1`，cloud commit `3ce525f`）。
+Cloud Run `backend-ai-service`（asia-east2）而家 100% traffic 喺 `<PREVIOUS_REVISION>`（2026-11-05 23:27 HKT，image `<REGISTRY_PATH>:vacancy1`，cloud commit `3ce525f`）。
 舊 request model `extra="forbid"`，唔識 `destination_epoch`、`lock_revision`、`idempotency_key`、`session_started_at`、`contract_version`；release `reason` 而家係 enum → 新 App 嘅 commit／release／sync 好大機會 422。
 
 ## 3. 部署步驟（參考；今次已做）
-1. 雲端分支 commit → `gcloud builds submit server --tag asia-east2-docker.pkg.dev/total-velocity-507606-q2/hkparking/server:<新tag>`
+1. 雲端分支 commit → `gcloud builds submit server --tag <REGISTRY_PATH>:<新tag>`
 2. `gcloud run deploy backend-ai-service --region asia-east2 --image <上面> --no-traffic --tag cand`
    → 用 cand URL 跑 smoke（recommend → commit → release）。
 3. 按需刷新：加 env `SNAPSHOT_ON_DEMAND_REFRESH_ENABLED=true`；service account 要喺 state bucket 有寫權限
    （而家得 `roles/storage.objectViewer`）＝**IAM 改動，要另外批**。唔開就係用 bucket 入面嘅舊 snapshot，**唔好當佢係即時數據**。
 4. `gcloud run services update-traffic backend-ai-service --region asia-east2 --to-latest`
-5. Rollback：`gcloud run services update-traffic backend-ai-service --region asia-east2 --to-revisions backend-ai-service-00005-m4d=100`
+5. Rollback：`gcloud run services update-traffic backend-ai-service --region asia-east2 --to-revisions <PREVIOUS_REVISION>=100`
    注意：新版寫入嘅 Firestore 文件有新欄位；舊版係 extra=forbid，讀 session 文件可能有問題（未驗證）→ rollback 之後先清 test session。
 
 ## 4. Maps／Navigation key（要 Kenny 批）

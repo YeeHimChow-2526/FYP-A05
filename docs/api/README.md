@@ -3,7 +3,7 @@
 呢個目錄係**畀雲端組同 stub server 用嘅範例**，唔係 App 讀嘅 fixture。
 App debug 版 fixture 仍然喺 `android/app/src/debug/assets/mock/`（Step22b 鎖死 14 個檔，所以範例唔放嗰度）。
 
-- 欄位以 `docs/specs/03_api_and_local_trie.md` §1–§5 同 `net/ApiClient.kt`、`net/ApiResponses.kt` 為準。
+- 現況以 repo 為準。請求／回應以 Dart `lib/core/net/api_client.dart`（送出）同 `lib/core/net/api_responses.dart`（解析）為準。Kotlin `android/app/src/main/kotlin/com/hkparking/copilot/net/ApiClient.kt` 只係原生殘留。
 - Response 範例盡量直接抄 debug mock；mock 冇嘅，就用 `FixtureApiTransport` 嘅預設 body `{"status":"OK"}`，並標明 **OPEN QUESTION**。
 - 機讀版本：`openapi.yaml`（最少限度，只寫 App 真係用到嘅嘢）。
 
@@ -35,5 +35,6 @@ App debug 版 fixture 仍然喺 `android/app/src/debug/assets/mock/`（Step22b �
 - recommend 回應嘅 `source_snapshot_ts`／`processed_at`／`server_now`：spec 03 寫 int（Unix 秒），但 mock 同 App parser 用 ISO-8601 字串（`+08:00`）。App 收到 int 唔會死，只係當空字串。**OPEN QUESTION**。
 - `crowd-report.request.json` 嘅 `report_type`：global §10.7 只有一個例子 `BLOCKED_OCCUPIED`，完整值集未定義；App 而家亦冇任何地方會送 crowd-report；範例用 `OPEN_QUESTION_REPORT_TYPE` 佔位。**OPEN QUESTION**。
 - `trip-report` HTTP body 只得 `session_id`、`trip_timestamp`、`feedback`。`feedback` 內 `rating_tag` 取 `GOOD`／`OK`／`BAD`，`perk_status_tag` 取 `VALID`／`INVALID`／`NONE`，`perk_notes` 最多 140。呢三項由 App 送出前檢查。`carpark_id` 唔入 body，雲端亦唔會當佢係已核對身份。`photo_url` 冇呼叫方；若呼叫方傳入，App 拒絕送出，唔會靜默丟棄。反饋失敗唔會自動補送。雲端仍未做：feedback 內容驗證、重複提交政策、香港午夜截止。
-- `preference`：`INDOOR_ONLY`／`SMART_HYBRID`／`METERS_FOCUS`（App 必送；雲端缺省 `SMART_HYBRID`，其他值 422）。評分數值以 cloud `server/app/scoring.py` 為準。卡新增 `availability`／`commit_allowed`／`is_fallback`（見 openapi `Card`）。
+- `preference`：`INDOOR_ONLY`／`SMART_HYBRID`／`METERS_FOCUS`（App 必送；雲端缺省 `SMART_HYBRID`，其他值 422）。評分數值以 cloud `server/app/scoring.py` 為準。卡欄 `availability`／`commit_allowed`／`is_fallback` 由 `api_responses.dart` 讀取（見 openapi `Card`）。
+- recommend 請求（`recommendAndRoute`）必送 `session_id`、`origin_lat`、`origin_lng`、`dest_lat`、`dest_lng`、`dest_name`、`preference`、`expand_scarcity`、`speech_locale`。`destination_epoch`、`session_started_at` 只喺有值時先入 body。回應解析讀頂層 `status`、`cards`、`spoken_cue`、`speech_locale`、`speech_locale_fallback`、`source_status`、`source_snapshot_ts`、`processed_at`、`server_now`、`data_age_seconds`、`await_voice_reply`。每張卡讀 `carpark_id`、`name`、`type`、`vacancies`、`distance_meters`、`fee_summary`、`spoken_cue`、`is_stale`、`availability`、`commit_allowed`、`is_fallback`，以及 `gate_lat`／`gate_lng`（冇就用 `lat`／`lng`）。`crowd_warning`、`rank_capped`、`lock_revision` 唔喺呢個解析器。
 - 範例 `session_id` 只係示範字串。
