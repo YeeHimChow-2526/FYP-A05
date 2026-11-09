@@ -1,67 +1,67 @@
-# hk_parking_client_context
+# 泊車副駕
 
-客戶端（**Android 原生 Kotlin + Flutter App 畫面**）Context 包 — 對應香港「泊車副駕」實作版 **v2.9.1**。
+香港用車時嘅泊車副駕 App。Flutter 負責畫面同行程狀態；Android 原生 Kotlin 負責前台服務、定位、語音同平台橋。
 
-## 呢個包係咩
+交接基準係 GitHub 分支 `完整app`，commit `91edc3ea9569b34d8ecc32fca3c2f38ecbaee5f7`。本工作樹係 `local/r9-verified-2026-11-09`，上面仲有未 commit 嘅行程反饋同舊入口封口。現況細則見 `docs/HANDOFF_SHORT.md` 同 `docs/REAL_MODE_HANDOFF.md` 文首。
 
-畀 coding agent／工程師嘅**精簡客戶端記憶**：產品不變量、目錄地圖、原生語音／狀態機 FSM、FGS 啟動握手與 MethodChannel、REST＋Kotlin 字典樹、原生 `sim/` 殼與模擬器／真機測試分工，以及測試清單（`docs/testing/01_test_plan.md`）。  
-行程期間全部車內邏輯由原生 Kotlin 執行（`TripStateMachine.kt` 為狀態機唯一擁有者）；Flutter 只負責設定、新手教學與今日行程畫面。  
-**真理源仍係** Google Doc 實作版 v2.9.1（文件 ID `1wzfVsSobPfCQW-TNcLnRmy9LsEB5KdUSbaUJwOfeEPo`）。本包係閱讀／開工切片，衝突時以 Doc 正文為準。
+舊「project kit／context package」說明（`hk_parking_client_context`、`hk_parking_project_kit_v291`、`git init`、Pi／Gemini、Google Doc v2.9.1）已搬去 [`docs/archive/README_project_kit_v291.md`](docs/archive/README_project_kit_v291.md)。
 
-## 點樣抄入專案
+## 開 App
 
-1. 將本目錄內容複製到你嘅專案（或 submodule／`docs/client_context/`）。
-2. 至少保留：`AGENTS.md`、`docs/specs/*.md`、`docs/testing/01_test_plan.md`、`docs/reference/android_manifest_notes.md`。
-3. 將 `android/app/src/main/kotlin/com/hkparking/copilot/NativeConfig.kt` 合併入原生模組（行車常數單一事實源）；`lib/core/constants/app_config.dart` 合併入 Flutter（App 畫面參數）。
-4. 按 `AGENTS.md` 目錄地圖建立原生 `sim/`（只限 debug 建置），按 Stage 逐步加。
-5. Manifest 以 `docs/reference/android_manifest_notes.md` 為**參考**手寫入 `android/`，唔好假設已存在。
+需要 Flutter、Android SDK、Java 17。路徑同開關放喺 `android/local.properties`（gitignore），經 `android/app/build.gradle.kts` 嘅 `hkpSetting()` 讀取：Gradle `-P`，然後 `local.properties`，然後環境變數。下面只係欄位名，唔好寫真值。
 
-入口閱讀：先 `AGENTS.md`，再按任務打開 `docs/specs/01`–`04`；測試按 `docs/testing/01_test_plan.md`（Phase A 開發前語音鏈驗證；Phase B 產品整合 29 項）。
+- SDK：`sdk.dir`、`flutter.sdk`、`flutter.buildMode`、`flutter.versionName`、`flutter.versionCode`
+- API／地圖：`HKP_API_BASE_URL`、`HKP_API_KEY`、`MAPS_API_KEY`
+- 開關：`HKP_USE_REAL_API`、`HKP_USE_REAL_NAVIGATION`、`HKP_USE_SIM_LOCATION`（值用 `true` 或留空，唔好抄真 URL 或 key）
+- 可選：`HKP_ACCEPTANCE_TAG`、`HKP_ACCEPTANCE_LABEL`
 
-語音：行程語音模式三選一（全語音／播報＋手動／純手動），由能力檢查判定；`minSdk 33` 只係安裝下限。
+```text
+flutter pub get
+flutter run
+```
 
-入口優先聲明（決定版）：「B-1 路徑 1A：Hey Google／App Actions 冷態入口屬實驗性能力，須按指定 intent、語言及裝置驗證通過後方可啟用，不列入本版必要交付或免手操作保證。正文相關冷態流程均以驗證通過為前提。本限制不適用於 B-1 路徑 1B 已開程後的本機語音互動。」
+debug APK：`flutter build apk --debug`。覆蓋安裝用 `adb install -r`，唔卸載、唔清資料。
 
-## 專案包用法
+## 模式
 
-本專案包係**客戶端**（Flutter＋原生 Android，用 Android 模擬器＋mock 數據開發）嘅專案根目錄；解壓後直接當專案用。雲端 API、數據管道、Firestore、IaC 等部分寫喺 `.ai/ARCHITECTURE.md`，只供對照參考。
+- 正常：模擬器或手機 GPS，加上 `HKP_USE_REAL_API`、`HKP_USE_REAL_NAVIGATION`。畫面標「正常｜即時數據｜Google 導航」。
+- DEMO：只限 debug。本地 fixture 加真 Google 地圖重播，唔打雲端鎖位。畫面標「DEMO｜示範數據（fixture）｜Google 導航」。release 唔可以入 DEMO。
 
-### 包內 `.ai/` 檔案
+## 而家點行
 
-| 檔案 | 作用 | 邊個寫 |
-|---|---|---|
-| `.ai/ARCHITECTURE.md` | v2.9.1 AI 全局知識總綱（罕用參考；`docs/AI_GLOBAL_KNOWLEDGE_v291.md` 只係 stub） | 規格守護者（隨 Doc 升版更新） |
-| `.ai/HANDOFF.md` | Gemini 開場提示：角色分工、技術路線、模擬器 MVP 三部曲、Pi 派工鐵律 | Kenny（填實作版網址） |
-| `.ai/PROGRESS.md` | 全部 46 條路線圖任務項清單＋待真機驗證清單 | Pi 勾選並填 commit；Gemini 確認 |
-| `.ai/SPEC_CHANGES.md` | 需要改規格嘅發現（模板＋條目） | Gemini 為主；Kenny 代記真機結果 |
-| `.ai/report.sh` | 跑測試指令並生成 `.ai/LAST_RUN.md` | 現成腳本，Pi 執行 |
-| `.ai/TASK.md` | 當前任務（每回合覆寫，唔入 git） | Gemini 出，Kenny 貼入 |
-| `.ai/LAST_RUN.md` | 回合報告：測試結果、git status、差異（唔入 git） | `report.sh` 生成 |
+行程嘅唯一真實狀態喺 Dart `TripRuntime`（`lib/app/trip_runtime.dart`、`lib/core/trip/`）。Kotlin `TripStateMachine` 同 overlay channel 仲留喺度。`getTodayTrips`、`confirmParkedCandidate`、`submitTripReport` 已停用，回 `LEGACY_ENTRY_DISABLED`／「舊入口已停用」。定位、語音、前台服務冇停。
 
-另附 `.gitignore`（忽略建置產物、`.ai/TASK.md`、`.ai/LAST_RUN.md`、repomix 輸出）同 `.repomixignore`（打包上下文時略過腳手架雜訊）。
+行程反饋 HTTP 只送：
 
-### 第一次設定
+```json
+{
+  "session_id": "sess-demo-0001",
+  "trip_timestamp": 1792995600,
+  "feedback": {
+    "rating_tag": "GOOD",
+    "perk_status_tag": "VALID",
+    "perk_notes": ""
+  }
+}
+```
 
-1. 解壓：`tar -xzf hk_parking_project_kit_v291.tar.gz`
-2. 入目錄：`cd hk_parking_project_kit_v291`
-3. 建 repo：`git init`
-4. 首個 commit：`git add -A && git commit -m "chore: 專案包 v2.9.1"`
-5. 安裝 Pi（本地 CLI Agent）：`npm install -g @mariozechner/pi-coding-agent`，喺專案根目錄執行 `pi`
-6. 喺 `.ai/HANDOFF.md` 將「（實作版網址）」換成你嘅實作版分享連結
-7. 開 Gemini 新對話，上載 `.ai/HANDOFF.md`、`.ai/ARCHITECTURE.md`、`AGENTS.md`、`.ai/PROGRESS.md`；Gemini 回覆確認句後開工
+`rating_tag` 係 `GOOD`／`OK`／`BAD`。`perk_status_tag` 係 `VALID`／`INVALID`／`NONE`。`carpark_id` 唔入呢條 body。
 
-### 日常循環
+## 已知限制
 
-1. 叫 Gemini 出任務 → 將輸出貼入 `.ai/TASK.md`
-2. 叫 Pi 執行 `.ai/TASK.md`：改檔 → 跑單一測試 → `git add -A && git commit` → `.ai/report.sh "<同一測試指令>"`
-3. 將 `.ai/LAST_RUN.md` 交返 Gemini，講「已執行，請讀 LAST_RUN」
-4. Gemini 答「通過，下一題」或出修正 TASK
-5. 通過後確認 `.ai/PROGRESS.md` 已勾選該任務並填 commit
+- 雲端未擋重複提交、未驗 feedback 內容、未做香港時間午夜截止、未檢查 `target_carpark_id`。
+- 導航 SDK 轉彎語音跟裝置語言，App 控制唔到。App 自己嘅口播先係粵語。SDK 粵語未驗。
+- release 而家用 debug 簽名（`android/app/build.gradle.kts` 嘅 release `signingConfig`）。
+- 底欄留白同推薦卡 `BOTTOM OVERFLOWED BY 9.0 PIXELS` 交 UI。
+- 第三次唔同停車場要明確確認。等待、逾時、殺 App 都唔會偷偷轉線；明確確認後只 commit／轉線一次。畫面確認已驗；真咪「好／唔好」未驗。
+- 冇 `canListen` 時唔可以叫人開口答，改用畫面確認／取消。
+- 手動結束唔等於泊妥。冇藍牙就唔會自動判斷「可能已泊入」，係已知缺口。
+- 升級前已同步但未交反饋、而且冇 `confirmSyncSent` 嘅舊列，可能不能再提交。
 
-`report.sh` 嘅退出碼跟測試指令一致（未提供測試指令時為 0）；差異超過 150 行時只列 `git diff --stat`。
+## 文件
 
-### 規格改動路徑
-
-Gemini 唔改規格文件。發現規格矛盾、缺漏，或真機結果需要改規格時，記入 `.ai/SPEC_CHANGES.md`；Kenny 定期帶畀規格守護者，Google Doc 改好並重新出包後清空條目。
-
-**必記規則：** 新增或升級入 App 嘅依賴（`pubspec.yaml`、`build.gradle(.kts)`），以及真機調整任何常數（`NativeConfig.kt`／`app_config.dart`），一律先記入 `.ai/SPEC_CHANGES.md`。
+- 短交接：`docs/HANDOFF_SHORT.md`
+- 真模式交接：`docs/REAL_MODE_HANDOFF.md`
+- 程式地圖：`docs/CODE_MAP.md`
+- API 樣本：`docs/api/`
+- 規格：`docs/specs/`（v2.9.1 正文保留，文首或相關段有 2026-11-09 更正）

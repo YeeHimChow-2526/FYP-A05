@@ -17,13 +17,16 @@
 - 正常模式行車 GPX：`docs/testing/gpx/README.md`（太子→朗豪坊、深水埗→海港城）。2026-11-09 模擬器核心驗收用嘅係 `adb emu geo fix` 同現場即泊，**冇播呢兩份 GPX**。
 
 ### 測試（分輪，唔好混）
-- **本輪（交接 commit，只改測試同文件）**：`flutter analyze` 零問題；`flutter test` 269 通過、0 失敗。冇重跑 Android 單元測試，冇重跑模擬器。
+- **行程反饋修正加舊入口封口（未 commit）**：`flutter analyze` 零問題；`flutter test` 282 通過、0 失敗。Android `:app:testDebugUnitTest -PHKP_USE_REAL_NAVIGATION=false` 同 `=true` 都是 348 項、0 失敗、0 錯誤、86 skipped。`:app:compileReleaseKotlin` 通過。release 帶 `hkp_feedback_fixture` extra 未實際啟動。模擬器 emulator-5554 用 debug 測試注入，冇呼叫生產寫入 API。HTTP 失敗句沒有在模擬器出現。
 - **上一輪乾淨目錄（同一基準、當時未包含今次測試修正）**：Android `:app:testDebugUnitTest` 344 項、0 失敗、86 skipped。emulator-5554 核心項通過：DEMO 選場後導航改去朗豪坊商場停車場；正常模式香港 GPS，示範卡不可預留；第三次海富要畫面確認，取消同逾時不轉，同意只一次；手動結束後新行程重設計數；殺 App 後模式保留、舊行程畫面不留。詳見當時專案外 `r9-clean-accept-2026-11-09.txt`，呢份唔再抄日誌。
 
 ### 行為同限制
 - 第三次唔同停車場必須明確確認。未同意不 commit、不發新路線，已確認目標維持上一間。畫面「確認／取消」已驗。真咪「好／唔好」未驗。
 - UI 待辦：底欄壓住 Navigation SDK ETA／留白過大；推薦卡曾出現 `BOTTOM OVERFLOWED BY 9.0 PIXELS`。交 UI，未改佈局。
-- 未驗：藍牙熄匙先至有「可能已泊入」、反饋提交、橫向、成功空推薦（`parse=ok cards=0`）。手動結束唔係泊妥。
+- 行程反饋：畫面仍組 flat JSON 做本機判斷。對外 HTTP 只送 `session_id`、`trip_timestamp`、`feedback`。確認同步要明確成功先送；404／409／422 拒絕後不送、不標已提交，重開仍然有效。舊紀錄沒有 `confirmSyncSent` 時不當作已同步。升級前已同步但未交反饋的舊列，可能不能再提交；沒有補送或恢復。HTTP 失敗顯示「未能確認提交結果」，不表示伺服器一定未收到，也不會變成「已提交反饋」。反饋沒有自動補送。這句只由 widget 測試覆蓋，模擬器 fixture 固定成功，不能當成模擬器已驗。
+- 舊 overlay 三個行程入口 `getTodayTrips`、`confirmParkedCandidate`、`submitTripReport` 已停用，回 `LEGACY_ENTRY_DISABLED`／「舊入口已停用」，不假成功。不再 flush、不改正式 prefs、不發 HTTP。正常今日行程仍走 Dart `TripRuntime`。`onTodayTripsChanged` 事件保留。定位、語音、前台服務沒有停。`docs/specs/` 同 `.ai/` 嘅舊段落已加「已停用（2026-11-09）」標註，原文冇刪。
+- 雲端（`15aab20`，未改、未部署）仍接受重複提交，不驗證 feedback 內容，不強制香港午夜截止。這三項未完成。車場身份不在這條 request 裡核對。
+- 未驗 live API。模擬器反饋用 debug 測試注入（`hkp_feedback_fixture`），不接觸生產 API，不能當成線上通過。未驗：藍牙熄匙先至有「可能已泊入」、橫向、成功空推薦（`parse=ok cards=0`）。手動結束唔係泊妥。
 - Navigation SDK 導航語言未驗證為粵語。模擬器出現英文 Then／街名。App 自己嘅粵語 TTS 唔可以當 SDK 係粵語。
 - 舊 Kotlin 殼（包括 `FloatingBubbleService.kt`、`CorePorts.kt` 嘅 `SttVoiceInput` stub）同驗收身份開關刻意保留，唔係本輪可刪清單。
 

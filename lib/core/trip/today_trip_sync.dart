@@ -60,17 +60,12 @@ class TodayTripSync {
     if (record.status != TodayTripStore.statusConfirmed) {
       return const ReportOutcome(ok: false, posted: false, reason: 'NOT_CONFIRMED');
     }
-    if (record.confirmSyncPending) {
-      if (network.isOnline()) await _syncOne(sessionId);
-      final after = store.find(sessionId);
-      if (after == null || after.confirmSyncPending) {
-        return const ReportOutcome(ok: false, posted: false, reason: 'CONFIRM_SYNC_PENDING');
-      }
-    }
+    final blocked = await _blockUntilConfirmSynced(sessionId);
+    if (blocked != null) return blocked;
     final fresh = store.find(sessionId)!;
     final carparkId = parsed.carparkId.trim().isEmpty ? fresh.carparkId : parsed.carparkId;
     final tripTs = parsed.tripTimestampSec > 0 ? parsed.tripTimestampSec : fresh.parkedAtEpochMs ~/ 1000;
-    final notes = _take(parsed.perkNotes, NativeConfig.TODAY_TRIP_NOTES_MAX_CHARS);
+    final notes = truncatePerkNotes(parsed.perkNotes, NativeConfig.TODAY_TRIP_NOTES_MAX_CHARS);
     CallOutcome? outcome;
     try {
       outcome = await api.submitTripReport(
@@ -88,12 +83,40 @@ class TodayTripSync {
       store.markFeedbackSubmitted(sessionId);
       return const ReportOutcome(ok: true, posted: true);
     }
+    if (outcome != null && outcome.attempts == 0 && outcome.httpStatus == null) {
+      return const ReportOutcome(ok: false, posted: false, reason: 'INVALID_FEEDBACK');
+    }
     final reason = switch (outcome?.httpStatus) {
       409 => 'CONFLICT',
       404 => 'NOT_FOUND_REMOTE',
       _ => 'NETWORK_OR_HTTP',
     };
     return ReportOutcome(ok: false, posted: false, reason: reason);
+  }
+
+  /// 成功先係 confirmSyncSent。pending=false 可以係拒絕或舊資料未知，兩種都唔送。
+  Future<ReportOutcome?> _blockUntilConfirmSynced(String sessionId) async {
+    final current = store.find(sessionId);
+    if (current == null) return const ReportOutcome(ok: false, posted: false, reason: 'NOT_FOUND');
+    if (current.syncRejected != null) {
+      return const ReportOutcome(ok: false, posted: false, reason: 'CONFIRM_SYNC_REJECTED');
+    }
+    if (current.confirmSyncPending) {
+      if (network.isOnline()) await _syncOne(sessionId);
+      final after = store.find(sessionId);
+      if (after == null) return const ReportOutcome(ok: false, posted: false, reason: 'NOT_FOUND');
+      if (after.syncRejected != null) {
+        return const ReportOutcome(ok: false, posted: false, reason: 'CONFIRM_SYNC_REJECTED');
+      }
+      if (after.confirmSyncPending || !after.confirmSyncSent) {
+        return const ReportOutcome(ok: false, posted: false, reason: 'CONFIRM_SYNC_PENDING');
+      }
+      return null;
+    }
+    if (!current.confirmSyncSent) {
+      return const ReportOutcome(ok: false, posted: false, reason: 'CONFIRM_SYNC_UNKNOWN');
+    }
+    return null;
   }
 
   Future<bool> _syncOne(String sessionId) async {
@@ -140,8 +163,19 @@ class TodayTripSync {
     return outcome.succeeded;
   }
 
-  static String _take(String value, int max) => value.length <= max ? value : value.substring(0, max);
 }
+
+String feedbackFailureText(String? reason) => switch (reason) {
+      'CONFIRM_SYNC_REJECTED' => '確認被拒，未提交反饋',
+      'CONFIRM_SYNC_PENDING' => '確認仍在同步，未提交反饋',
+      'CONFIRM_SYNC_UNKNOWN' => '未能核對確認結果，未提交反饋',
+      'CONFLICT' => '伺服器未接受，未提交',
+      'NOT_FOUND_REMOTE' => '找不到行程，未提交',
+      'INVALID_FEEDBACK' => '反饋格式不正確，未提交',
+      'NOT_CONFIRMED' => '未確認泊妥，未提交',
+      'NETWORK_OR_HTTP' => '未能確認提交結果',
+      _ => '提交失敗，未送出',
+    };
 
 class ParsedReport {
   const ParsedReport({

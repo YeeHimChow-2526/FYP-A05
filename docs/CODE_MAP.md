@@ -1,6 +1,6 @@
 # CODE_MAP — 完整app（v2：Dart 行程狀態機＋Kotlin 平台橋）
 
-> 基準：`完整app` @ `ed80f5a`。數值以源碼為準，本檔**只指位置同關係，唔複製數值**。
+> 基準：GitHub 分支 `完整app` @ `91edc3ea9569b34d8ecc32fca3c2f38ecbaee5f7`。本工作樹有未 commit 的行程反饋同舊入口封口。`ed80f5a` 係更早 baseline，唔再當現況。數值以源碼為準，本檔**只指位置同關係，唔複製數值**。
 > 改任何參數前：睇「改動影響」欄，並跑對應測試。
 
 ## 1. 擁有權
@@ -10,7 +10,8 @@
 | 行程狀態（巡航、1 km 預取、出卡、導航入口、到場、泊妥） | **Dart** | `lib/core/trip/trip_state_machine.dart`、`lib/core/trip/trip_controller.dart` |
 | 組裝／依賴注入（transport、nav engine、platform） | Dart | `lib/app/trip_runtime.dart` |
 | FGS、定位取樣、TTS、熄匙訊號、外跳導航、SharedPreferences | Kotlin（平台橋） | `android/.../bridge/DartBridgeRuntime.kt`、`bridge/TripPlatformBridge.kt` |
-| 權限、偏好寫入、今日行程（legacy channel） | Kotlin | `android/.../MainActivity.kt`（`OverlayBridge`） |
+| 權限、偏好寫入 | Kotlin | `android/.../MainActivity.kt`（`OverlayBridge`） |
+| 今日行程讀寫 | Dart | `lib/core/trip/today_trip_store.dart`、`today_trip_sync.dart`。舊 overlay `getTodayTrips`／`confirmParkedCandidate`／`submitTripReport` **已停用（2026-11-09）**，回 `LEGACY_ENTRY_DISABLED` |
 | 舊膠囊 FSM／浮卡／搖桿 | **legacy；v2 行程入口唔派事件到此，仍可能被其他入口執行，唔刪** | `TripStateMachine.kt`、`FloatingCardView.kt`、`FloatingBubbleService.kt` legacy 分支、`debug/.../sim/SimJoystick*` |
 
 Kotlin 平台職責（FGS、定位、TTS、熄匙）**保留喺原生**，唔搬去 Dart。
@@ -20,7 +21,7 @@ Kotlin 平台職責（FGS、定位、TTS、熄匙）**保留喺原生**，唔搬
 | Channel | Dart 包裝 | Kotlin | Dart→Kotlin method | Kotlin→Dart 事件 |
 |---|---|---|---|---|
 | `com.hkparking.copilot/trip_platform`（v2） | `lib/platform/trip_platform_channel.dart` | `bridge/TripPlatformBridge.kt`（`CHANNEL`） | 15：`startTripFgs ready checkStartGate fixturePost stopTripFgs applySamplingTier setNotificationText speak interruptSpeech launchGateNavigation getVoiceCapability getTransportConfig prefsLoad prefsPut prefsRemove` | 9：`onFix onTick onEngineSignal onFgsStopped onNetworkChanged onHotwordStart onShareIntake onPermissionRevoked onOemKilled` |
-| `com.hkparking.copilot/overlay`（legacy＋設定） | `lib/core/platform/overlay_channel.dart` | `MainActivity.kt` `OverlayBridge` | 10：`startBubbleService getPermissionStatus getVoiceCapability startVoiceCapture stopVoiceCapture setPreferences getTripState getTodayTrips confirmParkedCandidate submitTripReport` | 4：`onTripStateChanged onTodayTripsChanged onTripEnded onMicSessionChanged` |
+| `com.hkparking.copilot/overlay`（legacy＋設定） | `lib/core/platform/overlay_channel.dart` | `MainActivity.kt` `OverlayBridge` | 10：`startBubbleService getPermissionStatus getVoiceCapability startVoiceCapture stopVoiceCapture setPreferences getTripState getTodayTrips confirmParkedCandidate submitTripReport`。其中 `getTodayTrips`、`confirmParkedCandidate`、`submitTripReport` **已停用（2026-11-09）**，回 `LEGACY_ENTRY_DISABLED`，不讀寫正式行程 prefs、不發 HTTP | 4：`onTripStateChanged onTodayTripsChanged onTripEnded onMicSessionChanged` |
 
 注意：`OverlayChannel.startBubbleService()` 喺 `lib/` 只有定義、**冇呼叫點**；佢會經 `MainActivity.kt:153-168` 以 legacy 模式起 service（見 §3）。
 
@@ -85,7 +86,7 @@ Dart／Kotlin 常數一致性由 `test/core/native_config_mirror_test.dart` 守�
 | debug `Bindings.useRealNavigation` | `debug/.../di/Bindings.kt:62`＝BuildConfig；`:112`／`:207` 喺測試重設 false | Kotlin |
 | Dart nav engine／transport | `trip_runtime.dart`：正常模式跟 `getTransportConfig`（`useRealApi`／`useRealNavigation`）；DEMO 係 fixture 數據＋真 `GoogleNavEngine`（`simulateUserLocation`）。細節 `docs/REAL_MODE_HANDOFF.md` 第 0 節 | 正常可走真 SDK／HTTP；DEMO 不打雲端鎖位 |
 | DEMO／正常 | `lib/app/app_mode.dart`；`TripRuntime.setMode()`（prefs key `hkp_app_mode`）。有 session／FGS 啟動中拒絕；release（`kReleaseMode`）拒絕 DEMO；地圖同設定頁常駐 marker（模式｜數據｜導航），冇靜默 fallback | 重建 controller，`generation` 通知畫面重新訂閱 |
-| release | `release/.../di/Bindings.kt` 固定真 API／真導航 | — |
+| release | `release/.../di/Bindings.kt` 固定真 API／真導航。`android/app/build.gradle.kts` 嘅 release `signingConfig` 而家仍係 debug 簽名 | — |
 
 ## 7. 平台矩陣（iOS 本輪唔建 scaffold）
 

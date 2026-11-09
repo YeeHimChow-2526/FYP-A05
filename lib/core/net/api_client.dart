@@ -4,6 +4,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
+import '../constants/app_config.dart';
 import '../constants/native_config.dart';
 import '../voice/zh_hk_templates.dart';
 import 'api_responses.dart';
@@ -11,6 +12,38 @@ import 'server_issue.dart';
 import 'api_transport.dart';
 import 'http_result.dart';
 import 'recommend_response.dart';
+
+/// 備註上限係 UTF-16 code unit。截斷如果會切開 emoji 的高位代理，就退一格。
+String truncatePerkNotes(String value, int maxChars) {
+  if (maxChars <= 0) return '';
+  var end = value.length <= maxChars ? value.length : maxChars;
+  if (end > 0) {
+    final unit = value.codeUnitAt(end - 1);
+    if (unit >= 0xD800 && unit <= 0xDBFF) end -= 1;
+  }
+  return value.substring(0, end);
+}
+
+/// 雲端 TripReportRequest 只收這三個頂層欄。枚舉不合法就回 null，呼叫方不得送出。
+Map<String, Object?>? tripReportWirePayload({
+  required String sessionId,
+  required String ratingTag,
+  required String perkStatusTag,
+  required String perkNotes,
+  required int tripTimestampSec,
+}) {
+  if (!AppConfig.tripRatingTags.contains(ratingTag)) return null;
+  if (!AppConfig.tripPerkStatusTags.contains(perkStatusTag)) return null;
+  return {
+    'session_id': sessionId,
+    'trip_timestamp': tripTimestampSec,
+    'feedback': {
+      'rating_tag': ratingTag,
+      'perk_status_tag': perkStatusTag,
+      'perk_notes': truncatePerkNotes(perkNotes, NativeConfig.TODAY_TRIP_NOTES_MAX_CHARS),
+    },
+  };
+}
 
 enum QueryTriggerMode { backgroundPrefetch, driverActive, b2Resolution }
 
@@ -261,17 +294,29 @@ class ApiClient {
     required int tripTimestampSec,
     String? photoUrl,
   }) {
-    final payload = <String, Object?>{
-      'carpark_id': carparkId,
-      'rating_tag': ratingTag,
-      'perk_status_tag': perkStatusTag,
-      'perk_notes': perkNotes,
-      'session_id': sessionId,
-      'trip_timestamp': tripTimestampSec,
-    };
-    if (photoUrl != null) payload['photo_url'] = photoUrl;
+    // carparkId 只留喺呼叫簽名。雲端 trip-report 唔核對車場，所以唔放入 body。
+    // photoUrl 本版冇呼叫方傳入。有值就拒絕送出，避免靜默丟掉未定義欄位。
+    if (photoUrl != null) return Future.value(_localReject());
+    final payload = tripReportWirePayload(
+      sessionId: sessionId,
+      ratingTag: ratingTag,
+      perkStatusTag: perkStatusTag,
+      perkNotes: perkNotes,
+      tripTimestampSec: tripTimestampSec,
+    );
+    if (payload == null) return Future.value(_localReject());
     return _dispatch(TRIP, payload, null, graded: true, ready: false, silentConflict: true);
   }
+
+  CallOutcome _localReject() => const CallOutcome(
+        succeeded: false,
+        httpStatus: null,
+        spokenCues: [],
+        attempts: 0,
+        waitIntervalsMs: [],
+        shouldTurnGrey: false,
+        shouldTurnReady: false,
+      );
 
   Future<CallOutcome> _dispatch(
     String endpoint,

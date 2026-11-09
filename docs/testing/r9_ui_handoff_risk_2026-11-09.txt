@@ -1,3 +1,4 @@
+2026-11-09：呢份當日證據保持原樣。現況見 README.md／docs/HANDOFF_SHORT.md。
 泊車副駕 r9 特殊情況／UI 交接風險驗收
 日期：2026-11-09
 裝置：emulator-5554（sdk_gphone64_x86_64）

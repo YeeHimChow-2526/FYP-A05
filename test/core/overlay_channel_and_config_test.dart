@@ -75,6 +75,22 @@ void main() {
     expect(calls[9].arguments, {'payloadJson': '{"rating":1}'});
   });
 
+  test('舊行程入口收到停用錯誤時不會當成成功', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(OverlayChannel.channel, (call) async {
+      throw PlatformException(code: 'LEGACY_ENTRY_DISABLED', message: '舊入口已停用');
+    });
+    final rejected = isA<PlatformException>()
+        .having((error) => error.code, 'code', 'LEGACY_ENTRY_DISABLED')
+        .having((error) => error.message, 'message', '舊入口已停用');
+    await expectLater(OverlayChannel.getTodayTrips(), throwsA(rejected));
+    await expectLater(OverlayChannel.confirmParkedCandidate('rej-1'), throwsA(rejected));
+    await expectLater(
+      OverlayChannel.submitTripReport('{"session_id":"rej-1"}'),
+      throwsA(rejected),
+    );
+  });
+
   test('OverlayChannel 四個 Native → Flutter 只讀事件觸發監聽器', () async {
     String? state;
     String? dataJson;

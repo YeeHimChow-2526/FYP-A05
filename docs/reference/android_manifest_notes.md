@@ -1,6 +1,6 @@
 # AndroidManifest 參考摘錄（v2.9.1）
 
-> **參考用**：摘自實作版 Doc PART 2 §二.2。本檔**唔代表** Flutter 專案內已有對應 Manifest；實作時對照 `NativeConfig.kt` 與本節邊界寫入 `android/app/src/main/AndroidManifest.xml`。
+> **參考用**：摘自實作版 Doc PART 2 §二.2。Doc 已失效；本檔已按 2026-11-09 現況更正，冇更正嘅段落屬歷史。本檔**唔代表** Flutter 專案內已有對應 Manifest；實作時對照 `NativeConfig.kt` 與本節邊界寫入 `android/app/src/main/AndroidManifest.xml`。
 
 ## 權限與 FGS 類型
 
@@ -65,6 +65,6 @@
 - Pre-FGS：只通知、無膠囊、無 GREY／AMBER overlay。
 - 常駐通知文案：「正在聽」。OEM 殺 FGS＝abandon trip，司機自行重開（新 `session_id`）。
 - 另見 `res/xml/shortcuts.xml`（Hey Google App Actions；`destination` 可選；現場講法入現場即泊）。
-- 入口優先聲明（決定版）：「B-1 路徑 1A：Hey Google／App Actions 冷態入口屬實驗性能力，須按指定 intent、語言及裝置驗證通過後方可啟用，不列入本版必要交付或免手操作保證。正文相關冷態流程均以驗證通過為前提。本限制不適用於 B-1 路徑 1B 已開程後的本機語音互動。」驗證步驟見 `docs/testing/01_test_plan.md`（Google Doc「泊車副駕 測試清單 v2.9.1」，ID `1OaMcyeEU8m0HKuhhCLf2DCJX9iY0h1vu-ar7WGdd148`） Phase B 第 12 項。
+- 入口優先聲明（決定版）：「B-1 路徑 1A：Hey Google／App Actions 冷態入口屬實驗性能力，須按指定 intent、語言及裝置驗證通過後方可啟用，不列入本版必要交付或免手操作保證。正文相關冷態流程均以驗證通過為前提。本限制不適用於 B-1 路徑 1B 已開程後的本機語音互動。」驗證步驟見 `docs/testing/01_test_plan.md` Phase B 第 12 項。
 
 行車常數門檻一律引用 `android/app/src/main/kotlin/com/hkparking/copilot/NativeConfig.kt`（Flutter 畫面常數見 `lib/core/constants/app_config.dart`），唔好喺 Manifest 註解或 Kotlin 散落 hardcode。

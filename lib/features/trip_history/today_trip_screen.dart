@@ -14,6 +14,8 @@ class TodayTripView {
     required this.status,
     required this.confirmSyncPending,
     required this.feedbackSubmitted,
+    required this.confirmSyncSent,
+    this.syncRejected,
   });
 
   final String sessionId;
@@ -23,6 +25,15 @@ class TodayTripView {
   final String status;
   final bool confirmSyncPending;
   final bool feedbackSubmitted;
+  final bool confirmSyncSent;
+  final String? syncRejected;
+
+  String? get confirmBlockText {
+    if (syncRejected != null) return feedbackFailureText('CONFIRM_SYNC_REJECTED');
+    if (confirmSyncPending) return feedbackFailureText('CONFIRM_SYNC_PENDING');
+    if (!confirmSyncSent) return feedbackFailureText('CONFIRM_SYNC_UNKNOWN');
+    return null;
+  }
 
   static TodayTripView? fromMap(Map<Object?, Object?> map) {
     final sessionId = map['sessionId'] as String?;
@@ -35,6 +46,8 @@ class TodayTripView {
       status: (map['status'] as String?) ?? 'CANDIDATE',
       confirmSyncPending: map['confirmSyncPending'] == true,
       feedbackSubmitted: map['feedbackSubmitted'] == true,
+      confirmSyncSent: map['confirmSyncSent'] == true,
+      syncRejected: map['syncRejected'] is String ? map['syncRejected'] as String : null,
     );
   }
 }
@@ -197,7 +210,13 @@ class _TripCard extends StatelessWidget {
                 onPressed: onConfirm,
                 child: const Text('確認已泊妥'),
               ),
-            if (isConfirmed && !trip.feedbackSubmitted)
+            if (isConfirmed && !trip.feedbackSubmitted && trip.confirmBlockText != null)
+              Text(
+                trip.confirmBlockText!,
+                key: ValueKey('feedback_blocked_${trip.sessionId}'),
+                style: const TextStyle(color: AppColors.textSecondary),
+              ),
+            if (isConfirmed && !trip.feedbackSubmitted && trip.confirmBlockText == null)
               QuickFeedbackBar(
                 key: ValueKey('feedback_${trip.sessionId}'),
                 sessionId: trip.sessionId,

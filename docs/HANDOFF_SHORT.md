@@ -3,10 +3,14 @@
 **現況以本節為準（2026-11-09）。下面各 Phase 係歷史，衝突時以本節同 `docs/REAL_MODE_HANDOFF.md` 文首為準。** 架構：`docs/CODE_MAP.md`。風險證據：`docs/testing/r9_ui_handoff_risk_2026-11-09.txt`。GPX：`docs/testing/gpx/README.md`。
 
 - 建置同鍵名：`flutter pub get`，然後 `flutter build apk --debug`。設定經 `android/app/build.gradle.kts` `hkpSetting()`：Gradle `-P` → `android/local.properties`（gitignore）→ 環境變數 → 空。鍵名同 DEMO／GPX 見 REAL_MODE。唔寫秘密值。
-- 本輪只改兩個測試同交接文件：`flutter analyze` 零問題；`flutter test` 269 全過。上一輪乾淨目錄先有 Android 單元測試同模擬器結果，本輪冇重跑，唔好混為一次。
+- 本輪行程反饋加舊入口封口：`flutter analyze` 零問題；`flutter test` 282 全過。Android `:app:testDebugUnitTest` 在 `-PHKP_USE_REAL_NAVIGATION=false` 同 `=true` 都是 348 項、0 失敗、86 skipped。`:app:compileReleaseKotlin` 通過。release 帶測試注入 extra 未實際啟動。模擬器只跑 debug 測試注入，唔係 live API。HTTP 失敗句只由 widget 測試覆蓋。
 - 第三次唔同停車場要明確確認。畫面確認已驗；真咪未驗。
 - UI 待辦：底欄壓 ETA／留白；推薦卡曾 `BOTTOM OVERFLOWED BY 9.0 PIXELS`。
-- 未驗：藍牙泊妥、反饋提交、橫向、成功空推薦。手動結束唔係泊妥。
+- 行程反饋 HTTP 只送 `session_id`、`trip_timestamp`、`feedback`（GOOD／OK／BAD、VALID／INVALID／NONE、備註最多 140）。確認同步被 404／409／422 拒絕後不送反饋，重開仍然有效。HTTP 失敗顯示「未能確認提交結果」，不表示伺服器一定未收到。失敗不會顯示已提交。反饋沒有自動補送。
+- 升級前已同步但未交反饋、而且紀錄沒有 `confirmSyncSent` 的舊列，會被當成未知，可能不能再提交。沒有補送或恢復。
+- 舊 overlay 的 `getTodayTrips`、`confirmParkedCandidate`、`submitTripReport` 回 `LEGACY_ENTRY_DISABLED`／「舊入口已停用」，不讀寫正式行程 prefs、不發 sync 或 trip-report。正常今日行程仍走 Dart。定位、語音、前台服務沒有停。
+- 雲端三項仍未完成，本輪沒有改雲端：feedback 內容驗證、重複提交政策、香港午夜截止。
+- 未驗 live API。模擬器只用測試注入，不當作線上通過。未驗：藍牙泊妥、橫向、成功空推薦。手動結束唔係泊妥。
 - Navigation SDK 粵語未驗證。App 粵語 TTS 唔可以當 SDK 語言證據。
 - 正常模式仍可能收到雲端 DEMO 卡；客戶端禁止預留。冇改雲端。
 - 舊 Kotlin 殼同 `HKP_ACCEPTANCE_TAG` 驗收身份開關刻意保留，唔係可刪項。

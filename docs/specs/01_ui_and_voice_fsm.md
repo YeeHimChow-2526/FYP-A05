@@ -1,11 +1,23 @@
 # 01 — 原生語音 FSM／燈號／到場雙態；Flutter 教學／權限橫額／今日行程
 
-來源：實作版 Doc **v2.9.1** PART 1 §一／§三／§四（偏好對口播）／§五、PART 2 §一。正面向描述當前設計。
+來源：實作版 Doc **v2.9.1** PART 1 §一／§三／§四（偏好對口播）／§五、PART 2 §一。Doc 已失效；本檔已按 2026-11-09 現況更正，冇更正嘅段落屬歷史。
 
 ## 0. 擁有權
 
-- 膠囊、燈號、語音對話、追問卡片、到場判定：全部由原生 **`TripStateMachine.kt`**（唯一擁有者）驅動，喺 `FloatingBubbleService.kt` 內運行；卡片由原生 **`FloatingCardView.kt`** 以 WindowManager 繪出。
-- Flutter 只負責 App 內畫面（§5–§7、§10）；經 MethodChannel 讀取並顯示原生狀態（`getTripState()`、`onTripStateChanged`），**唔持有**任何行車狀態。
+- v2.9.1 原文：膠囊、燈號、語音對話、追問卡片、到場判定全部由原生 **`TripStateMachine.kt`**（唯一擁有者）驅動，喺 `FloatingBubbleService.kt` 內運行；卡片由原生 **`FloatingCardView.kt`** 以 WindowManager 繪出。
+- **2026-11-09 更正：** 行程唯一真實狀態喺 Dart `TripRuntime`。Kotlin FSM 仍在，已不是唯一擁有者。
+
+## 現況產品規則（2026-11-09）
+
+下面係現有 App 規則。有模擬器證據先寫已驗；冇證據唔當已驗。細節見 `docs/REAL_MODE_HANDOFF.md` 第 0 節。
+
+- 第三次唔同停車場要明確確認。等待、逾時、殺 App 都唔會偷偷轉線。明確確認後只 commit／轉線一次。畫面「確認／取消」、逾時不轉、同意只一次，上一輪模擬器已見。真咪「好／唔好」未驗。殺 App 對「第三次待確認」呢個狀態本身冇另列新證據。
+- 冇 `canListen` 時唔可以叫人開口答，改用畫面確認／取消。
+- 手動結束唔等於泊妥，唔會因此寫「可能已泊入」。
+- 冇藍牙就唔會自動判斷「可能已泊入」。呢個係已知缺口，未當已驗。
+- 導航 SDK 轉彎語音跟裝置語言，App 控制唔到。App 自己嘅口播先係粵語。SDK 粵語未驗。
+- 底欄留白同推薦卡 `BOTTOM OVERFLOWED BY 9.0 PIXELS` 交 UI。
+- v2.9.1 原文：Flutter 只負責 App 內畫面（§5–§7、§10）；經 MethodChannel 讀取並顯示原生狀態（`getTripState()`、`onTripStateChanged`），**唔持有**任何行車狀態。**2026-11-09 更正：** 行程狀態喺 Dart `TripRuntime`。
 
 ## 1. 產品交互哲學（語音優先）
 
@@ -85,7 +97,7 @@ STT 不可用（播報＋手動／純手動）：
 - 未啟用熱詞時拍膠囊單次聆聽：按 §5.4「收音計時」聆聽，講完自動停；本句完結即停止 AudioRecord 並降級 location。
 - STT 信心度 < 0.6：口播「太嘈聽唔清，稍後再試」即刻閉嘴（信心度缺失或 −1 另行分支，見 §5.6）。
 - 行車未設終點口播：「出發緊？去邊度等我睇定車位？」；全語音模式且 mic 已升級 → 按收音計時聆聽；全語音模式 mic 未升級 → 只口播＋維持 ALERT，待拍膠囊；STT 不可用 → 只口播一次（播報＋手動）或只顯示 ALERT（純手動），終點留待泊好車後輸入。
-- 入口優先聲明（決定版）：「B-1 路徑 1A：Hey Google／App Actions 冷態入口屬實驗性能力，須按指定 intent、語言及裝置驗證通過後方可啟用，不列入本版必要交付或免手操作保證。正文相關冷態流程均以驗證通過為前提。本限制不適用於 B-1 路徑 1B 已開程後的本機語音互動。」驗證步驟見 `docs/testing/01_test_plan.md`（Google Doc「泊車副駕 測試清單 v2.9.1」，ID `1OaMcyeEU8m0HKuhhCLf2DCJX9iY0h1vu-ar7WGdd148`） Phase B 第 12 項。
+- 入口優先聲明（決定版）：「B-1 路徑 1A：Hey Google／App Actions 冷態入口屬實驗性能力，須按指定 intent、語言及裝置驗證通過後方可啟用，不列入本版必要交付或免手操作保證。正文相關冷態流程均以驗證通過為前提。本限制不適用於 B-1 路徑 1B 已開程後的本機語音互動。」驗證步驟見 `docs/testing/01_test_plan.md` Phase B 第 12 項。
 
 ### 5.1 行程語音模式（決定版，三種互斥）
 
@@ -105,7 +117,7 @@ STT 不可用（播報＋手動／純手動）：
 
 ### 5.3 單一 AudioRecord → 裝置端 STT 工程閘門（決定版，開發前驗證）
 
-熱詞命中後同一 AudioRecord 連續錄音並把 PCM 交 STT，前提為目標裝置／引擎組合通過開發前驗證（W-A.20；步驟見 `docs/testing/01_test_plan.md`（Google Doc「泊車副駕 測試清單 v2.9.1」，ID `1OaMcyeEU8m0HKuhhCLf2DCJX9iY0h1vu-ar7WGdd148`） Phase A）：
+熱詞命中後同一 AudioRecord 連續錄音並把 PCM 交 STT，前提為目標裝置／引擎組合通過開發前驗證（W-A.20；步驟見 `docs/testing/01_test_plan.md` Phase A）：
 
 1. 只用裝置端路徑（`createOnDeviceSpeechRecognizer` 或同等），不設雲端 STT 後備；單靠 `EXTRA_PREFER_OFFLINE` 不足以作準。
 2. 驗收須證明結果來自注入之外部音訊，並非引擎自行開咪。
@@ -180,9 +192,9 @@ STT 不可用（播報＋手動／純手動）：
 
 ## 10. 今日行程專頁（Flutter，W-A.11）
 
-- 經 bridge `getTodayTrips()` 讀原生 `TodayTripStore`；`onTodayTripsChanged()` 時刷新。
-- 候選「可能已泊入 X」→ 司機一撳確認（`confirmParkedCandidate(sessionId)`）→ 原生送 `/v1/sync/outbox`（`DRIVER_CONFIRMED`），伺服器設 `ratable = true`，先開放 3 格反饋（`submitTripReport`）。
-- 確認時離線：原生本機保留，網絡恢復自動送出；香港時間 00:00（`AppConfig.todayTripsResetTimeHkt`）與今日行程一併清除。
+- 經 bridge `getTodayTrips()` 讀原生 `TodayTripStore`；`onTodayTripsChanged()` 時刷新。**已停用（2026-11-09）**：`getTodayTrips` 回 `LEGACY_ENTRY_DISABLED`。現況今日行程讀 Dart `TodayTripStore`。
+- 候選「可能已泊入 X」→ 司機一撳確認（`confirmParkedCandidate(sessionId)`）→ 原生送 `/v1/sync/outbox`（`DRIVER_CONFIRMED`），伺服器設 `ratable = true`，先開放 3 格反饋（`submitTripReport`）。**已停用（2026-11-09）**：呢兩個 method 唔再轉交 Kotlin，不發 sync 或 trip-report。現況確認同反饋走 Dart `TodayTripSync`。反饋 HTTP 係 nested `{session_id, trip_timestamp, feedback:{rating_tag, perk_status_tag, perk_notes}}`。
+- 確認時離線：原生本機保留，網絡恢復自動送出；香港時間 00:00（`AppConfig.todayTripsResetTimeHkt`）與今日行程一併清除。確認同步嘅本機保留仍然係現況；反饋冇自動補送。雲端未擋重複提交、未驗內容、未做午夜截止、未檢查 `target_carpark_id`。
 
 ## 11. 資料新鮮度（stale／degraded）
 

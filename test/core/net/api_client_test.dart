@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:copilot/core/constants/native_config.dart';
 import 'package:copilot/core/net/api_client.dart';
 import 'package:copilot/core/net/fake_api_transport.dart';
@@ -174,6 +176,47 @@ void main() {
     expect(trip.spokenCues, isEmpty);
     expect(trip.actionSpokenCue, isNull);
     expect(transport.calls.last.path, ApiClient.TRIP);
+    final body = jsonDecode(transport.calls.last.body) as Map<String, Object?>;
+    expect(body.keys.toSet(), {'session_id', 'trip_timestamp', 'feedback'});
+    expect(body['feedback'], {'rating_tag': 'GOOD', 'perk_status_tag': 'VALID', 'perk_notes': ''});
     expect(transport.calls.last.body.contains('photo_url'), isFalse);
+    expect(transport.calls.last.body.contains('carpark_id'), isFalse);
+  });
+
+  test('trip report rejects illegal enum and a supplied photo without posting', () async {
+    final transport = FakeApiTransport(const []);
+    final client = ApiClient(transport, sleeper: (_) async {});
+    final bad = await client.submitTripReport(sessionId: 'sess', carparkId: 'CP1', ratingTag: 'NOPE', perkStatusTag: 'VALID', tripTimestampSec: 1);
+    final photo = await client.submitTripReport(
+      sessionId: 'sess',
+      carparkId: 'CP1',
+      ratingTag: 'GOOD',
+      perkStatusTag: 'VALID',
+      tripTimestampSec: 1,
+      photoUrl: 'gs://fake/photo',
+    );
+    expect(bad.succeeded, isFalse);
+    expect(bad.attempts, 0);
+    expect(photo.attempts, 0);
+    expect(transport.calls, isEmpty);
+  });
+
+  test('trip report notes keep 140 chinese and do not split an emoji', () async {
+    final transport = FakeApiTransport([
+      const HttpResult(statusCode: 200, bodyJson: '{}'),
+      const HttpResult(statusCode: 200, bodyJson: '{}'),
+    ]);
+    final client = ApiClient(transport, sleeper: (_) async {});
+    final chinese = '測' * 141;
+    final emoji = '😀';
+    final odd = '測${emoji * 70}';
+    await client.submitTripReport(sessionId: 's', carparkId: 'c', ratingTag: 'OK', perkStatusTag: 'NONE', perkNotes: chinese, tripTimestampSec: 1);
+    await client.submitTripReport(sessionId: 's', carparkId: 'c', ratingTag: 'BAD', perkStatusTag: 'INVALID', perkNotes: odd, tripTimestampSec: 1);
+    final chineseNotes = ((jsonDecode(transport.calls[0].body) as Map)['feedback'] as Map)['perk_notes'] as String;
+    final emojiNotes = ((jsonDecode(transport.calls[1].body) as Map)['feedback'] as Map)['perk_notes'] as String;
+    expect(chineseNotes, '測' * NativeConfig.TODAY_TRIP_NOTES_MAX_CHARS);
+    expect(emojiNotes.length, lessThanOrEqualTo(NativeConfig.TODAY_TRIP_NOTES_MAX_CHARS));
+    expect(emojiNotes.endsWith(emoji), isTrue);
+    expect(emojiNotes.codeUnitAt(emojiNotes.length - 1), inInclusiveRange(0xDC00, 0xDFFF));
   });
 }

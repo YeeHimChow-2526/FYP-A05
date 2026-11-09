@@ -1,15 +1,17 @@
 # 客戶端（Android 原生 Kotlin + Flutter App 畫面）Context v2.9.1
 
-> 香港「**泊車副駕**」— 客戶端代理記憶。行程期間**全部車內邏輯於原生 Kotlin 執行**；Flutter 只負責 App 內畫面（設定、新手教學、今日行程）。  
-> **真理源**：Google Doc 實作版 **v2.9.1**（ID `1wzfVsSobPfCQW-TNcLnRmy9LsEB5KdUSbaUJwOfeEPo`）。  
-> 本包只覆蓋 App／客戶端契約；雲端算分公式、BQ／ETL、Terraform、Firestore schema、Gemini 仲裁、W-B..W-F **唔收錄**。衝突時以 Doc 正文為準。
+> **現況（2026-11-09）以本段為準。** 行程唯一真實狀態喺 Dart `TripRuntime`（`lib/app/trip_runtime.dart`、`lib/core/trip/`）。Kotlin `TripStateMachine` 同 overlay channel 仲留喺度，但 `getTodayTrips`、`confirmParkedCandidate`、`submitTripReport` 已停用，回 `LEGACY_ENTRY_DISABLED`。下面 v2.9.1 段落保留；同現況衝突時以本段、`README.md`、`docs/HANDOFF_SHORT.md` 為準。
+>
+> 香港「**泊車副駕**」— 客戶端代理記憶。下面「行程期間全部車內邏輯於原生 Kotlin 執行」係 v2.9.1 原文，唔再係現況。  
+> v2.9.1 Google Doc 已失效，唔再作準；現況以 repo（README／HANDOFF_SHORT／CODE_MAP）為準。  
+> 本包只覆蓋 App／客戶端契約；雲端算分公式、BQ／ETL、Terraform、Firestore schema、Gemini 仲裁、W-B..W-F **唔收錄**。
 
 ## 架構分工（決定版）
 
 | 層 | 負責 | 唔負責 |
 |----|------|--------|
-| **原生 Kotlin**（`FloatingBubbleService.kt` 為行程宿主） | FGS、P 膠囊（WindowManager）、`TripStateMachine.kt`（**膠囊／語音狀態機唯一擁有者**）、原生追問卡 `FloatingCardView.kt`、定位與 `DistanceTracker.kt`、`net/ApiClient.kt` 分級重試、語音能力檢查（`voice/VoiceCapabilityChecker.kt`）、裝置端粵語 STT／TTS、熱詞與 AudioRecord、指令碼（`voice/CommandCodes.kt`）、`poi/LocalPoiTrie.kt`、`trip/TodayTripStore.kt`、熄匙處理 | App 內設定／教學畫面 |
-| **Flutter**（只隨 App 畫面運行） | 設定（三段偏好、本程熱詞開關）、6 頁新手教學＋權限狀態橫額＋頁面 5 語音能力顯示、今日行程專頁（候選一撳確認、3 格反饋）、主畫面「出發」／起步頁／現場即泊入口（經 MethodChannel 交原生開程） | 任何行車邏輯；行程期間 Flutter 不在背景運行，只經 bridge 讀取並顯示原生狀態 |
+| **原生 Kotlin**（`FloatingBubbleService.kt` 為行程宿主） | FGS、P 膠囊（WindowManager）、`TripStateMachine.kt`（v2.9.1 寫「膠囊／語音狀態機唯一擁有者」；**2026-11-09 更正：已不是行程唯一擁有者**，現況見文首）、原生追問卡 `FloatingCardView.kt`、定位與 `DistanceTracker.kt`、`net/ApiClient.kt` 分級重試、語音能力檢查（`voice/VoiceCapabilityChecker.kt`）、裝置端粵語 STT／TTS、熱詞與 AudioRecord、指令碼（`voice/CommandCodes.kt`）、`poi/LocalPoiTrie.kt`、`trip/TodayTripStore.kt`、熄匙處理 | App 內設定／教學畫面 |
+| **Flutter**（只隨 App 畫面運行） | 設定（三段偏好、本程熱詞開關）、6 頁新手教學＋權限狀態橫額＋頁面 5 語音能力顯示、今日行程專頁（候選一撳確認、3 格反饋）、主畫面「出發」／起步頁／現場即泊入口（經 MethodChannel 交原生開程）。**2026-11-09：** 行程狀態同畫面邏輯喺 Dart `TripRuntime`，唔再係「只顯示原生狀態」 | v2.9.1 寫「任何行車邏輯」；呢句已過時 |
 
 常數：行車常數 → `android/app/src/main/kotlin/com/hkparking/copilot/NativeConfig.kt`；App 畫面參數 → `lib/core/constants/app_config.dart`。
 
@@ -25,7 +27,7 @@
 | [`docs/specs/02_native_bridge_and_fgs.md`](docs/specs/02_native_bridge_and_fgs.md) | MethodChannel（只於 App 畫面開啟時）、FGS 啟動握手、起步入口、Kotlin 元件、W-A.1/2/4/9/13/14/16/17 |
 | [`docs/specs/03_api_and_local_trie.md`](docs/specs/03_api_and_local_trie.md) | REST 端點＋DTO、`ApiClient.kt` 重試、今日行程待確認本機保留、Kotlin 字典樹、低水位與眾包口播 |
 | [`docs/specs/04_mock_and_sim_shell.md`](docs/specs/04_mock_and_sim_shell.md) | 原生 `sim/`（只限 debug）fixtures／注入事件、模擬器／真機測試分工、記憶體 PSS 量度 |
-| [`docs/testing/01_test_plan.md`](docs/testing/01_test_plan.md) | 測試清單 v2.9.1：Phase A 開發前語音鏈驗證（A–E）＋Phase B 產品整合 29 項（一→六）；Google Doc ID `1OaMcyeEU8m0HKuhhCLf2DCJX9iY0h1vu-ar7WGdd148` |
+| [`docs/testing/01_test_plan.md`](docs/testing/01_test_plan.md) | 測試清單 v2.9.1：Phase A 開發前語音鏈驗證（A–E）＋Phase B 產品整合 29 項（一→六）。Doc 已失效，以呢份 repo 檔為準 |
 | [`docs/reference/android_manifest_notes.md`](docs/reference/android_manifest_notes.md) | Manifest **參考**文字（唔聲稱已喺專案落地） |
 | [`android/.../NativeConfig.kt`](android/app/src/main/kotlin/com/hkparking/copilot/NativeConfig.kt) | **行車常數單一事實源**；**MUST cite，no hardcode** |
 | [`lib/core/constants/app_config.dart`](lib/core/constants/app_config.dart) | Flutter App 畫面參數（教學頁數、今日行程清除時間） |
@@ -33,7 +35,7 @@
 
 ## 目錄地圖（目標 repo）
 
-★ `TripStateMachine.kt`（狀態機唯一擁有者）、`FloatingBubbleService.kt`（行程宿主）、`NativeConfig.kt`（行車常數）、`FloatingCardView.kt`、`net/ApiClient.kt`、`poi/LocalPoiTrie.kt`、`trip/TodayTripStore.kt`。其餘元件、debug `sim/`、Flutter 畫面見 [`docs/specs/02_native_bridge_and_fgs.md`](docs/specs/02_native_bridge_and_fgs.md)。
+★ 現況行程擁有者係 Dart `TripRuntime`。`TripStateMachine.kt` 仍在（v2.9.1 叫「狀態機唯一擁有者」，2026-11-09 起唔再係）、`FloatingBubbleService.kt`（行程宿主）、`NativeConfig.kt`（行車常數）、`FloatingCardView.kt`、`net/ApiClient.kt`、`poi/LocalPoiTrie.kt`、`trip/TodayTripStore.kt`。其餘元件、debug `sim/`、Flutter 畫面見 [`docs/specs/02_native_bridge_and_fgs.md`](docs/specs/02_native_bridge_and_fgs.md)。
 
 ## CRITICAL NEVER
 
@@ -114,7 +116,7 @@
 
 ## W-A 任務錨點（客戶端）
 
-- **W-A.1** FloatingBubbleService 行程宿主＋TripStateMachine 唯一擁有者  
+- **W-A.1** FloatingBubbleService 行程宿主＋TripStateMachine 唯一擁有者（歷史任務名；現況行程 SoT 係 Dart `TripRuntime`）  
 - **W-A.2** MapsListener／ShareIntent／Bootstrap／橫額／教學頁 5  
 - **W-A.4** DistanceTracker 分級採樣＋APPROACH_MUTED（80m＋<8km/h 3s；或 150m 內 <15km/h 且 fix 年齡 >5s；>200m 達 10s 退回巡航）  
 - **W-A.9** EngineShutdown：先完成到場判定再 0.5s 停止；release 在線盡力送、離線放棄  
@@ -134,4 +136,4 @@
 - [ ] 狀態機／語音／卡片 → `01`；Native／FGS → `02`；API／Trie → `03`；sim／測試 → `04`  
 - [ ] 語音相關改動已對照 `docs/testing/01_test_plan.md` 對應項目  
 - [ ] 新行車門檻只加 `NativeConfig.kt`；App 畫面參數只加 `app_config.dart`  
-- [ ] Channel／REST 欄位變更必須回寫實作版 Doc，並更新本 Context 包  
+- [ ] Channel／REST 欄位變更寫入 repo 現況文件（README／HANDOFF_SHORT／CODE_MAP）。v2.9.1 Google Doc 已失效，唔再回寫  

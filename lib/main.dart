@@ -2,10 +2,16 @@ import 'package:copilot/app/trip_runtime.dart';
 import 'package:copilot/core/constants/app_colors.dart';
 import 'package:copilot/core/platform/overlay_channel.dart';
 import 'package:copilot/features/ignition/ignition_screen.dart';
+import 'package:copilot/features/trip_history/feedback_fixture_app.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (kDebugMode && args.contains(feedbackFixtureArg)) {
+    runApp(const FeedbackFixtureApp());
+    return;
+  }
   OverlayChannel.attach();
   Object? attachError;
   try {

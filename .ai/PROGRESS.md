@@ -1,3 +1,5 @@
+> 歷史記錄，截至 2026-10-27。現況見 `README.md`／`docs/HANDOFF_SHORT.md`。下面任務勾選冇改寫。
+
 # 開發進度（PROGRESS）— v2.9.1
 
 > 2026-10-27：Step 3.5 接受 Gemini RT-1..7 全數落地（見 SPEC_CHANGES SC-018 修訂）；測試見 Step35RtFixesTest；唔 push。
@@ -10,7 +12,7 @@
 >
 > V2 Step 3b：FBS `dart_bridge` 平台橋、TripRuntime、TodayTrip UI 改讀 Dart store。語音對話／膠囊／浮卡留 Step 5。
 
-最後更新：2026-10-25｜任務來源：`.ai/ARCHITECTURE.md` §19 PART 3 路線圖任務表（共 46 條任務項＝44 項工程任務，W-E.2 與 W-F.2 各拆 Part 1／Part 2）｜驗收細節以實作版 PART 3 為準。
+最後更新：2026-10-25｜任務來源：`.ai/ARCHITECTURE.md` §19 PART 3 路線圖任務表（共 46 條任務項＝44 項工程任務，W-E.2 與 W-F.2 各拆 Part 1／Part 2）。v2.9.1 Google Doc 已失效，唔再作準；現況以 repo（README／HANDOFF_SHORT／CODE_MAP）為準。
 
 寫入者：Pi 完成任務並 commit 後勾選並填 commit；Gemini 審查 `.ai/LAST_RUN.md` 後確認；Kenny 可隨時人手修正。
 

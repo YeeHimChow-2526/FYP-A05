@@ -2,11 +2,6 @@ package com.hkparking.copilot
 
 import android.content.Intent
 import com.hkparking.copilot.di.Bindings
-import com.hkparking.copilot.net.ApiClient
-import com.hkparking.copilot.trip.ApiClientSyncApi
-import com.hkparking.copilot.trip.SharedPrefsPort
-import com.hkparking.copilot.trip.TodayTripStore
-import com.hkparking.copilot.trip.TodayTripSync
 import com.hkparking.copilot.voice.AndroidSpeechProbe
 import com.hkparking.copilot.voice.TripVoiceMode
 import com.hkparking.copilot.voice.VoiceCapabilityChecker
@@ -27,7 +22,12 @@ class MainActivity : FlutterActivity() {
     cache.get(ENGINE_KEY)?.let { return it }
     val engine = FlutterEngine(app)
     TripPlatformBridge.bindOnce(app, engine.dartExecutor.binaryMessenger)
-    engine.dartExecutor.executeDartEntrypoint(DartExecutor.DartEntrypoint.createDefault())
+    if (BuildConfig.DEBUG) bindFeedbackFixtureChannel(engine.dartExecutor.binaryMessenger)
+    val fixture = BuildConfig.DEBUG && intent?.getBooleanExtra(EXTRA_FEEDBACK_FIXTURE, false) == true
+    engine.dartExecutor.executeDartEntrypoint(
+      DartExecutor.DartEntrypoint.createDefault(),
+      if (fixture) listOf(EXTRA_FEEDBACK_FIXTURE) else emptyList(),
+    )
     cache.put(ENGINE_KEY, engine)
     return engine
   }
@@ -196,12 +196,36 @@ class MainActivity : FlutterActivity() {
     pendingAudioResult = null
     pendingPermission?.let { (kind, result) -> result.success(TripPermissions.status(kind, permissionHost)) }
     pendingPermission = null
-    // RT-6：卸 channel；背景 sync 完成後主線回呼見 channelMounted=false 就唔 emit。
-    // today-trip-host-sync 已係 daemon 單線程 Executor，唔強制 shutdown 以免截斷 in-flight。
+    // RT-6：卸 channel；之後回呼見 channelMounted=false 就唔 emit。
     overlayHost?.channelMounted = false
     Bindings.todayTripsChangedEmitter = null
     overlayHost = null
     super.onDestroy()
+  }
+
+  private fun bindFeedbackFixtureChannel(messenger: io.flutter.plugin.common.BinaryMessenger) {
+    MethodChannel(messenger, EXTRA_FEEDBACK_FIXTURE).setMethodCallHandler { call, result ->
+      val prefs = getSharedPreferences(FIXTURE_PREFS, MODE_PRIVATE)
+      val key = call.argument<String>("key")
+      val allowed = key == NativeConfig.TODAY_TRIPS_JSON_KEY || key == NativeConfig.TODAY_TRIPS_HKT_DATE_KEY
+      if (key.isNullOrEmpty() || !allowed) {
+        result.error("BAD_KEY", key, null)
+        return@setMethodCallHandler
+      }
+      when (call.method) {
+        "get" -> result.success(prefs.getString(key, null))
+        "put" -> {
+          val value = call.argument<String>("value") ?: ""
+          prefs.edit().putString(key, value).apply()
+          result.success(null)
+        }
+        "remove" -> {
+          prefs.edit().remove(key).apply()
+          result.success(null)
+        }
+        else -> result.notImplemented()
+      }
+    }
   }
 
   companion object {
@@ -209,6 +233,8 @@ class MainActivity : FlutterActivity() {
     const val REQUEST_RECORD_AUDIO = 4107
     const val REQUEST_TRIP_PERMISSION = 4108
     const val PERMISSION_PREFS = "hkp_permission_requests"
+    const val FIXTURE_PREFS = "hkp_feedback_fixture"
+    const val EXTRA_FEEDBACK_FIXTURE = "hkp_feedback_fixture"
   }
 }
 
@@ -249,15 +275,7 @@ class OverlayBridge(private val host: OverlayHost) {
       "stopVoiceCapture" -> stopVoiceCapture()
       "setPreferences" -> setPreferences(args)
       "getTripState" -> ok(host.tripStateMachine.state.name)
-      "getTodayTrips" -> ok(host.todayTrips())
-      "confirmParkedCandidate" -> {
-        host.confirmParkedCandidate(args["sessionId"] as? String ?: "")
-        ok(null)
-      }
-      "submitTripReport" -> {
-        host.submitTripReport(args["payloadJson"] as? String ?: "")
-        ok(null)
-      }
+      "getTodayTrips", "confirmParkedCandidate", "submitTripReport" -> legacyEntryDisabled(method)
       else -> BridgeResult(ok = false, errorCode = "UNKNOWN_METHOD", message = method)
     }
   }
@@ -349,6 +367,13 @@ class OverlayBridge(private val host: OverlayHost) {
 
   private fun ok(value: Any?): BridgeResult = BridgeResult(ok = true, value = value)
 
+  private fun legacyEntryDisabled(method: String): BridgeResult = BridgeResult(
+    ok = false,
+    errorCode = LEGACY_ENTRY_DISABLED,
+    message = "舊入口已停用",
+    details = mapOf("method" to method),
+  )
+
   private fun entryOf(name: String?): StartupEntry? {
     if (name.isNullOrEmpty()) return null
     return runCatching { StartupEntry.valueOf(name) }.getOrNull()
@@ -360,6 +385,7 @@ class OverlayBridge(private val host: OverlayHost) {
     const val HOTWORD_KEY = "hotwordEnabled"
     const val GRANTED = "granted"
     const val DENIED = "denied"
+    const val LEGACY_ENTRY_DISABLED = "LEGACY_ENTRY_DISABLED"
   }
 }
 
@@ -370,34 +396,6 @@ private class AndroidOverlayHost(private val activity: MainActivity) : OverlayHo
   var emitter: (String, Map<String, Any?>) -> Unit = { _, _ -> }
   override val capabilityChecker: VoiceCapabilityChecker = VoiceCapabilityChecker(AndroidSpeechProbe(activity))
   override val tripStateMachine: TripStateMachine = TripStateMachine()
-  private val confirmed = mutableListOf<String>()
-  private val reports = mutableListOf<String>()
-  private val localStore: TodayTripStore by lazy {
-    TodayTripStore(
-      prefs = SharedPrefsPort(prefs()),
-      listener = TodayTripStore.Listener {
-        if (channelMounted) emit("onTodayTripsChanged", emptyMap())
-      },
-    )
-  }
-  private val localSync: TodayTripSync by lazy {
-    TodayTripSync(
-      store = tripStore(),
-      api = ApiClientSyncApi(ApiClient(Bindings.activeApiTransport)),
-      network = Bindings.networkStatus,
-      networkExecutor = syncExecutor,
-    )
-  }
-
-  // Step 3.5: real HTTP must not block the main thread (bridge calls arrive on main).
-  private val syncExecutor: java.util.concurrent.ExecutorService =
-    java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
-      Thread(runnable, "today-trip-host-sync").apply { isDaemon = true }
-    }
-
-  private fun tripStore(): TodayTripStore = Bindings.todayTripStore ?: localStore
-  private fun tripSync(): TodayTripSync = Bindings.todayTripSync ?: localSync
-
   override fun permissionInput(): PermissionCheckInput {
     val fine = granted(android.Manifest.permission.ACCESS_FINE_LOCATION)
     val coarse = granted(android.Manifest.permission.ACCESS_COARSE_LOCATION)
@@ -437,24 +435,11 @@ private class AndroidOverlayHost(private val activity: MainActivity) : OverlayHo
     prefs().edit().putBoolean(key, value).apply()
   }
 
-  override fun todayTrips(): List<Map<String, Any?>> {
-    if (Bindings.networkStatus.isOnline()) {
-      val sync = tripSync()
-      syncExecutor.execute { runCatching { sync.flushPendingConfirms() } }
-    }
-    return tripStore().asBridgeMaps(System.currentTimeMillis())
-  }
+  override fun todayTrips(): List<Map<String, Any?>> = emptyList()
 
-  override fun confirmParkedCandidate(sessionId: String) {
-    confirmed += sessionId
-    tripSync().confirm(sessionId)
-  }
+  override fun confirmParkedCandidate(sessionId: String) = Unit
 
-  override fun submitTripReport(payloadJson: String) {
-    reports += payloadJson
-    val sync = tripSync()
-    syncExecutor.execute { runCatching { sync.submitReport(payloadJson) } }
-  }
+  override fun submitTripReport(payloadJson: String) = Unit
 
   override fun activeService(): FloatingBubbleService? = null
 

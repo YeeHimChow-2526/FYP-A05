@@ -106,15 +106,19 @@ components:
         client_timestamp: { type: integer, format: int64, description: Unix 秒 }
     TripReportRequest:
       type: object
-      required: [session_id, carpark_id, rating_tag, perk_status_tag, trip_timestamp]
+      description: "App 送出形狀。雲端 15aab20 只檢查有 session_id、trip_timestamp、feedback object。feedback 內容、重複提交、香港午夜截止都未由雲端強制。"
+      required: [session_id, trip_timestamp, feedback]
       properties:
-        carpark_id: { type: string }
-        rating_tag: { type: string, enum: [GOOD, OK, BAD] }
-        perk_status_tag: { type: string, enum: [VALID, INVALID, NONE] }
-        perk_notes: { type: string }
         session_id: { type: string }
         trip_timestamp: { type: integer, format: int64, description: Unix 秒 }
-        photo_url: { type: string, description: App 本版唔會送 }
+        feedback:
+          type: object
+          description: "App 送出前先檢查枚舉，備註最多 140 個 UTF-16 code unit。雲端唔驗證呢個 object 嘅內容，亦唔讀 carpark_id。"
+          required: [rating_tag, perk_status_tag, perk_notes]
+          properties:
+            rating_tag: { type: string, enum: [GOOD, OK, BAD] }
+            perk_status_tag: { type: string, enum: [VALID, INVALID, NONE] }
+            perk_notes: { type: string, maxLength: 140 }
     StatusOnly:
       type: object
       description: "OPEN QUESTION：spec 冇定 body；App 只睇 HTTP status"

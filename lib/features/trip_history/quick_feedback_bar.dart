@@ -31,6 +31,7 @@ class _QuickFeedbackBarState extends State<QuickFeedbackBar> {
   String? _selectedPerkStatusTag;
   late final TextEditingController _notesController;
   bool _submitting = false;
+  String? _failureText;
 
   @override
   void initState() {
@@ -67,10 +68,14 @@ class _QuickFeedbackBarState extends State<QuickFeedbackBar> {
     // RT-3: snake_case JSON; no photo_url key.
     final json = jsonEncode(payload);
     try {
-      await widget.sync?.submitReport(json);
-      widget.onSubmitted?.call();
+      final outcome = await widget.sync?.submitReport(json);
+      if (outcome != null && outcome.posted) {
+        widget.onSubmitted?.call();
+      } else if (mounted) {
+        setState(() => _failureText = feedbackFailureText(outcome?.reason));
+      }
     } catch (_) {
-      // Silent: native / channel errors do not crash the row.
+      if (mounted) setState(() => _failureText = feedbackFailureText('NETWORK_OR_HTTP'));
     } finally {
       if (mounted) {
         setState(() => _submitting = false);
@@ -126,6 +131,15 @@ class _QuickFeedbackBarState extends State<QuickFeedbackBar> {
             counterStyle: TextStyle(color: AppColors.textSecondary),
           ),
         ),
+        if (_failureText != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              _failureText!,
+              key: const ValueKey('feedback_failure'),
+              style: const TextStyle(color: AppColors.textSecondary),
+            ),
+          ),
         Align(
           alignment: Alignment.centerRight,
           child: FilledButton(

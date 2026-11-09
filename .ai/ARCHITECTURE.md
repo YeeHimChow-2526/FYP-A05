@@ -2,22 +2,26 @@
 title: "[v2.9.1 AI 全局知識] 香港泊車語音副駕 — 開發 Agent 總綱"
 ---
 
+> **現況（2026-11-09）以 `README.md` 同 `docs/HANDOFF_SHORT.md` 為準。** 行程唯一真實狀態喺 Dart `TripRuntime`。下面「`TripStateMachine.kt` 為唯一擁有者」係 v2.9.1 原文，已更正見各段標註。`getTodayTrips`、`confirmParkedCandidate`、`submitTripReport` 已停用，回 `LEGACY_ENTRY_DISABLED`。雲端未擋重複提交、未驗 feedback 內容、未做香港午夜截止、未檢查 `target_carpark_id`。
+
 # 0. 文件定位與同步
 
-> 本文件由實作版 v2.9.1 生成；如有衝突，以實作版為準。升版時與其餘八份文件同步升版。
+> 本文件由實作版 v2.9.1 生成。v2.9.1 Google Doc 已失效，唔再作準；現況以 repo（README／HANDOFF_SHORT／CODE_MAP）為準。
 
 > **罕用參考。** 日常改客戶端讀 `AGENTS.md` + `docs/specs/*` + 源碼常數。本檔保留雲端／跨層硬規格；§4.1–4.2 不再內嵌常數表。
 
 
 文件版本：v2.9.1｜生成日期：2026-10-20（香港時間）｜用途：AI coding agent 單一去重全局知識檔（Markdown 友善）。
 
-本文件只收錄當前設計之硬規格與鐵律；每項驗收細節以實作版正文為準。客戶端（Android 原生 Kotlin＋Flutter App 畫面）細節見客戶端資料包：`hk_parking_client_context/AGENTS.md`（NEVER／ALWAYS 鐵律）、`docs/specs/01_ui_and_voice_fsm.md`、`docs/specs/02_native_bridge_and_fgs.md`、`docs/specs/03_api_and_local_trie.md`、`docs/specs/04_mock_and_sim_shell.md`、`docs/testing/01_test_plan.md`、`docs/reference/android_manifest_notes.md`，常數檔 `android/app/src/main/kotlin/com/hkparking/copilot/NativeConfig.kt` 及 `lib/core/constants/app_config.dart`（命名見 `docs/reference/native_config_glossary.md`）。
+本文件只收錄當時設計之硬規格與鐵律。v2.9.1 Google Doc 已失效，唔再作準；現況以 repo（README／HANDOFF_SHORT／CODE_MAP）為準。客戶端（Android 原生 Kotlin＋Flutter App 畫面）細節見客戶端資料包：`hk_parking_client_context/AGENTS.md`（舊包路徑；現況檔係 repo 根目錄 `AGENTS.md`）（NEVER／ALWAYS 鐵律）、`docs/specs/01_ui_and_voice_fsm.md`、`docs/specs/02_native_bridge_and_fgs.md`、`docs/specs/03_api_and_local_trie.md`、`docs/specs/04_mock_and_sim_shell.md`、`docs/testing/01_test_plan.md`、`docs/reference/android_manifest_notes.md`，常數檔 `android/app/src/main/kotlin/com/hkparking/copilot/NativeConfig.kt` 及 `lib/core/constants/app_config.dart`（命名見 `docs/reference/native_config_glossary.md`）。
 
 ## 0.1 其餘八份文件
 
+> 歷史來源，連結已失效。Doc ID 只留喺呢張表作出處，唔好再開。
+
 | # | 文件 | Google Doc ID | 角色 |
 |---|---|---|---|
-| 1 | [v2.9.1 實作版] 香港泊車語音副駕 — 系統架構與業務落地方案 | 1wzfVsSobPfCQW-TNcLnRmy9LsEB5KdUSbaUJwOfeEPo | 真理源（實作以此正文為準） |
+| 1 | [v2.9.1 實作版] 香港泊車語音副駕 — 系統架構與業務落地方案 | 1wzfVsSobPfCQW-TNcLnRmy9LsEB5KdUSbaUJwOfeEPo | 歷史來源，連結已失效 |
 | 2 | [v2.9] 香港泊車語音副駕 — 系統架構與業務落地方案（決定版） | 1ps7OfKJTLf2kjhQKv8yx4wzY_Z8kkF9gFP5SfnxRMf0 | 完整版（含 PART 4 架構演進日誌，只供審計） |
 | 3 | 香港泊車語音副駕 v2.9.1 工作重要度排行 | 1SOFWlaC8wJsNhQdTLu6NClhQmCUNcXiFO52ua2AAIXI | 46 條任務項 P0–P3、配套組合、放棄順序 |
 | 4 | 泊車副駕 測試清單 v2.9.1 | 1OaMcyeEU8m0HKuhhCLf2DCJX9iY0h1vu-ar7WGdd148 | Phase A／Phase B 測試步驟 |
@@ -26,7 +30,7 @@ title: "[v2.9.1 AI 全局知識] 香港泊車語音副駕 — 開發 Agent 總�
 | 7 | 只改數據抓數｜角色包 | 125YyZiSM7R2a4GRFFT4Mt1g5GjINA28TAV71zXmChdk | 角色閱讀切片 |
 | 8 | 只改合規權限｜角色包 | 1TlgY65z-y6fTtzBGiHXPNjh71hogMranSR6_tMEo7bI | 角色閱讀切片 |
 
-連結格式：`https://docs.google.com/document/d/<Doc ID>/edit`。
+舊連結格式 `https://docs.google.com/document/d/<Doc ID>/edit` 已失效，唔好再開。
 
 ## 0.2 按角色閱讀本文件
 
@@ -38,7 +42,7 @@ title: "[v2.9.1 AI 全局知識] 香港泊車語音副駕 — 開發 Agent 總�
 # 1. 寫 Code 規範（Coding Agent 鐵律）
 
 1. 常數單一事實源：行車／語音常數一律引用 `NativeConfig.kt`；雲端參數一律引用 `.env`（W_DIST／W_VAC／D_MAX_METERS 啟動時必須 int()／Pydantic 強制轉型後先入打分，禁止以字串直接參與運算）；Flutter App 畫面參數一律引用 `app_config.dart`。業務碼禁止 magic number；新門檻先加入對應常數檔再引用。
-2. `TripStateMachine.kt` 為膠囊／語音狀態機唯一擁有者；Flutter 只經 MethodChannel 讀取並顯示原生狀態，禁止於 Flutter 持有行車邏輯或建立第二個狀態機。
+2. v2.9.1：`TripStateMachine.kt` 為膠囊／語音狀態機唯一擁有者；Flutter 只經 MethodChannel 讀取並顯示原生狀態，禁止於 Flutter 持有行車邏輯或建立第二個狀態機。**2026-11-09 更正：** 行程唯一真實狀態喺 Dart `TripRuntime`。Kotlin FSM 仍在，已不是唯一擁有者。
 3. Flutter 只負責 `features/onboarding/`、`features/ignition/`（含設定）、`features/trip_history/` 及 App 內畫面；行程期間全部車內邏輯（巡航、定位、語音、卡片、重試、到場判定）於原生 Kotlin（`FloatingBubbleService.kt` 宿主）執行，行程期間 Flutter 不在背景運行（行車全程原生 Kotlin，無背景 Flutter 引擎）。
 4. `source_status` 只得兩值：`"ok"`｜`"degraded"`。
 5. `speech_locale` 預設 `zh-HK`（本產品 zh-HK＝粵語）；語音轉接層把 speech_locale 對應至引擎 locale／voice，絕不靜默回退普通話；App 本版只送 zh-HK、不提供語言選擇器；伺服器遇不支援之值明確回退 zh-HK 並回 `speech_locale_fallback = true`。
@@ -65,7 +69,7 @@ title: "[v2.9.1 AI 全局知識] 香港泊車語音副駕 — 開發 Agent 總�
 26. `RECORD_AUDIO` 只屬全語音模式之必要權限；播報＋手動／純手動模式不以 RECORD_AUDIO 作開程條件、不升級 microphone 類型。
 27. 系統「大概位置」視為未授權精確位置。
 28. 原生 `sim/` 只限 debug 建置，位於 debug source set `android/app/src/debug/kotlin/com/hkparking/copilot/sim/`，fixtures 位於 `android/app/src/debug/assets/mock/`；`src/main` 只引用 `di/Bindings.kt`（debug／release 各一份），無執行期旗標；`// MOCK:`／`// SIM:` 註解只准出現於 `sim/` 與 `mock/`；生產路徑不留 TODO。
-29. MethodChannel／REST 欄位變更先回寫實作版，再同步客戶端資料包與本文件。
+29. MethodChannel／REST 欄位變更寫入 repo 現況文件（README／HANDOFF_SHORT／CODE_MAP）。v2.9.1 Google Doc 已失效，唔再回寫。
 
 # 2. 產品定位與核心原則
 
@@ -78,7 +82,7 @@ title: "[v2.9.1 AI 全局知識] 香港泊車語音副駕 — 開發 Agent 總�
 
 # 3. 狀態與燈號唯一真理表
 
-狀態機：`TripStateMachine.kt`（唯一擁有者）。膠囊外圈色獨立於空位 Status Pip。膠囊與灰／琥珀 overlay 只於 location FGS 已啟動（收到 FGS_STARTED）後存在。下表為本文件唯一狀態與燈號真理表；表內只列常數名，數值見 §4 常數總表；其他章節只引用狀態名及常數名。
+狀態機：v2.9.1 寫 `TripStateMachine.kt`（唯一擁有者）。**2026-11-09 更正：** 行程 SoT 係 Dart `TripRuntime`；下面燈號表仍係當時 Kotlin 膠囊表。膠囊外圈色獨立於空位 Status Pip。膠囊與灰／琥珀 overlay 只於 location FGS 已啟動（收到 FGS_STARTED）後存在。下表為本文件唯一狀態與燈號真理表；表內只列常數名，數值見 §4 常數總表；其他章節只引用狀態名及常數名。
 
 | 狀態／燈號 | 外觀 | 含義 | 進入條件／觸發 | 維持／離開 |
 |---|---|---|---|---|
@@ -529,7 +533,7 @@ B-1 語句三支：
 
 - APPROACH_MUTED（決定版）：門檻見 §3 真理表；只靜音主動口播、避讓車載倒車雷達，行程繼續；司機拍膠囊仍可「轉場」或問「有冇第二個」；虛擬鎖不因 APPROACH_MUTED 釋放，APPROACH_MUTED 不呼叫 release。
 - PARKED_CONFIRMED（決定版）：目標場範圍內（或地庫 GPS 斷訊狀態）偵測熄匙訊號（EngineShutdownReceiver.kt：車載藍牙 ACL 斷開或車充斷電）→ 先完成到場判定，於本機今日行程（trip/TodayTripStore.kt，SharedPreferences）寫入候選「可能已泊入 X」（session_id、車場名稱、時間）→ 在線即盡力送出 release（reason = PARKED_CONFIRMED），離線即放棄（鎖至多保留至 expire_at）→ TEARDOWN_FADE_MS 內無痕淡出並停止 FGS。
-- 司機其後於今日行程一撳確認（confirmParkedCandidate）→ /v1/sync/outbox（DRIVER_CONFIRMED）→ ratable = true 並開放評分。確認時如離線，確認保留於本機並於網絡恢復自動送出；香港時間 00:00（AppConfig.todayTripsResetTimeHkt）與今日行程一併清除，之後一律不送。此為唯一本機保留項。
+- 司機其後於今日行程一撳確認（confirmParkedCandidate）→ /v1/sync/outbox（DRIVER_CONFIRMED）→ ratable = true 並開放評分。**已停用（2026-11-09）**：舊 channel 唔再送 sync；現況係 Dart `TodayTripSync`。確認時如離線，確認保留於本機並於網絡恢復自動送出；香港時間 00:00（AppConfig.todayTripsResetTimeHkt）與今日行程一併清除，之後一律不送。此為唯一本機保留項。
 - 目標範圍外熄匙即結束本程，不寫候選。虛擬鎖只於 PARKED_CONFIRMED 或 VIRTUAL_LOCK_TIMEOUT_MINUTES 到期時釋放。
 - 記憶體：以指定測試機 `adb shell dumpsys meminfo <package>` 量度行程中 PSS（FGS＋膠囊＋原生卡片），上限按實測設定並寫入驗收門檻。
 
@@ -542,7 +546,7 @@ B-1 語句三支：
 
 # 8. MethodChannel 合約
 
-Channel Name：`com.hkparking.copilot/overlay`（Dart 包裝 lib/core/platform/overlay_channel.dart）；只於 App 畫面開啟時連接；行程期間全部車內邏輯於原生執行，Kotlin 為狀態機唯一擁有者。
+Channel Name：`com.hkparking.copilot/overlay`（Dart 包裝 lib/core/platform/overlay_channel.dart）；只於 App 畫面開啟時連接。v2.9.1 寫行程期間全部車內邏輯於原生執行，Kotlin 為狀態機唯一擁有者。**2026-11-09 更正：** 行程 SoT 係 Dart `TripRuntime`。下面 `getTodayTrips`、`confirmParkedCandidate`、`submitTripReport` 三段保留，但已停用。
 
 Flutter → Android Native：
 
@@ -553,9 +557,9 @@ Flutter → Android Native：
 - `stopVoiceCapture()`：結束收音，降級回 location 類型並釋放麥克風。
 - `setPreferences(preference, hotwordEnabled)`：設定頁寫入三段偏好與本程熱詞開關（SharedPreferences），原生於下次請求讀取。
 - `getTripState()`：讀取原生 TripStateMachine 現時狀態（只讀顯示）。
-- `getTodayTrips()`：讀取原生 TodayTripStore 今日行程（含 PARKED_CONFIRMED 候選與待確認狀態）。
-- `confirmParkedCandidate(sessionId)`：司機於今日行程一撳確認；原生 ApiClient.kt 送出 /v1/sync/outbox（DRIVER_CONFIRMED），離線即保留於本機並於網絡恢復自動送出（香港時間 00:00 清除）。
-- `submitTripReport(payloadJson)`：今日行程 3 格反饋，經原生 ApiClient.kt 送出 /v1/feedback/trip-report（只限已確認行程）。
+- `getTodayTrips()`：讀取原生 TodayTripStore 今日行程（含 PARKED_CONFIRMED 候選與待確認狀態）。**已停用（2026-11-09）**，回 `LEGACY_ENTRY_DISABLED`。
+- `confirmParkedCandidate(sessionId)`：司機於今日行程一撳確認；原生 ApiClient.kt 送出 /v1/sync/outbox（DRIVER_CONFIRMED），離線即保留於本機並於網絡恢復自動送出（香港時間 00:00 清除）。**已停用（2026-11-09）**，不發 sync。
+- `submitTripReport(payloadJson)`：今日行程 3 格反饋，經原生 ApiClient.kt 送出 /v1/feedback/trip-report（只限已確認行程）。**已停用（2026-11-09）**，不發 trip-report。現況由 Dart 送 nested body。
 
 Android Native → Flutter（只讀事件，只於 App 畫面開啟時派發）：
 
@@ -753,11 +757,21 @@ Response（200 OK）：
 ## 10.8 POST /v1/feedback/trip-report（行程反饋與優惠上報）
 
 ```json
-{"carpark_id": "CP_LANGHAM", "rating_tag": "GOOD", "perk_status_tag": "VALID", "perk_notes": "滿$200免1小時", "session_id": "sess_8f9a2b", "trip_timestamp": 1791823900, "photo_url": "gs://hkparking-temp-perk-photos/photo123.jpg"}
+{
+  "session_id": "sess-demo-0001",
+  "trip_timestamp": 1792995600,
+  "feedback": {
+    "rating_tag": "GOOD",
+    "perk_status_tag": "VALID",
+    "perk_notes": ""
+  }
+}
 ```
 
-- 接受經司機確認泊妥（status = PARKED_CONFIRMED 且 ratable = true）之行程，於完成當日完結（香港時間）前均可提交；未知 session_id 回 404；未經司機確認回 409（客戶端靜默處理、不口播）。
-- 依 session_id 讀取保留之完成行程紀錄，以 trip_timestamp 與該紀錄之真實泊妥時間戳比對；1 小時時限規則見 §9.6。
+> 2026-11-09：舊平鋪樣本已撤下，唔再係送出格式。`carpark_id` 唔入呢條 body。App 若收到非空 `photo_url` 會拒絕送出。
+
+- 舊規格：接受經司機確認泊妥（status = PARKED_CONFIRMED 且 ratable = true）之行程，於完成當日完結（香港時間）前均可提交；未知 session_id 回 404；未經司機確認回 409（客戶端靜默處理、不口播）。雲端 `15aab20` 未做午夜截止，亦未擋重複提交、未驗 feedback 內容、未檢查 `target_carpark_id`。
+- 舊規格：依 session_id 讀取保留之完成行程紀錄，以 trip_timestamp 與該紀錄之真實泊妥時間戳比對；1 小時時限規則見 §9.6。呢個比對未在現有雲端實作確認。
 - 後端不設今日行程查詢端點；今日行程清單只讀本機 TodayTripStore。
 
 # 11. Firestore 配置
@@ -869,7 +883,7 @@ android/app/src/main/
     ├── EngineShutdownReceiver.kt # 熄匙訊號 → 到場判定 → 停止 FGS（§7.5）
     ├── MapsNotificationListener.kt # 模式 A 導航通知接盤，只發 Heads-up（§6.8）
     ├── ShareIntentReceiverActivity.kt # 模式 B Google Maps 分享透明跳板（§5.4）
-    ├── TripStateMachine.kt # 膠囊／語音狀態機唯一擁有者（§3）
+    ├── TripStateMachine.kt # v2.9.1 寫唯一擁有者（§3）；2026-11-09 起行程 SoT 係 Dart TripRuntime
     ├── FloatingCardView.kt # 原生追問卡片（§7.4）
     ├── voice/SttService.kt # 裝置端粵語 STT（外部 PCM 注入）（§6.3）
     ├── voice/TtsService.kt # 粵語口播合成隊列（zh-HK 模板）（§6.5）
@@ -958,7 +972,7 @@ server/
 - Gemini 只出草稿、絕不自動改寫主庫：官方優先雙軌仲裁。
 - POI 由後端記憶體補齊經緯度：杜絕外部大模型坐標幻覺。
 
-# 18. 測試摘要（細則見測試清單 Doc 1OaMcyeEU8m0HKuhhCLf2DCJX9iY0h1vu-ar7WGdd148／客戶端資料包 docs/testing/01_test_plan.md）
+# 18. 測試摘要（細則見 `docs/testing/01_test_plan.md`。v2.9.1 Google Doc 已失效，唔再作準）
 
 ## 18.1 Phase A — 開發前語音鏈驗證（指定裝置／引擎組合）
 
@@ -979,7 +993,7 @@ server/
 
 # 19. PART 3 路線圖任務表
 
-全專案 4 個階段、19 步、44 項工程任務（以任務編號計；W-E.2 與 W-F.2 各拆 Part 1／Part 2，合共 46 條任務項），按「依賴優先、垂直切片」編排。每項驗收細節見實作版 PART 3；重要度 P0–P3 見工作重要度排行 Doc。狀態欄 [ ] 供逐項剔選。
+全專案 4 個階段、19 步、44 項工程任務（以任務編號計；W-E.2 與 W-F.2 各拆 Part 1／Part 2，合共 46 條任務項），按「依賴優先、垂直切片」編排。v2.9.1 Google Doc 同工作重要度排行 Doc 已失效，唔再作準；現況以 repo（README／HANDOFF_SHORT／CODE_MAP）為準。狀態欄 [ ] 供逐項剔選。
 
 ## 19.1 Phase 1 — 垂直骨幹與端雲閉環（第 1–3 步）
 

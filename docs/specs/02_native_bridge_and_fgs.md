@@ -1,12 +1,13 @@
 # 02 — Native Bridge／FGS 啟動握手／起步入口（客戶端）
 
-來源：實作版 Doc **v2.9.1** PART 1 §一／§三、PART 2 §一／§二.2／§三、PART 3 W-A.1／2／4／9／13／14／16／17／19／20／21。Manifest 細節見 `docs/reference/android_manifest_notes.md`；行車常數見 `android/app/src/main/kotlin/com/hkparking/copilot/NativeConfig.kt`。
+來源：實作版 Doc **v2.9.1** PART 1 §一／§三、PART 2 §一／§二.2／§三、PART 3 W-A.1／2／4／9／13／14／16／17／19／20／21。Doc 已失效；本檔已按 2026-11-09 現況更正，冇更正嘅段落屬歷史。Manifest 細節見 `docs/reference/android_manifest_notes.md`；行車常數見 `android/app/src/main/kotlin/com/hkparking/copilot/NativeConfig.kt`。
 
 ## 1. MethodChannel（只於 App 畫面開啟時連接）
 
 - Channel：`com.hkparking.copilot/overlay`
 - Dart 包裝：`lib/core/platform/overlay_channel.dart`
-- 行程期間全部車內邏輯於原生執行，Kotlin 為狀態機唯一擁有者；Flutter 只發 App 內指令、讀取並顯示原生狀態。
+- v2.9.1 原文：行程期間全部車內邏輯於原生執行，Kotlin 為狀態機唯一擁有者；Flutter 只發 App 內指令、讀取並顯示原生狀態。
+- **2026-11-09 更正：** 行程唯一真實狀態喺 Dart `TripRuntime`。Kotlin FSM 同 channel 仲留喺度。下面三個 method 的舊行為段落保留，但已停用。
 
 ### Flutter → Native
 
@@ -19,9 +20,9 @@
 | `stopVoiceCapture()` | 降級 location、釋放咪 |
 | `setPreferences(preference, hotwordEnabled)` | 設定頁寫入三段偏好與本程熱詞開關（SharedPreferences） |
 | `getTripState()` | 讀取原生 `TripStateMachine` 現時狀態（只讀顯示） |
-| `getTodayTrips()` | 讀取原生 `TodayTripStore`（含 PARKED_CONFIRMED 候選與待確認狀態） |
-| `confirmParkedCandidate(sessionId)` | 司機一撳確認；原生 `ApiClient.kt` 送 `/v1/sync/outbox`（`DRIVER_CONFIRMED`）；離線即本機保留、網絡恢復自動送出、HKT 00:00 清除 |
-| `submitTripReport(payloadJson)` | 3 格反饋，經原生 `ApiClient.kt` 送 `/v1/feedback/trip-report`（只限已確認行程） |
+| `getTodayTrips()` | 讀取原生 `TodayTripStore`（含 PARKED_CONFIRMED 候選與待確認狀態）。**已停用（2026-11-09）**：回 `LEGACY_ENTRY_DISABLED`，不再 flush 或改正式 prefs |
+| `confirmParkedCandidate(sessionId)` | 司機一撳確認；原生 `ApiClient.kt` 送 `/v1/sync/outbox`（`DRIVER_CONFIRMED`）；離線即本機保留、網絡恢復自動送出、HKT 00:00 清除。**已停用（2026-11-09）**：唔再轉交 Kotlin `TodayTripSync`，不發 sync |
+| `submitTripReport(payloadJson)` | 3 格反饋，經原生 `ApiClient.kt` 送 `/v1/feedback/trip-report`（只限已確認行程）。**已停用（2026-11-09）**：不發 trip-report。現況由 Dart `TodayTripSync` 送 nested body |
 
 ### Native → Flutter（只讀事件，只於 App 畫面開啟時派發）
 
@@ -56,7 +57,7 @@ PendingIntent／App Actions／分享 → FgsBootstrapActivity（或 ShareIntentR
 | 檔案 | 職責 |
 |------|------|
 | `FloatingBubbleService.kt` | 行程期間全部車內邏輯之宿主；`foregroundServiceType=location\|microphone`（平時 location，用戶手勢升級 mic）；WindowManager 膠囊（只於 FGS_STARTED 後）；回報 FGS_STARTED／MIC_READY；熱詞＋AudioRecord；AudioDeviceCallback；AudioFocus。記憶體以指定測試機 `dumpsys meminfo` 量度 PSS，上限按實測設定 |
-| `TripStateMachine.kt` | 膠囊／語音狀態機**唯一擁有者** |
+| `TripStateMachine.kt` | v2.9.1：膠囊／語音狀態機唯一擁有者。**2026-11-09 更正：** 檔案仍在，已不是行程唯一擁有者 |
 | `FloatingCardView.kt` | 原生追問卡（一次一張；全卡盲撳） |
 | `FgsBootstrapActivity.kt` | 短命透明：通知／冷啟動 → 權限檢查 → `startForeground` → 等 FGS_STARTED；缺項 `finish()`＋補授權通知 |
 | `ShareIntentReceiverActivity.kt` | Maps 分享透明跳板（B-2）；同一握手 |
@@ -98,7 +99,7 @@ PendingIntent／App Actions／分享 → FgsBootstrapActivity（或 ShareIntentR
 
 現場即泊 GPS：須可用且水平精度 ≤100m；否則失敗——不開 FGS、不推薦；TTS「暫時搵唔到你位置，請稍後再講一次」。
 
-入口優先聲明（決定版）：「B-1 路徑 1A：Hey Google／App Actions 冷態入口屬實驗性能力，須按指定 intent、語言及裝置驗證通過後方可啟用，不列入本版必要交付或免手操作保證。正文相關冷態流程均以驗證通過為前提。本限制不適用於 B-1 路徑 1B 已開程後的本機語音互動。」驗證步驟見 `docs/testing/01_test_plan.md`（Google Doc「泊車副駕 測試清單 v2.9.1」，ID `1OaMcyeEU8m0HKuhhCLf2DCJX9iY0h1vu-ar7WGdd148`） Phase B 第 12 項。
+入口優先聲明（決定版）：「B-1 路徑 1A：Hey Google／App Actions 冷態入口屬實驗性能力，須按指定 intent、語言及裝置驗證通過後方可啟用，不列入本版必要交付或免手操作保證。正文相關冷態流程均以驗證通過為前提。本限制不適用於 B-1 路徑 1B 已開程後的本機語音互動。」驗證步驟見 `docs/testing/01_test_plan.md` Phase B 第 12 項。
 
 ### B-2 Trie Miss 背景解析
 

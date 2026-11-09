@@ -1,5 +1,7 @@
-請先讀取以下規格作為全局唯一真理源（衝突時以實作版為準）：
-- 《[v2.9.1 實作版] 香港泊車語音副駕 — 系統架構與業務落地方案》：
+> **歷史記錄，截至 2026-10。現況見 `README.md`／`docs/HANDOFF_SHORT.md`。** 下面係當時 Gemini／Pi 開場提示，唔再係現有 App 架構。行程唯一真實狀態喺 Dart `TripRuntime`。`getTodayTrips`、`confirmParkedCandidate`、`submitTripReport` 已停用（2026-11-09），回 `LEGACY_ENTRY_DISABLED`。
+
+新 Agent 先讀 `README.md` 同 `docs/HANDOFF_SHORT.md`。v2.9.1 Google Doc 已失效，唔再作準；現況以 repo（README／HANDOFF_SHORT／CODE_MAP）為準。唔好再去讀 Google Doc。
+- 《[v2.9.1 實作版] 香港泊車語音副駕 — 系統架構與業務落地方案》：已失效，唔好開啟。
 - 《[v2.9.1 AI 全局知識] 開發 Agent 總綱》：專案內 `.ai/ARCHITECTURE.md`
 - 客戶端：專案根目錄 `AGENTS.md` + `docs/specs/01–04` + `docs/testing/01_test_plan.md`
 - 進度：`.ai/PROGRESS.md`
@@ -14,7 +16,7 @@
  - 真機調整任何常數：同步喺 `SPEC_CHANGES.md` 記一條。
 2. 技術路線（Android 模擬器 Pixel 連 Google Play；minSdk 33）
  - 同倉雙層：
-   - `android/`（原生 Kotlin，行程期間全部車內邏輯）：`FloatingBubbleService.kt`（FGS 宿主、P 膠囊）、`TripStateMachine.kt`（膠囊／語音狀態機唯一擁有者）、`FgsBootstrapActivity`／`ShareIntentReceiverActivity`（FGS 握手）、`FloatingCardView.kt`、`DistanceTracker.kt`、`voice/`（STT／TTS／能力檢查）、`net/ApiClient.kt`、`poi/LocalPoiTrie.kt`、`trip/TodayTripStore.kt`、debug 專用 `sim/` 模擬殼（`mock/*.json` fixtures＋注入事件）。
+   - `android/`（原生 Kotlin；v2.9.1 寫行程期間全部車內邏輯）：`FloatingBubbleService.kt`（FGS 宿主、P 膠囊）、`TripStateMachine.kt`（v2.9.1 寫膠囊／語音狀態機唯一擁有者；**2026-11-09 更正：已不是行程唯一擁有者**）、`FgsBootstrapActivity`／`ShareIntentReceiverActivity`（FGS 握手）、`FloatingCardView.kt`、`DistanceTracker.kt`、`voice/`（STT／TTS／能力檢查）、`net/ApiClient.kt`、`poi/LocalPoiTrie.kt`、`trip/TodayTripStore.kt`、debug 專用 `sim/` 模擬殼（`mock/*.json` fixtures＋注入事件）。
    - `lib/`（Flutter，只隨 App 畫面運行）：設定、6 頁新手教學＋權限橫額＋頁面 5 語音能力、今日行程、「出發」入口。
    - MethodChannel：`com.hkparking.copilot/overlay`（Flutter 只讀原生狀態、發 App 內指令）。
  - 行車常數一律引用 `NativeConfig.kt`；畫面參數引用 `app_config.dart`；嚴禁 hardcode。
@@ -48,7 +50,7 @@
    - 期望：列明今次 Step 1 可以展示同仲未可以展示嘅清單；未可以展示嘅標 `[真機]` 或後續 Step
  - 每個 `## 模擬器驗收` 必須寫：而家去到邊個閘口、逐步點撳、期望見到咩、失敗時要貼咩畀你（截圖／logcat）。我未覆「已試，結果：…」之前，唔好派下一題。
 
-請回覆：「已讀取 v2.9.1 規格並載入模擬器 MVP 三部曲與 Pi 派工協議，請指示當前進度。」
+請回覆：「已讀 README 同 HANDOFF_SHORT。v2.9.1 Google Doc 已失效，唔再作準。請指示當前進度。」
 
 ## V2 Step 1 裁定（2026-11-01）
 

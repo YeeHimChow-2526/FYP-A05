@@ -1,6 +1,6 @@
 # 04 — 原生 sim／fixtures／注入事件／測試策略（客戶端工程約定）
 
-來源：Kenny 對話協定＋實作版 Doc **v2.9.1** PART 2 §一（目錄樹 `sim/`）、§十 測試策略、W-A.18／19／20。完整測試步驟見 `docs/testing/01_test_plan.md`（Google Doc「泊車副駕 測試清單 v2.9.1」，ID `1OaMcyeEU8m0HKuhhCLf2DCJX9iY0h1vu-ar7WGdd148`）（Phase A 開發前語音鏈驗證 A–E；Phase B 產品整合 29 項，按一→六次序執行，逐項記錄裝置／Android 版本／語音服務／通過與否）。本檔描述**開發／驗收**用殼；正式生產路徑不含任何 sim 代碼。
+來源：Kenny 對話協定＋實作版 Doc **v2.9.1** PART 2 §一（目錄樹 `sim/`）、§十 測試策略、W-A.18／19／20。Doc 已失效；本檔已按 2026-11-09 現況更正，冇更正嘅段落屬歷史。完整測試步驟見 `docs/testing/01_test_plan.md`（Phase A 開發前語音鏈驗證 A–E；Phase B 產品整合 29 項，按一→六次序執行，逐項記錄裝置／Android 版本／語音服務／通過與否）。本檔描述**開發／驗收**用殼；正式生產路徑不含任何 sim 代碼。
 
 ## 1. 原則
 

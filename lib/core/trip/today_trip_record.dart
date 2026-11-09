@@ -11,6 +11,7 @@ class TodayTripRecord {
     this.lockRevision,
     this.destinationEpoch,
     this.syncRejected,
+    this.confirmSyncSent = false,
   });
 
   /// 泊車事件建立嗰刻（engine-off）鎖低嘅身份；之後重播原封不動。
@@ -24,6 +25,9 @@ class TodayTripRecord {
 
   /// 伺服器明確拒絕（例如 STALE_REVISION）→ 唔再重試；值係錯誤碼。
   final String? syncRejected;
+
+  /// 確認同步收到 HTTP 2xx 先為 true。舊紀錄冇呢個欄 → false，唔當成功。
+  final bool confirmSyncSent;
 
   final String sessionId;
   final String carparkId;
@@ -42,6 +46,7 @@ class TodayTripRecord {
     bool? feedbackSubmitted,
     String? syncRejected,
     bool clearSyncRejected = false,
+    bool? confirmSyncSent,
   }) {
     return TodayTripRecord(
       sessionId: sessionId,
@@ -55,6 +60,7 @@ class TodayTripRecord {
       lockRevision: lockRevision,
       destinationEpoch: destinationEpoch,
       syncRejected: clearSyncRejected ? null : (syncRejected ?? this.syncRejected),
+      confirmSyncSent: confirmSyncSent ?? this.confirmSyncSent,
     );
   }
 
@@ -70,6 +76,7 @@ class TodayTripRecord {
         'lockRevision': lockRevision,
         'destinationEpoch': destinationEpoch,
         'syncRejected': syncRejected,
+        'confirmSyncSent': confirmSyncSent,
       };
 
   static TodayTripRecord? fromJson(Object? raw) {
@@ -88,6 +95,7 @@ class TodayTripRecord {
       lockRevision: raw['lockRevision'] is int ? raw['lockRevision'] as int : null,
       destinationEpoch: raw['destinationEpoch'] is int ? raw['destinationEpoch'] as int : null,
       syncRejected: raw['syncRejected'] is String ? raw['syncRejected'] as String : null,
+      confirmSyncSent: raw['confirmSyncSent'] == true,
     );
   }
 }

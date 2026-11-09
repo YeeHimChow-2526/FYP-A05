@@ -1,6 +1,6 @@
 # 03 — REST／本地字典樹／重試／在線即送與待確認本機保留（客戶端）
 
-來源：實作版 Doc **v2.9.1** PART 1 §一（重試）／§三（字典樹）／§四（稀缺、低水位、眾包客戶端處理）、PART 2 §四。全部 REST 呼叫由原生 `net/ApiClient.kt` 發出（行程期間不經 Flutter）。本檔**不含**打分公式數學、BQ／ETL／Terraform／Firestore schema 細節。
+來源：實作版 Doc **v2.9.1** PART 1 §一（重試）／§三（字典樹）／§四（稀缺、低水位、眾包客戶端處理）、PART 2 §四。Doc 已失效；本檔已按 2026-11-09 現況更正，冇更正嘅段落屬歷史。全部 REST 呼叫由原生 `net/ApiClient.kt` 發出（行程期間不經 Flutter）。本檔**不含**打分公式數學、BQ／ETL／Terraform／Firestore schema 細節。
 
 ## 1. 通用 Header
 
@@ -79,7 +79,7 @@
 
 ### 2.4 `POST /v1/sync/outbox`
 
-`{ "session_id", "event_type": "DRIVER_CONFIRMED", "timestamp" }` — 司機於今日行程一撳確認候選「可能已泊入 X」（`confirmParkedCandidate`）後送出；伺服器覆蓋狀態為 `PARKED_CONFIRMED` 並設 **`ratable = true`**，同時刪除鎖文件（天然等冪）。確認時如離線：確認保留於本機 SharedPreferences，網絡恢復即自動送出；香港時間 00:00 與今日行程一併清除，之後一律不送。
+`{ "session_id", "event_type": "DRIVER_CONFIRMED", "timestamp" }` — 司機於今日行程一撳確認候選「可能已泊入 X」（舊入口 `confirmParkedCandidate`，**已停用（2026-11-09）**；現況由 Dart `TodayTripSync` 送出）後送出；伺服器覆蓋狀態為 `PARKED_CONFIRMED` 並設 **`ratable = true`**，同時刪除鎖文件（天然等冪）。確認時如離線：確認保留於本機 SharedPreferences，網絡恢復即自動送出；香港時間 00:00 與今日行程一併清除，之後一律不送。
 
 ### 2.5 `POST /v1/feedback/crowd-report`／`trip-report`
 
@@ -88,7 +88,7 @@
   - 1 小時窗口內先以來源 IP 做 5 分鐘群組，再以 distinct `session_id` 去重；累積 ≥2 個獨立來源 → 該選項排序封頂（不得排在首個未被回報之選項之前）＋口播黃旗「近期有司機回報疑似霸位，請留意現場」。
   - 眾包回報一律不作排除；排除只來自官方數據。
   - 客戶端**不收集、不送出**裝置 ID；Play Integrity 屬後期階段（只用於 crowd-report）。
-- `trip-report`：只接受經司機確認之行程（`PARKED_CONFIRMED` 且 `ratable = true`）；未知 session → 404；session 存在但未確認（`ratable = false`，包括候選未確認、APPROACH_MUTED 或未到場）→ 409，客戶端靜默處理、不口播。
+- `trip-report`：App 送出 body 只係 `{session_id, trip_timestamp, feedback:{rating_tag, perk_status_tag, perk_notes}}`。`rating_tag` 係 `GOOD`／`OK`／`BAD`，`perk_status_tag` 係 `VALID`／`INVALID`／`NONE`。`carpark_id` 唔入 body。舊 overlay `submitTripReport` **已停用（2026-11-09）**。舊規格寫只接受 `PARKED_CONFIRMED` 且 `ratable = true`、未知 session → 404、未確認 → 409。雲端 `15aab20` 仍未擋重複提交、未驗 feedback 內容、未做香港午夜截止、未檢查 `target_carpark_id`。呢幾項未完成，唔當已解決。
 - 今日行程清單讀本機 `TodayTripStore`（SharedPreferences）；後端**不設**行程查詢端點。
 
 ## 3. `session_id`（客戶端契約）

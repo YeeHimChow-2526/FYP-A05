@@ -1,3 +1,5 @@
+> 2026-11-09：呢份路線證據保持原樣。現況見 `README.md`／`docs/HANDOFF_SHORT.md`。2026-11-09 核心驗收冇播呢兩份 GPX。
+
 # 模擬器行車 GPX（正常模式）
 
 給 emulator-5554 的 Extended Controls → Location → Routes → **Import GPX**。不要用起終點點選：香港路線的 Play 常常是灰的。這兩份是已展開的 `<trk><trkseg><trkpt>`，每點相距約 8 m、相隔 1 秒（約 29 km/h），時間單調遞增。

@@ -225,24 +225,18 @@ class Step34TodayTripStoreTest {
   }
 
   @Test
-  fun step34_14_bridgeGetTodayTripsReadsStore() {
+  fun step34_14_bridgeGetTodayTripsIsDisabledAndLeavesStore() {
     val prefs = MemoryPrefsPort()
     val store = TodayTripStore(prefs, hktDateOf = { "2026-10-26" })
     store.upsertCandidate("s1", "cp1", "甲場", 4_000L)
+    val before = prefs.getString(NativeConfig.TODAY_TRIPS_JSON_KEY)
     val host = StoreHost(store)
-    val bridge = OverlayBridge(host)
-    val result = bridge.handle("getTodayTrips", emptyMap())
-    assertTrue(result.ok)
-    @Suppress("UNCHECKED_CAST")
-    val list = result.value as List<Map<String, Any?>>
-    assertEquals(1, list.size)
-    assertEquals("s1", list[0]["sessionId"])
-    assertEquals("甲場", list[0]["carparkName"])
-    assertEquals("CANDIDATE", list[0]["status"])
-    assertNotNull(list[0]["carparkId"])
-    assertNotNull(list[0]["parkedAtEpochMs"])
-    assertNotNull(list[0]["confirmSyncPending"])
-    assertNotNull(list[0]["feedbackSubmitted"])
+    val result = OverlayBridge(host).handle("getTodayTrips", emptyMap())
+    assertFalse(result.ok)
+    assertEquals(OverlayBridge.LEGACY_ENTRY_DISABLED, result.errorCode)
+    assertEquals("舊入口已停用", result.message)
+    assertEquals(before, prefs.getString(NativeConfig.TODAY_TRIPS_JSON_KEY))
+    assertEquals("s1", store.find("s1")!!.sessionId)
   }
 
   @Ignore("Step2 SoT -> Dart: test/core/trip/today_trip_store_test.dart")

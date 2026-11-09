@@ -107,7 +107,14 @@ class TodayTripStore {
     final records = _load();
     final idx = records.indexWhere((row) => row.sessionId == sessionId);
     if (idx < 0) return false;
-    records[idx] = records[idx].copyWith(status: statusConfirmed, confirmSyncPending: syncPending);
+    records[idx] = syncPending
+        ? records[idx].copyWith(
+            status: statusConfirmed,
+            confirmSyncPending: true,
+            confirmSyncSent: false,
+            clearSyncRejected: true,
+          )
+        : records[idx].copyWith(status: statusConfirmed, confirmSyncPending: false);
     _save(records, prefs.getString(NativeConfig.TODAY_TRIPS_HKT_DATE_KEY));
     _notify();
     return true;
@@ -118,7 +125,11 @@ class TodayTripStore {
     final records = _load();
     final idx = records.indexWhere((row) => row.sessionId == sessionId);
     if (idx < 0) return;
-    records[idx] = records[idx].copyWith(confirmSyncPending: false, syncRejected: code);
+    records[idx] = records[idx].copyWith(
+      confirmSyncPending: false,
+      confirmSyncSent: false,
+      syncRejected: code,
+    );
     _save(records, prefs.getString(NativeConfig.TODAY_TRIPS_HKT_DATE_KEY));
     _notify();
   }
@@ -127,7 +138,11 @@ class TodayTripStore {
     final records = _load();
     final idx = records.indexWhere((row) => row.sessionId == sessionId);
     if (idx < 0) return;
-    records[idx] = records[idx].copyWith(confirmSyncPending: false);
+    records[idx] = records[idx].copyWith(
+      confirmSyncPending: false,
+      confirmSyncSent: true,
+      clearSyncRejected: true,
+    );
     _save(records, prefs.getString(NativeConfig.TODAY_TRIPS_HKT_DATE_KEY));
     _notify();
   }

@@ -34,6 +34,6 @@ App debug 版 fixture 仍然喺 `android/app/src/debug/assets/mock/`（Step22b �
 - `timestamp`／`client_timestamp`／`trip_timestamp`：Unix **秒**（整數）。
 - recommend 回應嘅 `source_snapshot_ts`／`processed_at`／`server_now`：spec 03 寫 int（Unix 秒），但 mock 同 App parser 用 ISO-8601 字串（`+08:00`）。App 收到 int 唔會死，只係當空字串。**OPEN QUESTION**。
 - `crowd-report.request.json` 嘅 `report_type`：global §10.7 只有一個例子 `BLOCKED_OCCUPIED`，完整值集未定義；App 而家亦冇任何地方會送 crowd-report；範例用 `OPEN_QUESTION_REPORT_TYPE` 佔位。**OPEN QUESTION**。
-- `trip-report` 嘅 `rating_tag` 取 `GOOD`／`OK`／`BAD`，`perk_status_tag` 取 `VALID`／`INVALID`／`NONE`（SC-017）；`photo_url` App 本版唔會送。
+- `trip-report` HTTP body 只得 `session_id`、`trip_timestamp`、`feedback`。`feedback` 內 `rating_tag` 取 `GOOD`／`OK`／`BAD`，`perk_status_tag` 取 `VALID`／`INVALID`／`NONE`，`perk_notes` 最多 140。呢三項由 App 送出前檢查。`carpark_id` 唔入 body，雲端亦唔會當佢係已核對身份。`photo_url` 冇呼叫方；若呼叫方傳入，App 拒絕送出，唔會靜默丟棄。反饋失敗唔會自動補送。雲端仍未做：feedback 內容驗證、重複提交政策、香港午夜截止。
 - `preference`：`INDOOR_ONLY`／`SMART_HYBRID`／`METERS_FOCUS`（App 必送；雲端缺省 `SMART_HYBRID`，其他值 422）。評分數值以 cloud `server/app/scoring.py` 為準。卡新增 `availability`／`commit_allowed`／`is_fallback`（見 openapi `Card`）。
 - 範例 `session_id` 只係示範字串。

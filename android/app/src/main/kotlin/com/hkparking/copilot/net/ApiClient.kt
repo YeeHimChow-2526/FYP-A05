@@ -110,9 +110,20 @@ class ApiClient(
   suspend fun submitCrowdReport(sessionId: String, carparkId: String, reportType: String, clientTimestampSec: Long): CallOutcome =
     dispatch(CROWD, mapOf("session_id" to sessionId, "carpark_id" to carparkId, "report_type" to reportType, "client_timestamp" to clientTimestampSec), null, true, false)
 
+  @Suppress("UNUSED_PARAMETER")
   suspend fun submitTripReport(sessionId: String, carparkId: String, ratingTag: String, perkStatusTag: String, perkNotes: String = "", tripTimestampSec: Long, photoUrl: String? = null): CallOutcome {
-    val payload = linkedMapOf<String, Any?>("carpark_id" to carparkId, "rating_tag" to ratingTag, "perk_status_tag" to perkStatusTag, "perk_notes" to perkNotes, "session_id" to sessionId, "trip_timestamp" to tripTimestampSec)
-    if (photoUrl != null) payload["photo_url"] = photoUrl
+    // carparkId 唔入 wire：雲端唔核對車場。photoUrl 有值就拒絕，避免靜默丟未定義欄位。
+    if (photoUrl != null) return outcome(false, null, attempts = 0)
+    if (ratingTag !in RATING_TAGS || perkStatusTag !in PERK_TAGS) return outcome(false, null, attempts = 0)
+    val payload = linkedMapOf<String, Any?>(
+      "session_id" to sessionId,
+      "trip_timestamp" to tripTimestampSec,
+      "feedback" to linkedMapOf(
+        "rating_tag" to ratingTag,
+        "perk_status_tag" to perkStatusTag,
+        "perk_notes" to truncatePerkNotes(perkNotes, NativeConfig.TODAY_TRIP_NOTES_MAX_CHARS),
+      ),
+    )
     return dispatch(TRIP, payload, null, true, false, silentConflict = true)
   }
 
@@ -258,6 +269,9 @@ class ApiClient(
   private fun jsonValue(value: Any?): String = when (value) {
     null -> "null"
     is Boolean, is Number -> value.toString()
+    is Map<*, *> -> value.entries.joinToString(prefix = "{", postfix = "}") { (key, nested) ->
+      "\"$key\":${jsonValue(nested)}"
+    }
     else -> "\"${value.toString().replace("\\", "\\\\").replace("\"", "\\\"")}\""
   }
 
@@ -273,6 +287,18 @@ class ApiClient(
     const val SYNC = "/v1/sync/outbox"
     const val CROWD = "/v1/feedback/crowd-report"
     const val TRIP = "/v1/feedback/trip-report"
+    val RATING_TAGS = setOf("GOOD", "OK", "BAD")
+    val PERK_TAGS = setOf("VALID", "INVALID", "NONE")
+
+    fun truncatePerkNotes(value: String, maxChars: Int): String {
+      if (maxChars <= 0) return ""
+      var end = if (value.length <= maxChars) value.length else maxChars
+      if (end > 0) {
+        val unit = value[end - 1].code
+        if (unit in 0xD800..0xDBFF) end -= 1
+      }
+      return value.substring(0, end)
+    }
     val ENDPOINTS = listOf(RECOMMEND, COMMIT, RELEASE, SYNC, CROWD, TRIP)
     private const val PARKED_CONFIRMED = "PARKED_CONFIRMED"
     private const val DRIVER_CONFIRMED = "DRIVER_CONFIRMED"
