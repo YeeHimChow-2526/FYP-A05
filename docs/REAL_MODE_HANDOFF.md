@@ -17,7 +17,7 @@
 - 正常模式行車 GPX：`docs/testing/gpx/README.md`（太子→朗豪坊、深水埗→海港城）。2026-11-09 模擬器核心驗收用嘅係 `adb emu geo fix` 同現場即泊，**冇播呢兩份 GPX**。
 
 ### 測試（分輪，唔好混）
-- **行程反饋修正加舊入口封口（未 commit）**：`flutter analyze` 零問題；`flutter test` 282 通過、0 失敗。Android `:app:testDebugUnitTest -PHKP_USE_REAL_NAVIGATION=false` 同 `=true` 都是 348 項、0 失敗、0 錯誤、86 skipped。`:app:compileReleaseKotlin` 通過。release 帶 `hkp_feedback_fixture` extra 未實際啟動。模擬器 emulator-5554 用 debug 測試注入，冇呼叫生產寫入 API。HTTP 失敗句沒有在模擬器出現。
+- **行程反饋修正加舊入口封口（2026-11-09 已推上 完整app）**：`flutter analyze` 零問題；`flutter test` 282 通過、0 失敗。Android `:app:testDebugUnitTest -PHKP_USE_REAL_NAVIGATION=false` 同 `=true` 都是 348 項、0 失敗、0 錯誤、86 skipped。`:app:compileReleaseKotlin` 通過。release 帶 `hkp_feedback_fixture` extra 未實際啟動。模擬器 emulator-5554 用 debug 測試注入，冇呼叫生產寫入 API。HTTP 失敗句沒有在模擬器出現。
 - **上一輪乾淨目錄（同一基準、當時未包含今次測試修正）**：Android `:app:testDebugUnitTest` 344 項、0 失敗、86 skipped。emulator-5554 核心項通過：DEMO 選場後導航改去朗豪坊商場停車場；正常模式香港 GPS，示範卡不可預留；第三次海富要畫面確認，取消同逾時不轉，同意只一次；手動結束後新行程重設計數；殺 App 後模式保留、舊行程畫面不留。詳見當時專案外 `r9-clean-accept-2026-11-09.txt`，呢份唔再抄日誌。
 
 ### 行為同限制

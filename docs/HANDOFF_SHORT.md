@@ -21,6 +21,7 @@
 - 測試：`flutter analyze`、`flutter test`；Kotlin `cd android && bash ./gradlew :app:testDebugUnitTest -PHKP_USE_REAL_NAVIGATION=false`同 `=true` 都要過（`Step35NavigationSwitchTest` 已拆成「flag 路由」同「JVM 強制 sim」兩個測試）。
 - Key：`MAPS_API_KEY`、`HKP_API_BASE_URL`、`HKP_API_KEY` 由 `hkpSetting()` 提供，**唔入庫、唔抄入文件**。取得方式同 2026-11-09 真導航 debug 建置見文首同 REAL_MODE，呢行唔再代表「未接入」。
 - 模擬位置：`adb emu geo fix <經度> <緯度>`；debug `SIM_EVENT FIX "<緯度>,<經度>,<速度km/h>,<精度m>"`（`SimEventReceiver.kt` `parseFix`）。唔好用 `SIM_EVENT START_TRIP`（行 legacy）。
+註：以下 Phase 標題嘅『未 commit』係當時狀態，相關改動已經包含喺 `完整app`。
 - Phase 2（未 commit）：四分頁、DEMO／正常切換（debug only）、地圖頁「現場即泊」次掣（onSite＋精度 ≤100 m 鎖現場）。未驗：真機／模擬器 E2E、真地圖、語音。
 - Phase 3（未 commit）：改目的地全面重設＋epoch 丟舊結果、1 km 就緒 latch（同空位 pip 分開）、卡片預設收起。未做：改目的地向雲端 release（要 Phase 4/5 epoch）、語音指令接 `showCardDetails()`、黃 pip 門檻。
 

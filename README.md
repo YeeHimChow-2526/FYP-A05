@@ -2,7 +2,7 @@
 
 香港用車時嘅泊車副駕 App。Flutter 負責畫面同行程狀態；Android 原生 Kotlin 負責前台服務、定位、語音同平台橋。
 
-交接基準係 GitHub 分支 `完整app`，commit `91edc3ea9569b34d8ecc32fca3c2f38ecbaee5f7`。本工作樹係 `local/r9-verified-2026-11-09`，上面仲有未 commit 嘅行程反饋同舊入口封口。現況細則見 `docs/HANDOFF_SHORT.md` 同 `docs/REAL_MODE_HANDOFF.md` 文首。
+交接基準係 GitHub 分支 `完整app` 最新 tip（2026-11-09 已包含行程反饋修正、舊入口停用同文件整理；上一個基準係 91edc3e）。
 
 舊「project kit／context package」說明（`hk_parking_client_context`、`hk_parking_project_kit_v291`、`git init`、Pi／Gemini、Google Doc v2.9.1）已搬去 [`docs/archive/README_project_kit_v291.md`](docs/archive/README_project_kit_v291.md)。
 
