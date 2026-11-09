@@ -83,7 +83,7 @@ Dart／Kotlin 常數一致性由 `test/core/native_config_mirror_test.dart` 守�
 |---|---|---|
 | `HKP_USE_REAL_API`、`HKP_USE_REAL_NAVIGATION`、`HKP_USE_SIM_LOCATION`、`HKP_API_BASE_URL`、`HKP_API_KEY`、`MAPS_API_KEY` | `android/app/build.gradle.kts` `hkpSetting()`：`-P` → `android/local.properties` → 環境變數 → 空 | BuildConfig／manifest placeholder（build 時決定） |
 | debug `Bindings.useRealNavigation` | `debug/.../di/Bindings.kt:62`＝BuildConfig；`:112`／`:207` 喺測試重設 false | Kotlin |
-| Dart nav engine／transport | `trip_runtime.dart` `_buildController()` 用 `modeInfo`：正常模式跟 `getTransportConfig`（`useRealApi`／`useRealNavigation`）；DEMO 一律 fixture＋Fake | Google Nav SDK 或 Fake；HTTP 或 `fixturePost` |
+| Dart nav engine／transport | `trip_runtime.dart`：正常模式跟 `getTransportConfig`（`useRealApi`／`useRealNavigation`）；DEMO 係 fixture 數據＋真 `GoogleNavEngine`（`simulateUserLocation`）。細節 `docs/REAL_MODE_HANDOFF.md` 第 0 節 | 正常可走真 SDK／HTTP；DEMO 不打雲端鎖位 |
 | DEMO／正常 | `lib/app/app_mode.dart`；`TripRuntime.setMode()`（prefs key `hkp_app_mode`）。有 session／FGS 啟動中拒絕；release（`kReleaseMode`）拒絕 DEMO；地圖同設定頁常駐 marker（模式｜數據｜導航），冇靜默 fallback | 重建 controller，`generation` 通知畫面重新訂閱 |
 | release | `release/.../di/Bindings.kt` 固定真 API／真導航 | — |
 

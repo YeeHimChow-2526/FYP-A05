@@ -1,10 +1,21 @@
 # 交接（極短）— 完整app
 
-- 分支：`完整app`（由 `v2-nav-embed` `ed80f5a` 開）。雲端喺 `Terraform` 分支，**唔 merge 入 App**。
+**現況以本節為準（2026-11-09）。下面各 Phase 係歷史，衝突時以本節同 `docs/REAL_MODE_HANDOFF.md` 文首為準。** 架構：`docs/CODE_MAP.md`。風險證據：`docs/testing/r9_ui_handoff_risk_2026-11-09.txt`。GPX：`docs/testing/gpx/README.md`。
+
+- 建置同鍵名：`flutter pub get`，然後 `flutter build apk --debug`。設定經 `android/app/build.gradle.kts` `hkpSetting()`：Gradle `-P` → `android/local.properties`（gitignore）→ 環境變數 → 空。鍵名同 DEMO／GPX 見 REAL_MODE。唔寫秘密值。
+- 本輪只改兩個測試同交接文件：`flutter analyze` 零問題；`flutter test` 269 全過。上一輪乾淨目錄先有 Android 單元測試同模擬器結果，本輪冇重跑，唔好混為一次。
+- 第三次唔同停車場要明確確認。畫面確認已驗；真咪未驗。
+- UI 待辦：底欄壓 ETA／留白；推薦卡曾 `BOTTOM OVERFLOWED BY 9.0 PIXELS`。
+- 未驗：藍牙泊妥、反饋提交、橫向、成功空推薦。手動結束唔係泊妥。
+- Navigation SDK 粵語未驗證。App 粵語 TTS 唔可以當 SDK 語言證據。
+- 正常模式仍可能收到雲端 DEMO 卡；客戶端禁止預留。冇改雲端。
+- 舊 Kotlin 殼同 `HKP_ACCEPTANCE_TAG` 驗收身份開關刻意保留，唔係可刪項。
+
+- 分支起點：`完整app` 舊 baseline 係 `ed80f5a`。雲端喺 `Terraform` 分支，**唔 merge 入 App**。
 - 架構同參數關係：讀 `docs/CODE_MAP.md`。平台差異：CODE_MAP §7。
 - 行程邏輯只改 Dart（`lib/core/trip/`）；Kotlin 只做平台橋。舊 Kotlin 膠囊檔保留唔刪。
 - 測試：`flutter analyze`、`flutter test`；Kotlin `cd android && bash ./gradlew :app:testDebugUnitTest -PHKP_USE_REAL_NAVIGATION=false`同 `=true` 都要過（`Step35NavigationSwitchTest` 已拆成「flag 路由」同「JVM 強制 sim」兩個測試）。
-- Key：`MAPS_API_KEY`、`HKP_API_BASE_URL`、`HKP_API_KEY` 由本機 `android/local.properties`（gitignore）或 `-P` 提供，**唔入庫、唔抄入文件**。現時未接入、真地圖未驗證。
+- Key：`MAPS_API_KEY`、`HKP_API_BASE_URL`、`HKP_API_KEY` 由 `hkpSetting()` 提供，**唔入庫、唔抄入文件**。取得方式同 2026-11-09 真導航 debug 建置見文首同 REAL_MODE，呢行唔再代表「未接入」。
 - 模擬位置：`adb emu geo fix <經度> <緯度>`；debug `SIM_EVENT FIX "<緯度>,<經度>,<速度km/h>,<精度m>"`（`SimEventReceiver.kt` `parseFix`）。唔好用 `SIM_EVENT START_TRIP`（行 legacy）。
 - Phase 2（未 commit）：四分頁、DEMO／正常切換（debug only）、地圖頁「現場即泊」次掣（onSite＋精度 ≤100 m 鎖現場）。未驗：真機／模擬器 E2E、真地圖、語音。
 - Phase 3（未 commit）：改目的地全面重設＋epoch 丟舊結果、1 km 就緒 latch（同空位 pip 分開）、卡片預設收起。未做：改目的地向雲端 release（要 Phase 4/5 epoch）、語音指令接 `showCardDetails()`、黃 pip 門檻。

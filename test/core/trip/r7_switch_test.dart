@@ -35,7 +35,7 @@ int _commits(HoldTransport t) => t.calls.where((x) => x == ApiClient.COMMIT).len
 
 void main() {
   group('r7 confirmCandidate switching', () {
-    test('R7-1 A→B→C success reroutes each time, new revision', () async {
+    test('R7-1 A and B commit; C waits, then one explicit consent switches once', () async {
       final t = HoldTransport();
       final (c, nav) = await _atA(t, FakePlatform());
       expect(nav.activeTitle, 'A場');
@@ -46,16 +46,46 @@ void main() {
       expect(nav.activeTitle, 'B場');
       expect(c.navTarget?.kind, NavTargetKind.carpark);
       expect(c.navTarget?.state, NavTargetState.guiding);
+      final commitsAtB = _commits(t);
+      final routesAtB = nav.calls.where((call) => call == 'setDestinations').length;
+      expect(commitsAtB, 2);
       t.next = _committed(5);
+      await c.confirmCandidate(2);
+      expect(c.pendingSwitchCarparkId, 'CP_C');
+      expect(c.committedCarparkId, 'CP_B');
+      expect(c.heldLock?.lockRevision, 4);
+      expect(nav.activeTitle, 'B場');
+      expect(c.navTarget?.title, 'B場');
+      expect(c.state, TripState.navToGate);
+      expect(c.confirmNote, contains('未確認'));
+      expect(c.confirmNote, contains('C場'));
+      expect(_commits(t), commitsAtB);
+      expect(nav.calls.where((call) => call == 'setDestinations'), hasLength(routesAtB));
+
+      await c.acceptPendingSwitch();
+      expect(c.pendingSwitchCarparkId, isNull);
+      expect(c.committedCarparkId, 'CP_C');
+      expect(c.heldLock?.lockRevision, 5);
+      expect(nav.activeTitle, 'C場');
+      expect(c.navTarget?.title, 'C場');
+      expect(c.state, TripState.navToGate);
+      expect(_commits(t), 3);
+      expect(nav.calls.where((call) => call == 'setDestinations'), hasLength(routesAtB + 1));
+      final keys = [for (var i = 0; i < t.calls.length; i++) if (t.calls[i] == ApiClient.COMMIT) (jsonDecode(t.bodies[i]) as Map)['idempotency_key']];
+      expect(keys.toSet(), hasLength(3));
+      expect(keys[1], contains('CP_B'));
+      expect(keys[2], contains('CP_C'));
+      expect(c.confirmNote, contains('已確認'));
+      expect(c.confirmNote, contains('C場'));
+
+      final commitsAfter = _commits(t);
+      final routesAfter = nav.calls.where((call) => call == 'setDestinations').length;
+      await c.acceptPendingSwitch();
       await c.confirmCandidate(2);
       expect(c.committedCarparkId, 'CP_C');
       expect(nav.activeTitle, 'C場');
-      expect(c.state, TripState.navToGate);
-      expect(_commits(t), 3);
-      final keys = [for (var i = 0; i < t.calls.length; i++) if (t.calls[i] == ApiClient.COMMIT) (jsonDecode(t.bodies[i]) as Map)['idempotency_key']];
-      expect(keys.toSet(), hasLength(3)); // A/B/C 各自 key，唔重用
-      expect(keys[1], contains('CP_B'));
-      expect(c.confirmNote, contains('C場'));
+      expect(_commits(t), commitsAfter);
+      expect(nav.calls.where((call) => call == 'setDestinations'), hasLength(routesAfter));
     });
 
     test('R7-2 B fails → A kept (lock, route, target)', () async {

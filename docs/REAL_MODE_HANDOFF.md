@@ -1,7 +1,36 @@
-# 真模式交接（同學版）— 2026-11-08 HKT
+# 真模式交接（同學版）
 
-App：`FYP-A05-full-app` 分支 `完整app`（未 commit 改動）。雲端：`scratch-baseline/cloud` 分支 `review/cloud-destination-release`（未 commit、未部署）。
-同一個 App 有 DEMO／正常兩種（設定 → DEMO 模式）；debug 先可以切。UI 流程（目的地輸入／啟動畫面）留畀 UI 同學，呢份唔郁。
+**現況以第 0 節為準（2026-11-09）。下面 2026-11-08 各節係歷史，衝突時以第 0 節為準。** 極短版：`docs/HANDOFF_SHORT.md`。架構：`docs/CODE_MAP.md`。DEMO 導航來源以本節第 0 節為準。風險證據：`docs/testing/r9_ui_handoff_risk_2026-11-09.txt`。GPX 步驟唔再抄一遍：`docs/testing/gpx/README.md`。
+
+## 0. 2026-11-09 現況
+
+### 建置同執行
+- `flutter pub get`，然後 `flutter build apk --debug`。模擬器覆蓋安裝用 `adb install -r`，唔卸載、唔清資料。
+- 設定只經 `android/app/build.gradle.kts` `hkpSetting()`：Gradle `-P` → `android/local.properties`（gitignore，由本機自己放）→ 環境變數 → 空。空白 URL／key 當離線，唔會把值寫入文件。
+- 鍵名：`sdk.dir`、`flutter.sdk`、`flutter.buildMode`、`flutter.versionName`、`flutter.versionCode`（Flutter／SDK 路徑）；`HKP_API_BASE_URL`、`HKP_API_KEY`、`MAPS_API_KEY`；`HKP_USE_REAL_API`、`HKP_USE_REAL_NAVIGATION`、`HKP_USE_SIM_LOCATION`；可選 `HKP_ACCEPTANCE_TAG`、`HKP_ACCEPTANCE_LABEL`。
+- 2026-11-09 乾淨目錄驗收冇設 `HKP_ACCEPTANCE_TAG`，debug 包名係 `com.hkparking.copilot`，versionCode 1。設咗 tag 先會變成 `com.hkparking.copilot.acceptance.<tag>`。呢個開關保留。
+
+### DEMO 同正常
+- 設定頁 `demo_mode_switch`。debug 先可以切；行程中唔切；release 不准 DEMO。標籤：`正常｜即時數據｜Google 導航` 或 `DEMO｜示範數據（fixture）｜Google 導航`。
+- 正常：裝置／模擬器 GPS ＋ 真 HTTP（`HKP_USE_REAL_API`）＋ 真 Navigation SDK（`HKP_USE_REAL_NAVIGATION`）。可能收到雲端 DEMO 卡；客戶端把示範卡設成不可預留（按鈕「示範數據，唔可以預留」）。冇改雲端目錄。
+- DEMO：本地 fixture（`FixtureApiTransport`、`android/app/src/debug/assets/mock/`）＋ 真 Google 地圖上重播 `lib/app/demo_trip.dart`，唔打雲端鎖位。預設推薦係 `recommend_success_langham.json` 一張朗豪坊卡。
+- 正常模式行車 GPX：`docs/testing/gpx/README.md`（太子→朗豪坊、深水埗→海港城）。2026-11-09 模擬器核心驗收用嘅係 `adb emu geo fix` 同現場即泊，**冇播呢兩份 GPX**。
+
+### 測試（分輪，唔好混）
+- **本輪（交接 commit，只改測試同文件）**：`flutter analyze` 零問題；`flutter test` 269 通過、0 失敗。冇重跑 Android 單元測試，冇重跑模擬器。
+- **上一輪乾淨目錄（同一基準、當時未包含今次測試修正）**：Android `:app:testDebugUnitTest` 344 項、0 失敗、86 skipped。emulator-5554 核心項通過：DEMO 選場後導航改去朗豪坊商場停車場；正常模式香港 GPS，示範卡不可預留；第三次海富要畫面確認，取消同逾時不轉，同意只一次；手動結束後新行程重設計數；殺 App 後模式保留、舊行程畫面不留。詳見當時專案外 `r9-clean-accept-2026-11-09.txt`，呢份唔再抄日誌。
+
+### 行為同限制
+- 第三次唔同停車場必須明確確認。未同意不 commit、不發新路線，已確認目標維持上一間。畫面「確認／取消」已驗。真咪「好／唔好」未驗。
+- UI 待辦：底欄壓住 Navigation SDK ETA／留白過大；推薦卡曾出現 `BOTTOM OVERFLOWED BY 9.0 PIXELS`。交 UI，未改佈局。
+- 未驗：藍牙熄匙先至有「可能已泊入」、反饋提交、橫向、成功空推薦（`parse=ok cards=0`）。手動結束唔係泊妥。
+- Navigation SDK 導航語言未驗證為粵語。模擬器出現英文 Then／街名。App 自己嘅粵語 TTS 唔可以當 SDK 係粵語。
+- 舊 Kotlin 殼（包括 `FloatingBubbleService.kt`、`CorePorts.kt` 嘅 `SttVoiceInput` stub）同驗收身份開關刻意保留，唔係本輪可刪清單。
+
+## 歷史（2026-11-08）
+
+App 當時喺 `完整app` 工作樹。雲端紀錄見下面各節，**今輪冇改雲端**。
+同一個 App 有 DEMO／正常兩種（設定 → DEMO 模式）；debug 先可以切。UI 流程（目的地輸入／啟動畫面）留畀 UI 同學。
 
 ## 1. 狀態
 | 項目 | 已實作 | 本機測試過 | 機／雲端未驗證 |
@@ -56,12 +85,13 @@ flutter build apk --debug --build-number=5
 2. 目的地「朗豪坊商場」→ 去 → **藍色路線去朗豪坊**。
 3. `geo fix 114.17080 22.32540`（約 0.83 km）→ 出 P 推介（真後端車位；要睇 source／更新時間係咪新）。
 4. 開卡 → 明確確認 → 藍色路線**改去停車場**。確認失敗／滿 → 保持去原目的地。
-5. 分兩次試：(a) 停程／取消 → 導航停、鎖位釋放（後端 release 200）；(b) `geo fix 114.16900 22.31950` → 泊好。
+5. 分兩次試：(a) 手動結束 → 導航停；**手動結束唔係泊妥**，唔會因此出現「可能已泊入」。(b) 藍牙熄匙先至係泊妥候選，2026-11-09 未驗。
 6. 行程中喺系統設定收回位置 → 返 App → 行程安全結束。
 7. 語音：有 TTS 就聽到提示；咪喺 debug 係模擬（adb INJECT_UTTERANCE），真咪未驗證。唔使新手機。
 
 ## r7（2026-11-08）核心交接補充
-- `confirmCandidate`：navToGate 可轉車場（成功先換鎖／路線；失敗保持原車場）；同一間＝「已經確認」；進行中＝「請等等」；過期 epoch／abort 後結果唔改路線。每間車場 idempotency key `c{epoch}-{carparkId}` 各自唯一（r7_switch_test R7-1）。
+- 2026-11-09 起 R7-1 以文首為準：A、B 成功後，第三間不同車場先 `awaiting_consent`，明確同意先轉一次。下面呢句只描述第一次同第二次，以及失敗／同一間／進行中。
+- `confirmCandidate`：navToGate 可轉車場（成功先換鎖／路線；失敗保持原車場）；同一間＝「已經確認」；進行中＝「請等等」；過期 epoch／abort 後結果唔改路線。每間車場 idempotency key `c{epoch}-{carparkId}` 各自唯一。
 - 導航細行 `nav_target_line`：目的地 vs 實際導航目標＋確認結果；SDK 成功前唔寫「導航緊」。
 - 證據限制：Google 導航聲由 SDK 按時機播（r6 log 10:23:39、10:32:02 HKT，中間約 8 分鐘原因未明）；10:32 冇新 app 路線請求；模擬器能否聽到無法由 log 推斷；SDK 當時用 en-us 語音，未改語言。Debug 咪仍為模擬。
 - 交 UI 同學（未改）：輸入／開始流程；底部 P 同中間箭嘴功能重疊（箭嘴可收埋 P 卡但 P 只可開）；卡片捲動；地圖 chrome 遮擋。
@@ -69,7 +99,7 @@ flutter build apk --debug --build-number=5
 ## r8（2026-11-08）
 - App TTS：Dart bridge 行程中 service 自己嘅 VoiceCapabilityChecker 冇人 check（UNKNOWN）→ r7 每句 `tts_unavailable`。`DartBridgeRuntime.speak` 先叫 `FloatingBubbleService.syncBridgeTtsAvailable()`（原生 init 失敗就唔覆蓋；manual-only 由 Dart `_speak` 擋）。測試 `R8BridgeTtsTest`。
 - 定位：`GoogleNavEngine(simulateUserLocation:)` 由 `getTransportConfig.useSimLocation`（debug 且 HKP_USE_SIM_LOCATION）控制；false 時唔再 `simulator.setUserLocation`，session ready 後一次 `removeUserLocation`。測試 R8-1..3。
-- DEMO 開關現狀：debug only；本地 fixture + FakeNavEngine 面板（唔係真地圖）；定位仍係裝置 GPS。「真地圖＋固定模擬行程」未實作。
+- DEMO 開關現狀：以下面 r9 段為準（fixture 數據＋真 Google 地圖重播）。呢度舊寫法「FakeNavEngine、未實作真地圖」作廢。
 - 未證實：實機聲音、定位延遲全部來源、路線橙色原因。
 
 ## r9 DEMO 行程 source map（UI 同學）

@@ -1,4 +1,5 @@
 import 'package:copilot/core/constants/native_config.dart';
+import 'package:copilot/core/platform/trip_permissions.dart';
 import 'package:copilot/core/trip/trip_state_machine.dart';
 import 'package:copilot/core/trip/trip_types.dart';
 import 'package:copilot/core/voice/voice_capability.dart';
@@ -133,16 +134,44 @@ void main() {
     expect(machine.requestStart(StartupEntry.b1).sessionId, isNull);
   });
 
-  test('alertCueAppendsTapOnlyWhenFullVoiceMicNotUpgraded', () {
-    final machine = started(StartupEntry.a2);
-    machine.applyVoiceCapability(
-      const CapabilitySnapshot(stt: CapabilityStatus.available, tts: CapabilityStatus.available, mode: TripVoiceMode.fullVoice, voiceInputEnabled: true),
-      true,
+  test('silenceDriveWithoutRealMicDoesNotInviteAReply', () {
+    final injectedOnly = deriveVoiceCapability(
+      const VoiceFacts(ttsEngine: true, recognizer: false, recordAudio: false, simulatedInput: true),
+      userVoiceEnabled: true,
     );
+    expect(injectedOnly.mode, TripVoiceMode.fullVoice);
+    expect(injectedOnly.voiceInputEnabled, isTrue);
+    expect(injectedOnly.canListen, isFalse);
+    final machine = started(StartupEntry.a2);
+    machine.applyVoiceCapability(injectedOnly, true);
+    expect(machine.voiceReplyAvailable, isFalse);
     machine.onDriveSample(speedKmh: 30, deltaDistanceM: 500, deltaTimeS: 40);
-    expect(machine.lastSpokenCue, endsWith(ZhHkTemplates.TAP_CAPSULE));
+    expect(machine.lastSpokenCue, ZhHkTemplates.SILENCE_DRIVE);
+    expect(machine.lastSpokenCue, isNot(contains(ZhHkTemplates.TAP_CAPSULE)));
+    expect(machine.destinationLocked, isFalse);
+  });
+
+  test('realListenWithoutMicFgsInvitesTapAndMicFgsDropsTheInvite', () {
+    final listening = deriveVoiceCapability(
+      const VoiceFacts(ttsEngine: true, recognizer: true, recordAudio: true, simulatedInput: false),
+      userVoiceEnabled: true,
+    );
+    expect(listening.stt, CapabilityStatus.available);
+    expect(listening.tts, CapabilityStatus.available);
+    expect(listening.mode, TripVoiceMode.fullVoice);
+    expect(listening.voiceInputEnabled, isTrue);
+    expect(listening.canListen, isTrue);
+    final machine = started(StartupEntry.a2);
+    machine.applyVoiceCapability(listening, true);
+    expect(machine.voiceReplyAvailable, isTrue);
+    expect(machine.isMicFgsActive, isFalse);
+    machine.onDriveSample(speedKmh: 30, deltaDistanceM: 500, deltaTimeS: 40);
+    expect(machine.lastSpokenCue, '${ZhHkTemplates.SILENCE_DRIVE}${ZhHkTemplates.TAP_CAPSULE}');
     machine.onMicFgsActive(true);
-    machine.clearSession();
+    machine.onPlaceClarificationNeeded();
+    expect(machine.lastSpokenCue, ZhHkTemplates.PLACE_CLARIFY);
+    expect(machine.lastSpokenCue, isNot(contains(ZhHkTemplates.TAP_CAPSULE)));
+    expect(machine.destinationLocked, isFalse);
   });
 
   test('onDestinationSetLeavesAlertAndJitWithinTrigger', () {
