@@ -72,6 +72,17 @@ resource "google_storage_bucket_iam_member" "snapshot_reader" {
   member = "serviceAccount:${google_service_account.app_sa.email}"
 }
 
+# Runtime SA write access on the snapshot bucket. This binding EXISTS LIVE (roles/storage.objectUser,
+# verified 2026-11-11) and is needed for SNAPSHOT_ON_DEMAND_REFRESH_ENABLED=true (API creates/overwrites snapshot
+# objects). It sits next to snapshot_reader because the live bucket has both bindings. If it is not in state,
+# import it before apply instead of letting Terraform create it.
+# The deploy identity's roles/storage.objectAdmin on this bucket is deliberately NOT in Terraform.
+resource "google_storage_bucket_iam_member" "snapshot_runtime_writer_live" {
+  bucket = google_storage_bucket.state_snapshots.name
+  role   = "roles/storage.objectUser"
+  member = "serviceAccount:${google_service_account.app_sa.email}"
+}
+
 # Backend API Service
 resource "google_cloud_run_v2_service" "backend" {
   name     = "backend-ai-service"
@@ -149,6 +160,7 @@ resource "google_cloud_run_v2_service" "backend" {
     google_project_service.required_apis,
     google_project_iam_member.firestore_user,
     google_storage_bucket_iam_member.snapshot_reader,
+    google_storage_bucket_iam_member.snapshot_runtime_writer_live,
     google_secret_manager_secret_iam_member.api_key_accessor,
     google_secret_manager_secret_iam_member.crowd_hash_key_accessor,
   ]

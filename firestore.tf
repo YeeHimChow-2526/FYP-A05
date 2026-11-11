@@ -3,9 +3,13 @@ resource "google_firestore_database" "database" {
   name                              = "(default)"
   location_id                       = var.region
   type                              = "FIRESTORE_NATIVE"
+  concurrency_mode                  = "PESSIMISTIC" # live: PESSIMISTIC
+  app_engine_integration_mode       = "DISABLED"    # live: DISABLED
   point_in_time_recovery_enablement = var.firestore_enable_point_in_time_recovery ? "POINT_IN_TIME_RECOVERY_ENABLED" : "POINT_IN_TIME_RECOVERY_DISABLED"
-  delete_protection_state           = "DELETE_PROTECTION_ENABLED"
-  deletion_policy                   = "ABANDON"
+  delete_protection_state           = var.firestore_enable_delete_protection ? "DELETE_PROTECTION_ENABLED" : "DELETE_PROTECTION_DISABLED"
+  deletion_policy                   = "ABANDON" # Terraform-only: destroy removes it from state, never deletes the live database
+
+  # Live (verified 2026-11-11): edition STANDARD (provider 5.45.2 has no database_edition argument), realtime updates enabled.
 
   depends_on = [google_project_service.required_apis]
 }

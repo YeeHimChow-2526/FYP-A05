@@ -137,14 +137,11 @@ counting locks.
 
 ## Production protection and recovery
 
-The Terraform defaults protect the `(default)` database from accidental
-deletion (`delete_protection_state = DELETE_PROTECTION_ENABLED` and
-`deletion_policy = ABANDON`), enable seven-day point-in-time recovery (PITR),
-and create a daily backup schedule with 14-day retention. The backup retention
-can be configured from 1 to 98 days; PITR and daily backups can be disabled
-through Terraform variables for non-production environments. Backup and PITR
-storage and operations may incur additional charges, so review the plan and
-project budget before deployment.
+Terraform now defaults to the **live** state (verified 2026-11-11): `delete_protection_state = DELETE_PROTECTION_DISABLED`,
+PITR disabled and no daily backup schedule; `deletion_policy = ABANDON` stays (Terraform-only). The protections are
+opt-in switches (`firestore_enable_delete_protection`, `firestore_enable_point_in_time_recovery`,
+`firestore_enable_daily_backups`; retention 1 to 98 days). Backup and PITR storage and operations may incur additional
+charges, so turning them on is a separate team decision after reviewing the plan and project budget.
 
 For recovery, identify the required recovery timestamp or scheduled backup,
 restore to a separate Firestore database, validate the restored data and API

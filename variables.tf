@@ -52,14 +52,20 @@ variable "state_snapshot_bucket_name" {
 
 variable "firestore_enable_point_in_time_recovery" {
   type        = bool
-  description = "Enable Firestore point-in-time recovery for up to 7 days."
-  default     = true
+  description = "Enable Firestore point-in-time recovery for up to 7 days. Live is DISABLED (verified 2026-11-11), so the default is false; turning it on is a separate team decision with cost."
+  default     = false
+}
+
+variable "firestore_enable_delete_protection" {
+  type        = bool
+  description = "Enable Firestore delete protection. Live is DELETE_PROTECTION_DISABLED (verified 2026-11-11), so the default is false; enabling it is a separate team decision."
+  default     = false
 }
 
 variable "firestore_enable_daily_backups" {
   type        = bool
-  description = "Create a daily Firestore backup schedule."
-  default     = true
+  description = "Create a daily Firestore backup schedule. No schedule was applied by Terraform (existence live not checked), so the default is false; turning it on is a separate team decision with cost."
+  default     = false
 }
 
 variable "firestore_backup_retention_days" {

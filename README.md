@@ -186,11 +186,13 @@ The API key is also needed by the app client. Transfer it through your private
 development workflow; it is only a basic client identifier, not a security
 boundary. Do not commit the key or either local secret file.
 
-Firestore is configured with delete protection, a Terraform `ABANDON`
-deletion policy, seven-day point-in-time recovery, and daily backups retained
-for 14 days by default. These protection and backup features may incur
-additional charges; review the settings and estimated costs in `terraform plan`
-before applying.
+Firestore uses a Terraform `ABANDON` deletion policy. Delete protection,
+seven-day point-in-time recovery and daily backups (14 days) are available as
+switches (`firestore_enable_delete_protection`, `firestore_enable_point_in_time_recovery`,
+`firestore_enable_daily_backups`), but they default to **false** because the live
+database has them off (see `docs/TERRAFORM_LIVE_SYNC.md`). Turning them on is a
+separate team decision and may incur additional charges; review the cost in
+`terraform plan` first.
 
 Build and push the image, then set `backend_image` in `terraform.tfvars` to the
 same image URI:
