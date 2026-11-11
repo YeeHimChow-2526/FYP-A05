@@ -79,15 +79,19 @@ resource "google_cloud_run_v2_service" "backend" {
   ingress  = "INGRESS_TRAFFIC_ALL"
 
   template {
-    service_account = google_service_account.app_sa.email
+    service_account                  = google_service_account.app_sa.email
+    max_instance_request_concurrency = var.backend_max_concurrency # live: 160 (Cloud Run default is 80)
+    timeout                          = "300s"                      # live: 300s
+
     scaling {
       min_instance_count = 0
       max_instance_count = 10
     }
 
     containers {
-      image = var.backend_image
+      image = local.backend_image
       resources {
+        cpu_idle = false # live: CPU always allocated (run.googleapis.com/cpu-throttling = false)
         limits = {
           cpu    = "2"
           memory = "2Gi"
@@ -100,6 +104,18 @@ resource "google_cloud_run_v2_service" "backend" {
       env {
         name  = "GCS_STATE_BUCKET"
         value = "gs://${google_storage_bucket.state_snapshots.name}"
+      }
+      env {
+        name  = "SECRET_RELOAD_TS"
+        value = var.backend_secret_reload_ts
+      }
+      env {
+        name  = "SNAPSHOT_ON_DEMAND_REFRESH_ENABLED"
+        value = var.backend_snapshot_on_demand_refresh_enabled
+      }
+      env {
+        name  = "CAPACITY_BOOTSTRAP_ENABLED"
+        value = var.backend_capacity_bootstrap_enabled
       }
       env {
         name = "INTERNAL_API_KEY"
@@ -122,6 +138,11 @@ resource "google_cloud_run_v2_service" "backend" {
         }
       }
     }
+  }
+
+  # The console / gcloud stamp these client fields on every deploy; they are not part of the desired state.
+  lifecycle {
+    ignore_changes = [client, client_version]
   }
 
   depends_on = [
