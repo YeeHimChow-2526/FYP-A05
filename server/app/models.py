@@ -112,10 +112,16 @@ class CrowdReportRequest(StrictModel):
     client_timestamp: int
 
 
+class TripReportFeedback(StrictModel):
+    rating_tag: Literal["GOOD", "OK", "BAD"]
+    perk_status_tag: Literal["VALID", "INVALID", "NONE"]
+    perk_notes: str = Field(default="", max_length=140)
+
+
 class TripReportRequest(StrictModel):
     session_id: str = Field(min_length=1, max_length=128, pattern=r"^[^/]+$")
-    trip_timestamp: int
-    feedback: dict[str, Any]
+    trip_timestamp: int = Field(ge=1_500_000_000, le=4_102_444_800)
+    feedback: TripReportFeedback
 
 
 class Poi(BaseModel):

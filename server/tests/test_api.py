@@ -7,7 +7,9 @@ from starlette.requests import Request
 from app.config import Settings
 from app.firestore import LockFullError
 from main import client_ip_from_request, create_app
-from app.models import CarparkSnapshot, RegionSnapshot
+from pydantic import ValidationError
+
+from app.models import CarparkSnapshot, RegionSnapshot, TripReportRequest
 
 
 class FakeRepository:
@@ -262,11 +264,25 @@ class ApiTests(unittest.TestCase):
             json={
                 "session_id": "sess_1",
                 "trip_timestamp": 1791823900,
-                "feedback": {"parking_success": True},
+                "feedback": {
+                    "rating_tag": "GOOD",
+                    "perk_status_tag": "VALID",
+                    "perk_notes": "",
+                },
             },
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.repository.trip_report[0], "sess_1")
+
+    def test_trip_report_feedback_requires_expected_schema(self):
+        with self.assertRaises(ValidationError):
+            TripReportRequest.model_validate(
+                {
+                    "session_id": "sess_1",
+                    "trip_timestamp": 1791823900,
+                    "feedback": {"parking_success": True},
+                }
+            )
 
 
 if __name__ == "__main__":

@@ -206,7 +206,7 @@ def create_app(
             await request.app.state.repository.submit_trip_report(
                 body.session_id,
                 body.trip_timestamp,
-                body.feedback,
+                body.feedback.model_dump(),
             )
         except LookupError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error

@@ -436,6 +436,25 @@ class FirestoreRepository:
             raise LookupError("Unknown or expired session")
         if not session.get("ratable", False) or session.get("status") != "PARKED_CONFIRMED":
             raise PermissionError("Trip must be driver-confirmed before rating")
+        if session.get("trip_report") is not None:
+            raise PermissionError("Trip report already submitted for this session")
+        if not isinstance(feedback, dict):
+            raise ValueError("feedback must be a dictionary")
+        normalized = dict(feedback)
+        allowed_keys = {"rating_tag", "perk_status_tag", "perk_notes"}
+        unexpected_keys = set(normalized) - allowed_keys
+        if unexpected_keys:
+            raise ValueError(f"feedback contains unsupported keys: {sorted(unexpected_keys)}")
+        for required_key in ("rating_tag", "perk_status_tag", "perk_notes"):
+            if required_key not in normalized:
+                raise ValueError(f"feedback is missing required field: {required_key}")
+        if normalized["rating_tag"] not in {"GOOD", "OK", "BAD"}:
+            raise ValueError("feedback.rating_tag must be GOOD, OK, or BAD")
+        if normalized["perk_status_tag"] not in {"VALID", "INVALID", "NONE"}:
+            raise ValueError("feedback.perk_status_tag must be VALID, INVALID, or NONE")
+        perk_notes = normalized["perk_notes"]
+        if not isinstance(perk_notes, str) or len(perk_notes) > 140:
+            raise ValueError("feedback.perk_notes must be a string with at most 140 characters")
         await (
             self._client.collection("active_sessions")
             .document(session_id)
@@ -443,7 +462,7 @@ class FirestoreRepository:
                 {
                     "trip_report": {
                         "trip_timestamp": trip_timestamp,
-                        "feedback": feedback,
+                        "feedback": normalized,
                         "submitted_at": datetime.now(UTC),
                     }
                 },
