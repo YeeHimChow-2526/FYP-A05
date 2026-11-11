@@ -182,6 +182,9 @@ resource "google_cloud_run_v2_service" "backend" {
       template[0].labels,
       template[0].annotations,
       template[0].execution_environment,
+      # Live template carries the auto-generated revision name (00008-vef); TF has none.
+      # Ignoring it avoids a no-op redeploy at import. New images still roll new revisions.
+      template[0].revision,
     ]
   }
 
