@@ -45,3 +45,23 @@ resource "google_firestore_field" "crowd_reports_ttl" {
 
   ttl_config {}
 }
+
+# Composite index used by the destination-release lock queries.
+# Already exists live (READY, created from firestore.indexes.json). It MUST be imported, never created:
+# see imports.tf and docs/TERRAFORM_LIVE_SYNC.md.
+resource "google_firestore_index" "virtual_locks_carpark_created" {
+  project     = var.project_id
+  database    = google_firestore_database.database.name
+  collection  = "virtual_locks"
+  query_scope = "COLLECTION"
+
+  fields {
+    field_path = "carpark_id"
+    order      = "ASCENDING"
+  }
+
+  fields {
+    field_path = "created_at"
+    order      = "ASCENDING"
+  }
+}

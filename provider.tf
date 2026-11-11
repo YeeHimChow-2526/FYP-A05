@@ -1,6 +1,6 @@
 # provider.tf
 terraform {
-  required_version = ">= 1.5.0"
+  required_version = ">= 1.6.0" # import blocks may use variables in id from 1.6
   required_providers {
     google = {
       source  = "hashicorp/google"
