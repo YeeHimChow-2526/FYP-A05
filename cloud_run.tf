@@ -117,18 +117,6 @@ resource "google_cloud_run_v2_service" "backend" {
         value = "gs://${google_storage_bucket.state_snapshots.name}"
       }
       env {
-        name  = "SECRET_RELOAD_TS"
-        value = var.backend_secret_reload_ts
-      }
-      env {
-        name  = "SNAPSHOT_ON_DEMAND_REFRESH_ENABLED"
-        value = var.backend_snapshot_on_demand_refresh_enabled
-      }
-      env {
-        name  = "CAPACITY_BOOTSTRAP_ENABLED"
-        value = var.backend_capacity_bootstrap_enabled
-      }
-      env {
         name = "INTERNAL_API_KEY"
 
         value_source {
@@ -148,12 +136,47 @@ resource "google_cloud_run_v2_service" "backend" {
           }
         }
       }
+      env {
+        name  = "SECRET_RELOAD_TS"
+        value = var.backend_secret_reload_ts
+      }
+      env {
+        name  = "SNAPSHOT_ON_DEMAND_REFRESH_ENABLED"
+        value = var.backend_snapshot_on_demand_refresh_enabled
+      }
+      env {
+        name  = "CAPACITY_BOOTSTRAP_ENABLED"
+        value = var.backend_capacity_bootstrap_enabled
+      }
     }
   }
 
-  # The console / gcloud stamp these client fields on every deploy; they are not part of the desired state.
+  # Mirrors live exactly (verified 2026-11-11): 100% pinned to revision 00008, plus tag "cand" on the same revision.
+  # Pinned (not LATEST) so a fresh plan does not change traffic. When this module deploys a new image,
+  # change var.backend_traffic_revision to the new revision name first (or switch to LATEST) - see docs.
+  traffic {
+    type     = "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION"
+    revision = var.backend_traffic_revision
+    percent  = 100
+  }
+  traffic {
+    type     = "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION"
+    revision = var.backend_traffic_revision
+    tag      = var.backend_traffic_tag
+    percent  = 0
+  }
+
+  # Not part of the desired state: client fields are stamped by gcloud/console on every deploy, and the template
+  # labels/annotations/execution_environment are metadata that the live revision carries but this config never set
+  # (e.g. run.googleapis.com/startupProbeType). Ignoring them keeps the post-import plan free of metadata-only noise.
   lifecycle {
-    ignore_changes = [client, client_version]
+    ignore_changes = [
+      client,
+      client_version,
+      template[0].labels,
+      template[0].annotations,
+      template[0].execution_environment,
+    ]
   }
 
   depends_on = [

@@ -23,28 +23,22 @@ resource "google_firestore_backup_schedule" "daily" {
   daily_recurrence {}
 }
 
-resource "google_firestore_field" "active_sessions_ttl" {
-  project    = var.project_id
-  database   = google_firestore_database.database.name
-  collection = "active_sessions"
-  field      = "expire_at"
-
-  ttl_config {}
+# TTL policies on expire_at. NOT confirmed to exist live, so they are off by default: a plain create would
+# switch on TTL deletion in the live database. Enable with firestore_enable_ttl = true only once the owner
+# command shows the policies already exist (imports.tf then imports them; plan must show no add).
+locals {
+  firestore_ttl_collections = var.firestore_enable_ttl ? {
+    active_sessions = "active_sessions"
+    virtual_locks   = "virtual_locks"
+    crowd_reports   = "reports"
+  } : {}
 }
 
-resource "google_firestore_field" "virtual_locks_ttl" {
+resource "google_firestore_field" "ttl" {
+  for_each   = local.firestore_ttl_collections
   project    = var.project_id
   database   = google_firestore_database.database.name
-  collection = "virtual_locks"
-  field      = "expire_at"
-
-  ttl_config {}
-}
-
-resource "google_firestore_field" "crowd_reports_ttl" {
-  project    = var.project_id
-  database   = google_firestore_database.database.name
-  collection = "reports"
+  collection = each.value
   field      = "expire_at"
 
   ttl_config {}

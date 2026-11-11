@@ -133,6 +133,10 @@ resources. A project Owner can bootstrap the stack; an
 administrator can instead grant narrower roles according to organization
 policy.
 
+> **This branch (`新確認版Terraform`) adopts the already-running cloud with `import` blocks** (see `imports.tf`
+> and `docs/TERRAFORM_LIVE_SYNC.md`, section 5). Do not follow the "create the foundation" steps below on the live
+> project: use the import flow, and only `terraform apply` when the plan shows 0 to add / change / destroy.
+
 ### 2. Configure Terraform and create the foundation
 
 Copy [`terraform.tfvars.example`](./terraform.tfvars.example) to

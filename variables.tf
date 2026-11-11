@@ -82,3 +82,41 @@ variable "firestore_backup_retention_days" {
     error_message = "firestore_backup_retention_days must be a whole number from 1 to 98."
   }
 }
+
+variable "project_services" {
+  type        = list(string)
+  description = "Google APIs managed (and imported) by this configuration. Must list ONLY services that are already enabled live, otherwise the import fails or Terraform would enable a new API. Confirm with the read-only command in docs/TERRAFORM_LIVE_SYNC.md."
+  default = [
+    "serviceusage.googleapis.com",
+    "cloudresourcemanager.googleapis.com",
+    "iam.googleapis.com",
+    "run.googleapis.com",
+    "firestore.googleapis.com",
+    "firebaserules.googleapis.com",
+    "aiplatform.googleapis.com",
+    "cloudscheduler.googleapis.com",
+    "cloudbuild.googleapis.com",
+    "artifactregistry.googleapis.com",
+    "compute.googleapis.com",
+    "secretmanager.googleapis.com",
+    "storage.googleapis.com",
+  ]
+}
+
+variable "firestore_enable_ttl" {
+  type        = bool
+  description = "Manage the Firestore TTL policies (field expire_at on active_sessions, virtual_locks, reports). Default false: not confirmed to exist live, and creating a TTL policy would be a live change. Set true only after the owner command shows these TTL policies exist (then they are imported)."
+  default     = false
+}
+
+variable "backend_traffic_revision" {
+  type        = string
+  description = "Cloud Run revision that holds 100% of traffic live (and the tag below). Live: backend-ai-service-00008-vef."
+  default     = "backend-ai-service-00008-vef"
+}
+
+variable "backend_traffic_tag" {
+  type        = string
+  description = "Traffic tag that exists live on the same revision."
+  default     = "cand"
+}
