@@ -8,7 +8,7 @@
 #   [I]  inferred live (the running service could not work otherwise) - confirm with the owner command block
 #   [C]  conditional: only imported when its enabling variable is true
 
-# [I] Project APIs. The list comes from var.project_services - it must contain ONLY enabled APIs.
+# [V] Project APIs. Owner confirmed 2026-11-11: all 13 in var.project_services are already enabled.
 import {
   for_each = toset(var.project_services)
   to       = google_project_service.required_apis[each.key]
@@ -31,7 +31,8 @@ import {
   id = "${var.project_id} roles/aiplatform.user serviceAccount:${local.runtime_sa_email}"
 }
 
-# [I] Secrets (Cloud Run references them by name; versions exist) and the SA's accessor binding on each.
+# [V] Secrets (automatic replication) and the runtime SA's secretAccessor binding on each (verified 2026-11-11).
+# The deploy identity's secretVersionManager on hkparking-internal-api-key is deliberately NOT in Terraform.
 import {
   to = google_secret_manager_secret.internal_api_key
   id = "projects/${var.project_id}/secrets/hkparking-internal-api-key"
@@ -49,8 +50,7 @@ import {
   id = "projects/${var.project_id}/secrets/hkparking-crowd-ip-hash-secret roles/secretmanager.secretAccessor serviceAccount:${local.runtime_sa_email}"
 }
 
-# [V] Snapshot bucket (exists, ASIA-EAST2). Uniform access / public access prevention / storage class are [I]:
-#     confirm with the owner command; if live differs, change the resource to the live value before planning.
+# [V] Snapshot bucket (ASIA-EAST2, STANDARD, uniform access, PAP enforced, 7-day soft delete, no versioning).
 import {
   to = google_storage_bucket.state_snapshots
   id = "${var.project_id}/${var.state_snapshot_bucket_name}"
@@ -93,7 +93,7 @@ import {
   id = "projects/${var.project_id}/databases/(default)/collectionGroups/virtual_locks/indexes/CICAgOjXh4EK"
 }
 
-# [C] Firestore TTL policies: only when var.firestore_enable_ttl = true (empty set otherwise).
+# [V] Firestore TTL policies (ACTIVE on active_sessions, virtual_locks, reports). Imported when firestore_enable_ttl is true (default).
 import {
   for_each = local.firestore_ttl_collections
   to       = google_firestore_field.ttl[each.key]

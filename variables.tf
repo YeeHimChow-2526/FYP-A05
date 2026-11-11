@@ -105,8 +105,8 @@ variable "project_services" {
 
 variable "firestore_enable_ttl" {
   type        = bool
-  description = "Manage the Firestore TTL policies (field expire_at on active_sessions, virtual_locks, reports). Default false: not confirmed to exist live, and creating a TTL policy would be a live change. Set true only after the owner command shows these TTL policies exist (then they are imported)."
-  default     = false
+  description = "Manage the Firestore TTL policies (field expire_at on active_sessions, virtual_locks, reports). Live policies are ACTIVE (verified 2026-11-11), so the default is true and they are imported."
+  default     = true
 }
 
 variable "backend_traffic_revision" {

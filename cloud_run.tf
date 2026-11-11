@@ -59,9 +59,15 @@ resource "google_secret_manager_secret" "crowd_ip_hash_secret" {
 resource "google_storage_bucket" "state_snapshots" {
   name                        = var.state_snapshot_bucket_name
   location                    = var.region
+  storage_class               = "STANDARD"
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
   force_destroy               = false
+
+  # Live (verified 2026-11-11): 7-day soft delete is on; versioning is off (not present in bucket describe).
+  soft_delete_policy {
+    retention_duration_seconds = 604800
+  }
 
   depends_on = [google_project_service.required_apis]
 }

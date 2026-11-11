@@ -23,9 +23,8 @@ resource "google_firestore_backup_schedule" "daily" {
   daily_recurrence {}
 }
 
-# TTL policies on expire_at. NOT confirmed to exist live, so they are off by default: a plain create would
-# switch on TTL deletion in the live database. Enable with firestore_enable_ttl = true only once the owner
-# command shows the policies already exist (imports.tf then imports them; plan must show no add).
+# TTL policies on expire_at. Live policies are ACTIVE on active_sessions, virtual_locks and reports
+# (verified 2026-11-11). Default on, and imports.tf imports them so plan must not create them.
 locals {
   firestore_ttl_collections = var.firestore_enable_ttl ? {
     active_sessions = "active_sessions"
