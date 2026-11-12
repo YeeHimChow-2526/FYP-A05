@@ -249,4 +249,8 @@ are created in GCP by this repository until you run `terraform apply`.
 The current scope does not include DATA.GOV.HK ingestion/history workers,
 official POI data, Gemini perk reconciliation, or the 7-day/14-day chronic
 hotspot escalation flow. The one-hour crowd-report penalty and two-source
-ranking cap are implemented by the API.
+ranking cap are implemented by the API. Terraform defines GCS lifecycle
+retention only for objects under `history/` (Nearline after 30 days, Coldline
+after 90 days, Archive after 365 days, deletion after 730 days); review the
+plan and deletion impact before applying it. This does not create history
+workers, a scheduler, or BigQuery resources.

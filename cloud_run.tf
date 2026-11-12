@@ -69,6 +69,54 @@ resource "google_storage_bucket" "state_snapshots" {
     retention_duration_seconds = 604800
   }
 
+  # Cold-path history retention only. Live snapshots and static objects are unaffected.
+  lifecycle_rule {
+    action {
+      type          = "SetStorageClass"
+      storage_class = "NEARLINE"
+    }
+
+    condition {
+      age            = 30
+      matches_prefix = ["history/"]
+    }
+  }
+
+  lifecycle_rule {
+    action {
+      type          = "SetStorageClass"
+      storage_class = "COLDLINE"
+    }
+
+    condition {
+      age            = 90
+      matches_prefix = ["history/"]
+    }
+  }
+
+  lifecycle_rule {
+    action {
+      type          = "SetStorageClass"
+      storage_class = "ARCHIVE"
+    }
+
+    condition {
+      age            = 365
+      matches_prefix = ["history/"]
+    }
+  }
+
+  lifecycle_rule {
+    action {
+      type = "Delete"
+    }
+
+    condition {
+      age            = 730
+      matches_prefix = ["history/"]
+    }
+  }
+
   depends_on = [google_project_service.required_apis]
 }
 
