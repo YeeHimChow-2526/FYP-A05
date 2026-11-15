@@ -12,3 +12,8 @@ output "api_image_repository" {
   value       = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.api.repository_id}"
   description = "Artifact Registry repository for the API container image."
 }
+
+output "ingestion_job_name" {
+  value       = var.ingestion_enabled ? google_cloud_run_v2_job.ingestion[0].name : null
+  description = "Cloud Run job that archives raw TD feeds and publishes processed snapshots."
+}

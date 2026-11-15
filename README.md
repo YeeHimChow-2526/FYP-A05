@@ -83,10 +83,11 @@ car park feeds into one citywide region snapshot. It uses no AI and needs no API
   `source_snapshot_ts` = the feed's `Last-Modified`. `source_status` is `degraded` when fewer
   than 300 car parks map, or after 3 consecutive fetch failures (the last snapshot is kept, and
   the API marks it stale after 600 s anyway).
-- Writes: `regions/HK_TD/snapshot.json`, then `manifest.json` (only when it changes), then
-  `state/td_carpark.json` (ETag, sha256, failure count). All writes use `if_generation_match`, and a
-  412 means another run won (exit 0). A 304 or an unchanged body writes nothing. Manifest region values
-  are strings only. `INCLUDE_DEMO_REGION=1` keeps `MK_DEMO` listed next to `HK_TD`.
+- Writes: immutable `regions/HK_TD/snapshots/*.json` objects and a shared `manifest.json`
+  containing the current region pointers, ETags, failure counts and refresh lease.
+  A 304 or unchanged body keeps the existing region object; the manifest's check time still advances.
+  The CLI uses the same generation-guarded publication protocol as the API's on-demand refresh.
+  `INCLUDE_DEMO_REGION=1` adds `MK_DEMO` when its seed object exists.
 - Run:
 
 ```sh
@@ -96,10 +97,75 @@ bash scripts/run_ingest_once.sh [gs://bucket]                             # writ
 
   `scripts/upload_demo_seed.sh` no longer replaces a real (`is_demo: false`) manifest unless
   `FORCE_DEMO=1`. Without that flag it refreshes only `regions/MK_DEMO/snapshot.json`.
-- Cost: about 100 KB per snapshot. At a 2-minute day / 5-minute night cadence that is roughly 1–2 GCS Class A
-  writes per run, well under US$1/month, plus Cloud Run Job time once it's scheduled. The
-  Scheduler and Job are not in Terraform yet. Until they are, the data goes stale 10 minutes after the last
-  manual run.
+- Scheduled ingestion is opt-in; see the next section. Without scheduling or enabled on-demand
+  refresh, data becomes stale after the last manual run.
+
+### Scheduled downloads: car parks and parking meters
+
+`ingestion.tf` defines **two Cloud Scheduler triggers and one Cloud Run Job**, running both
+sources on these non-overlapping schedules in `Asia/Hong_Kong`:
+
+| Time window | Interval | Cron |
+|---|---|---|
+| 06:00-23:59 | Every five minutes | `*/5 6-23 * * *` |
+| 00:00-05:59 | Every fifteen minutes | `*/15 0-5 * * *` |
+
+The overnight trigger last runs at 05:45; the daytime trigger starts at 06:00.
+These schedules control the ingestion job only; enabled API on-demand refresh can still
+fetch more frequently, including overnight.
+
+The job reuses the
+`server/` image, overriding its API startup command with
+`python -m app.ingest.td_carpark --archive-raw` and `METER_REFRESH_ENABLED=true`.
+It uses dedicated service accounts: the job can read/write the snapshot bucket, while
+the scheduler can only invoke this job. No API key or application secrets are needed.
+
+Each execution downloads these four complete feeds without conditional requests and preserves
+the original bytes in GCS (run IDs contain a UTC timestamp and a random suffix):
+
+| Feed | URL | GCS object |
+|---|---|---|
+| Car park vacancies | https://resource.data.one.gov.hk/td/carpark/vacancy_all.json | `raw/td_carpark/<run-id>/vacancy_all.json` |
+| Car park basic information | https://resource.data.one.gov.hk/td/carpark/basic_info_all.json | `raw/td_carpark/<run-id>/basic_info_all.json` |
+| Meter occupancy | https://resource.data.one.gov.hk/td/psiparkingspaces/occupancystatus/occupancystatus.csv | `raw/td_meters/<run-id>/occupancystatus.csv` |
+| Meter spaces | https://resource.data.one.gov.hk/td/psiparkingspaces/spaceinfo/parkingspaces.csv | `raw/td_meters/<run-id>/parkingspaces.csv` |
+
+The same downloaded responses feed the existing snapshot processor, without downloading twice:
+
+- Processed objects: `regions/HK_TD/snapshots/*.json` and `regions/HK_TD_METERS/snapshots/*.json`.
+- `manifest.json` points to the latest published objects; do not assume fixed snapshot filenames.
+- Existing immutable metadata caches remain under `static/td_info/` and `static/td_meter_spaces/`.
+- Unchanged dynamic feeds do not create new processed snapshots. Raw files are still archived.
+- Raw archiving happens before the shared refresh lease/backoff checks, so another writer can
+  cause snapshot publication to be skipped even after this execution archives its raw feeds.
+- Download failures are included in structured logs and produce a nonzero job exit code.
+  Other successfully downloaded feeds are retained and independent sources can still publish.
+  Failed storage writes fail the job. Raw data is saved before parsing, including malformed feeds.
+- Neither Scheduler nor the job retries failed executions automatically; the next scheduled run
+  tries again. Scheduler success means execution was requested, not that ingestion succeeded:
+  check Cloud Run Job execution status and logs.
+
+**Deployment (manual, not performed by adding these files):**
+
+1. Complete the existing-resource import first, keeping `ingestion_enabled = false`.
+   Follow [the live-sync procedure](docs/TERRAFORM_LIVE_SYNC.md); do not apply a fresh-create
+   plan against the existing project.
+2. Build the updated `server/` image using `gcloud builds submit` (see below). Record its
+   Artifact Registry digest; the old live backend image does not include raw archiving.
+3. Set `ingestion_enabled = true` and `ingestion_image = "<new image URI, preferably @sha256:...>"`
+   in your private `terraform.tfvars`. This image setting is independent of `backend_image`,
+   so enabling ingestion does not deploy a new API image or change API traffic.
+4. Run `terraform plan`, review the new job, scheduler, service accounts and IAM bindings,
+   then `terraform apply`. The deployer needs permission to create those resources and
+   act as the scheduler/job service accounts. The Cloud Scheduler API must be enabled.
+5. Test immediately with `gcloud run jobs execute parking-data-ingest --region=asia-east2 --wait`
+   (use your configured region), inspect execution logs, and list the bucket's `raw/` objects
+   and the two region pointers in `manifest.json`.
+
+The schedules start after apply. Expect 240 executions and up to 960 raw objects per day.
+Raw and processed snapshots currently have **no automatic expiry**; storage grows over time.
+Cloud Run, Scheduler, network and storage operations may incur charges. Agree on retention
+and monitor actual costs before leaving this enabled long term.
 
 ## Cloud deployment
 
@@ -246,7 +312,7 @@ Cloud Run can scale to zero, but Firestore and storage can incur charges. Check
 current GCP pricing and set project budgets/alerts before applying. No resources
 are created in GCP by this repository until you run `terraform apply`.
 
-The current scope does not include DATA.GOV.HK ingestion/history workers,
+DATA.GOV.HK scheduled ingestion is opt-in as described above. The current scope does not include history workers,
 official POI data, Gemini perk reconciliation, or the 7-day/14-day chronic
 hotspot escalation flow. The one-hour crowd-report penalty and two-source
 ranking cap are implemented by the API. Terraform defines GCS lifecycle

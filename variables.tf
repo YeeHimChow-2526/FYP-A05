@@ -50,6 +50,19 @@ variable "state_snapshot_bucket_name" {
   description = "Globally unique GCS bucket name for versioned parking snapshots."
 }
 
+variable "ingestion_enabled" {
+  type        = bool
+  description = "Create the TD ingestion job and daytime/overnight schedulers. Keep false during the existing-resource import."
+  default     = false
+}
+
+variable "ingestion_image" {
+  type        = string
+  description = "Newly built server/ image URI with raw-feed archiving support. Independent of the live backend image."
+  default     = ""
+  nullable    = false
+}
+
 variable "firestore_enable_point_in_time_recovery" {
   type        = bool
   description = "Enable Firestore point-in-time recovery for up to 7 days. Live is DISABLED (verified 2026-11-11), so the default is false; turning it on is a separate team decision with cost."

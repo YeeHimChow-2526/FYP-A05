@@ -64,6 +64,56 @@ def manifest(store):
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_job_archives_all_four_feeds_and_publishes_both_regions(self):
+        store, up = FakeStore(), Upstream(last_modified=NOW)
+        result = td.run_once(store, up, now=NOW, meters_enabled=True, archive_raw=True)
+        self.assertEqual(result.exit_code, 0)
+        expected = {
+            "vacancy_all.json": VAC,
+            "basic_info_all.json": INFO,
+            "occupancystatus.csv": up.meter_occ,
+            "parkingspaces.csv": up.meter_spaces,
+        }
+        self.assertEqual(len(result.writes), 4)
+        for name in result.writes:
+            self.assertTrue(name.startswith("raw/td_"))
+            self.assertEqual(store.read(name)[0], expected[name.rsplit("/", 1)[-1]])
+        self.assertEqual(set(manifest(store)["regions"]), {"HK_TD", "HK_TD_METERS"})
+        self.assertEqual(len(up.calls), 4)
+        self.assertTrue(all(etag is None for _, etag in up.calls))
+
+        pointers = manifest(store)["regions"]
+        later = td.run_once(store, up, now=NOW + timedelta(minutes=5),
+                            meters_enabled=True, archive_raw=True)
+        self.assertEqual(later.exit_code, 0)
+        self.assertEqual(len(later.writes), 4)
+        self.assertTrue(set(result.writes).isdisjoint(later.writes))
+        self.assertEqual(manifest(store)["regions"], pointers)
+        self.assertEqual(len(up.calls), 8)
+
+    def test_raw_fetch_failure_is_reported_and_other_source_still_publishes(self):
+        store, up = FakeStore(), Upstream()
+        up.fail.add(td.VACANCY_URL)
+        result = td.run_once(store, up, now=NOW, meters_enabled=True, archive_raw=True)
+        self.assertEqual(result.exit_code, 1)
+        self.assertIn(td.VACANCY_URL, result.stats["raw_errors"])
+        self.assertEqual(len(result.writes), 3)
+        self.assertEqual(result.stats["sources"]["td_carpark"], "failed")
+        self.assertIn("HK_TD_METERS", manifest(store)["regions"])
+
+    def test_raw_storage_failure_is_not_reported_as_success(self):
+        store, up = FakeStore(), Upstream()
+        original_write = store.write
+
+        def fail_raw(name, data, generation):
+            if name.startswith("raw/"):
+                raise PermissionError("raw write denied")
+            return original_write(name, data, generation)
+
+        store.write = fail_raw
+        with self.assertRaisesRegex(PermissionError, "raw write denied"):
+            td.run_once(store, up, now=NOW, archive_raw=True)
+
     def test_stalled_leader_is_fenced_after_takeover(self):
         store, up = FakeStore(), Upstream()
         sc.refresh_once(store, up, CFG, clock=at(NOW))  # bootstrap

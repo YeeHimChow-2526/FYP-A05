@@ -1,12 +1,12 @@
-"""TD car park vacancy feed -> GCS ``regions/HK_TD/snapshot.json`` + ``manifest.json``.
+"""TD car park feeds -> immutable GCS region snapshots + shared ``manifest.json``.
 
-No AI. One run = one conditional fetch of the Transport Department feeds,
-a pure transform into the ``RegionSnapshot`` schema, and generation-guarded
-GCS writes (region first, manifest last). Designed to run as a Cloud Run Job
+No AI. Normal runs conditionally fetch the Transport Department feeds; --archive-raw
+also preserves complete original feeds per execution. Snapshot publication uses the
+shared refresh lease and generation-guarded GCS writes. Designed to run as a Cloud Run Job
 (``python -m app.ingest.td_carpark``) or by hand via ``scripts/run_ingest_once.sh``.
 
 Exit codes: 0 = written / nothing changed / another run won (412);
-1 = source fetch failed (old snapshot kept; degraded after 3 consecutive fails);
+1 = raw download or source refresh failed, or the manifest is invalid;
 2 = bad configuration.
 """
 
@@ -20,6 +20,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
@@ -49,7 +50,7 @@ BBOX = (22.153, 22.563, 113.835, 114.441)
 PER_CARPARK_STALE_MINUTES = 30
 MIN_OK_CARPARKS = 300
 DEGRADED_AFTER_FAILURES = 3
-JOB_LEASE_SECONDS = 180  # s; > 3 URLs x (4 attempts x 8 s + 3 x 2 s backoff)
+JOB_LEASE_SECONDS = 180  # s; > 4 URLs x (4 attempts x 8 s + 3 x 2 s backoff)
 
 FETCH_TIMEOUT_SECONDS = 8
 FETCH_MAX_ATTEMPTS = 4
@@ -328,7 +329,7 @@ class GcsObjectStore:
         try:
             blob.upload_from_string(
                 data,
-                content_type="application/json",
+                content_type="text/csv" if name.endswith(".csv") else "application/json",
                 if_generation_match=if_generation_match,
             )
         except self._gexc.PreconditionFailed as error:
@@ -369,6 +370,7 @@ def run_once(
     now: datetime | None = None,
     include_demo: bool = False,
     meters_enabled: bool = False,
+    archive_raw: bool = False,
 ) -> RunResult:
     """Job/CLI writer: the SAME lease/CAS protocol as the API (app/shared_cache.py), forced past
     the 60 s interval but still honouring another writer's lease and the failure backoff.
@@ -381,10 +383,49 @@ def run_once(
     # Job fetches retry (FETCH_MAX_ATTEMPTS x timeout + backoff ~ 40 s per URL) -> longer lease.
     cfg = shared_cache.RefreshConfig(lease_seconds=JOB_LEASE_SECONDS, meters_enabled=meters_enabled)
     clock = (lambda: now) if now is not None else (lambda: datetime.now(UTC))
-    result = shared_cache.refresh_once(store, fetch, cfg, clock=clock, force=True, extra_regions=extra)
+    raw_objects: list[str] = []
+    raw_errors: dict[str, str] = {}
+    refresh_fetch = fetch
+    if archive_raw:
+        run_id = f"{clock().astimezone(UTC):%Y%m%dT%H%M%S%fZ}-{uuid.uuid4().hex}"
+        feeds = {
+            VACANCY_URL: f"raw/td_carpark/{run_id}/vacancy_all.json",
+            INFO_URL: f"raw/td_carpark/{run_id}/basic_info_all.json",
+        }
+        if meters_enabled:
+            feeds.update({
+                shared_cache.METER_OCCUPANCY_URL: f"raw/td_meters/{run_id}/occupancystatus.csv",
+                shared_cache.METER_SPACES_URL: f"raw/td_meters/{run_id}/parkingspaces.csv",
+            })
+        responses: dict[str, FetchResult] = {}
+        failures: dict[str, FetchError] = {}
+        for url, name in feeds.items():
+            try:
+                response = fetch(url, None)
+                if response.status != 200:
+                    raise FetchError(f"GET {url} returned {response.status}; raw archive requires a body")
+            except FetchError as error:
+                failures[url] = error
+                raw_errors[url] = str(error)
+                continue
+            store.write(name, response.body, 0)
+            raw_objects.append(name)
+            responses[url] = response
+
+        def archived_fetch(url: str, etag: str | None) -> FetchResult:
+            if url in failures:
+                raise failures[url]
+            return responses[url]
+
+        refresh_fetch = archived_fetch
+        cfg.static_ttl_seconds = 0
+    result = shared_cache.refresh_once(store, refresh_fetch, cfg, clock=clock, force=True, extra_regions=extra)
     failed = [k for k, v in result.sources.items() if v == "failed"]
-    code = 1 if failed or result.outcome == "bad_manifest" else 0
-    return RunResult(code, result.outcome, {"sources": result.sources, "generation": result.generation})
+    code = 1 if failed or raw_errors or result.outcome == "bad_manifest" else 0
+    stats: dict[str, Any] = {"sources": result.sources, "generation": result.generation}
+    if archive_raw:
+        stats.update(raw_objects=raw_objects, raw_errors=raw_errors)
+    return RunResult(code, result.outcome, stats, raw_objects)
 
 
 def dry_run(fetch: Fetcher, out_path: str | None, now: datetime | None = None) -> RunResult:
@@ -419,8 +460,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.ingest.td_carpark")
     parser.add_argument("--dry-run", action="store_true", help="fetch + transform only; no GCS")
     parser.add_argument("--out", help="with --dry-run: write the snapshot JSON here")
+    parser.add_argument("--archive-raw", action="store_true", help="also archive original feeds in GCS")
     parser.add_argument("--bucket", default=os.environ.get("GCS_STATE_BUCKET", ""))
     args = parser.parse_args(argv)
+    if args.dry_run and args.archive_raw:
+        parser.error("--archive-raw requires GCS and cannot be combined with --dry-run")
 
     if args.dry_run:
         result = dry_run(http_fetch, args.out)
@@ -433,6 +477,7 @@ def main(argv: list[str] | None = None) -> int:
             http_fetch,
             include_demo=_env_flag("INCLUDE_DEMO_REGION"),
             meters_enabled=_env_flag("METER_REFRESH_ENABLED"),
+            archive_raw=args.archive_raw,
         )
     print(
         json.dumps(

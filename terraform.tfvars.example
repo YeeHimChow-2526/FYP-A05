@@ -3,3 +3,7 @@ region                     = "asia-east2"
 # backend_image is optional: leave it out to use the live digest (variables.tf: backend_image_digest).
 # backend_image            = "asia-east2-docker.pkg.dev/YOUR_GCP_PROJECT_ID/hkparking/server@sha256:..."
 state_snapshot_bucket_name = "YOUR_GLOBALLY_UNIQUE_LOWERCASE_BUCKET_NAME"
+
+# Enable only AFTER importing the existing infrastructure and building the updated server image.
+# ingestion_enabled = true
+# ingestion_image   = "asia-east2-docker.pkg.dev/YOUR_GCP_PROJECT_ID/hkparking/server@sha256:..."

@@ -1,4 +1,4 @@
-"""TD metered-parking CSVs -> meter-cluster RegionSnapshot (pure, local, NOT scheduled).
+"""TD metered-parking CSVs -> meter-cluster RegionSnapshot (pure transform).
 
 Schema verified against TD data spec "Distribution of Metered Parking Spaces and Occupancy of
 those Installed with New Parking Meters" (spaceinfo/parkingspaces.csv,
@@ -8,8 +8,8 @@ occupancystatus/occupancystatus.csv) and a public read on 2026-11-08 HKT:
   OccupancyDateChanged = time of the last occupancy CHANGE (not an observation/freshness time).
   PoleId > 90000 = internal test meters. Only spaces with NEW meters have occupancy rows.
 
-There is no Cloud Run job, bucket write or schedule for this module: it is a typed normaliser
-for local import/tests. Wiring it into ingest is a separate (cost-bearing) decision.
+The shared refresh pipeline calls this normaliser. The opt-in Terraform ingestion job enables
+meters via METER_REFRESH_ENABLED=true; this module itself performs no downloads or bucket writes.
 
 Cluster = (District, Street, SectionOfStreet), VehicleType "A" only (CHOICE: the TD section of
 street is the grouping; METER_CLUSTER_RADIUS_METERS is not applied here). The count is the number

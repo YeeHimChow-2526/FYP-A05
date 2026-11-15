@@ -1,5 +1,14 @@
 # Terraform 同雲端現況對齊（新確認版 Terraform）
 
+Scheduled ingestion is now available in `ingestion.tf`, but defaults to
+`ingestion_enabled = false` to preserve the import-only workflow below.
+Keep it disabled until the existing-resource import is complete. Then build the
+updated `server/` image, set `ingestion_image`, and explicitly enable ingestion
+in a separate reviewed plan. This intentionally creates new Cloud Run Job,
+Cloud Scheduler and IAM resources; that later plan is no longer import-only.
+See [scheduled downloads](../README.md#scheduled-downloads-car-parks-and-parking-meters)
+for the four raw feeds, processed outputs, costs and verification steps.
+
 這個分支由 `Terraform`（`276c07e`，DB 設定：PITR／刪除保護／ABANDON／每日備份）出發，
 疊上 PR #5 的後端 code（`15aab20`），再補上「雲端已經存在、但 Terraform 未有寫」的設定。
 原本的 `Terraform` 分支冇改動。**呢個分支冇可能喺呢部機證明 plan 結果**；目標係全新 state 之下，第一次 `terraform plan` 只顯示 import（0 add／0 change／0 destroy），見第 5 節。
