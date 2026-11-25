@@ -213,6 +213,20 @@ class RunOnceTests(unittest.TestCase):
         self.assertEqual(store.json(td.MANIFEST_OBJECT)["sources"]["td_carpark"]["consecutive_failures"], 0)
 
 
+class ModuleEntryPointTests(unittest.TestCase):
+    def test_python_m_runs_package_module(self):
+        # `python -m` must use the module shared_cache imports, or its PreconditionFailed
+        # handler misses the __main__ copy's exception (second Cloud Run Job run failed with 412).
+        import runpy
+        from unittest import mock
+
+        with mock.patch.object(td, "main", return_value=0) as package_main:
+            with self.assertRaises(SystemExit) as exit_info:
+                runpy.run_module("app.ingest.td_carpark", run_name="__main__")
+        package_main.assert_called_once_with()
+        self.assertEqual(exit_info.exception.code, 0)
+
+
 class HttpFetchTests(unittest.TestCase):
     def test_backoff_retries_then_raises(self):
         sleeps = []

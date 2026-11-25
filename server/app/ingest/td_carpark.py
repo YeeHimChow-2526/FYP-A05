@@ -495,4 +495,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # `python -m` loads this file as __main__, separate from the app.ingest.td_carpark that
+    # shared_cache imports; run the package copy so PreconditionFailed is a single class.
+    from app.ingest import td_carpark as _package_module
+
+    sys.exit(_package_module.main())
