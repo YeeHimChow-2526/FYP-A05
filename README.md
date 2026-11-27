@@ -6,6 +6,8 @@ cloud infrastructure plus FastAPI backend.
 - App: Flutter UI and Android native services. See the App section below.
 - Cloud / API: Terraform and the FastAPI service in [`server/`](./server/). See the Cloud section below.
 
+呢個統一版本嘅起點說明，同有意保留嘅已知差距，見 [`docs/UNIFIED_BASELINE.md`](docs/UNIFIED_BASELINE.md)。舊分支 `完整app` 同 `feature/scheduler` 只作歷史參考。
+
 ---
 
 # 泊車副駕
