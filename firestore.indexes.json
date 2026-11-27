@@ -1,0 +1,19 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "virtual_locks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "carpark_id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "created_at",
+          "order": "ASCENDING"
+        }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

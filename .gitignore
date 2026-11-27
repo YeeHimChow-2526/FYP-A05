@@ -59,8 +59,10 @@ repomix*.md
 # Python（tools/stub_server 等本地工具）
 __pycache__/
 *.pyc
+*.py[cod]
 .venv/
 venv/
+.pytest_cache/
 
 # 日誌與落地包（*_drop/、*_drop.zip 只喺本機用，唔入庫）
 *.log
@@ -69,3 +71,11 @@ venv/
 
 # Widget Preview related
 .widget_preview/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.tfvars.json

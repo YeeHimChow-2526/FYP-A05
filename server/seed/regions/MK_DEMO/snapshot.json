@@ -1,0 +1,16 @@
+{
+  "region_id": "MK_DEMO",
+  "source": "DEMO",
+  "is_demo": true,
+  "source_snapshot_ts": "__NOW__",
+  "processed_at": "__NOW__",
+  "source_status": "ok",
+  "carparks": [
+    {"carpark_id":"CP_LANGHAM","name":"朗豪坊停車場","type":"INDOOR","lat":22.3184,"lng":114.1683,"vacancies":42,"fee_summary":"DEMO","is_open":true},
+    {"carpark_id":"DEMO_MK_CENTRE","name":"旺角中心停車場（DEMO）","type":"INDOOR","lat":22.3170,"lng":114.1700,"vacancies":15,"fee_summary":"DEMO","is_open":true},
+    {"carpark_id":"DEMO_GCP","name":"新世紀廣場停車場（DEMO）","type":"INDOOR","lat":22.3217,"lng":114.1727,"vacancies":8,"fee_summary":"DEMO","is_open":true},
+    {"carpark_id":"DEMO_METER_PORTLAND","name":"砵蘭街咪錶（DEMO）","type":"METER","lat":22.3195,"lng":114.1690,"vacancies":3,"fee_summary":"DEMO","is_open":true},
+    {"carpark_id":"DEMO_METER_SHANGHAI","name":"上海街咪錶（DEMO）","type":"METER","lat":22.3180,"lng":114.1695,"vacancies":2,"fee_summary":"DEMO","is_open":true},
+    {"carpark_id":"DEMO_SMOKE_TEST","name":"Smoke test 專用（DEMO，唔好導航）","type":"INDOOR","lat":22.2800,"lng":114.1588,"vacancies":5,"fee_summary":"DEMO","is_open":true}
+  ]
+}

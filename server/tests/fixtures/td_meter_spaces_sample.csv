@@ -1,0 +1,12 @@
+2026-11-08
+,,,,,,,,,,,,,,,,,,,,,,,
+PoleId,ParkingSpaceId,Region,Region_tc,Region_sc,District,District_tc,District_sc,SubDistrict,SubDistrict_tc,SubDistrict_sc,Street,Street_tc,Street_sc,SectionOfStreet,SectionOfStreet_tc,SectionOfStreet_sc,Latitude,Longitude,VehicleType,LPP,OperatingPeriod,TimeUnit,PaymentUnit
+10001,10001A,Kowloon,九龍,九龙,Kwun Tong,觀塘,观塘,KT,觀塘,观塘,Hoi Yuen Road,海濱道,海滨道,Sec A,甲段,甲段,22.3120,114.2245,A,120,D,15,2
+10001,10001B,Kowloon,九龍,九龙,Kwun Tong,觀塘,观塘,KT,觀塘,观塘,Hoi Yuen Road,海濱道,海滨道,Sec A,甲段,甲段,22.3121,114.2246,A,120,D,15,2
+10002,10002A,Kowloon,九龍,九龙,Kwun Tong,觀塘,观塘,KT,觀塘,观塘,Hoi Yuen Road,海濱道,海滨道,Sec A,甲段,甲段,22.3122,114.2247,A,120,D,15,2
+10002,10002B,Kowloon,九龍,九龙,Kwun Tong,觀塘,观塘,KT,觀塘,观塘,Hoi Yuen Road,海濱道,海滨道,Sec A,甲段,甲段,22.3123,114.2248,A,120,D,15,2
+10003,10003A,Kowloon,九龍,九龙,Kwun Tong,觀塘,观塘,KT,觀塘,观塘,How Ming Street,巧明街,巧明街,Sec B,乙段,乙段,22.3110,114.2230,A,60,D,15,2
+10003,10003B,Kowloon,九龍,九龙,Kwun Tong,觀塘,观塘,KT,觀塘,观塘,How Ming Street,巧明街,巧明街,Sec B,乙段,乙段,22.3111,114.2231,A,60,D,15,2
+10004,10004A,Kowloon,九龍,九龙,Kwun Tong,觀塘,观塘,KT,觀塘,观塘,Wai Yip Street,偉業街,伟业街,Sec C,丙段,丙段,22.3130,114.2260,A,60,D,15,2
+10005,10005A,Kowloon,九龍,九龙,Kwun Tong,觀塘,观塘,KT,觀塘,观塘,Wai Yip Street,偉業街,伟业街,Sec G,丁段,丁段,22.3130,114.2260,G,60,D,15,2
+95000,95000A,Kowloon,九龍,九龙,Kwun Tong,觀塘,观塘,KT,觀塘,观塘,Test Road,測試路,测试路,Sec T,測試,测试,22.3130,114.2260,A,60,D,15,2
