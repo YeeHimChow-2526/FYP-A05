@@ -5,5 +5,9 @@ resource "google_artifact_registry_repository" "api" {
   description   = "Container images for the Hong Kong parking API."
   format        = "DOCKER"
 
+  lifecycle {
+    prevent_destroy = true
+  }
+
   depends_on = [google_project_service.required_apis]
 }

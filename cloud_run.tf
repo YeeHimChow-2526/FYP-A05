@@ -42,6 +42,10 @@ resource "google_secret_manager_secret" "internal_api_key" {
     auto {}
   }
 
+  lifecycle {
+    prevent_destroy = true
+  }
+
   depends_on = [google_project_service.required_apis]
 }
 
@@ -51,6 +55,10 @@ resource "google_secret_manager_secret" "crowd_ip_hash_secret" {
 
   replication {
     auto {}
+  }
+
+  lifecycle {
+    prevent_destroy = true
   }
 
   depends_on = [google_project_service.required_apis]
