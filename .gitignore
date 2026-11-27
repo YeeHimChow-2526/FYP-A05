@@ -79,3 +79,4 @@ venv/
 *.tfplan
 *.tfvars
 *.tfvars.json
+!ci/terraform-ci.tfvars
