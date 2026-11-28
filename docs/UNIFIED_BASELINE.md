@@ -28,3 +28,5 @@
 ## 雲端更新
 
 把程式推上 GitHub 唔會自動改雲端。任何雲端更新都要先跑 `terraform plan`，睇過計劃先至考慮 apply。唔好用預設值 apply：預設會把資料擷取當成關閉，計劃可能會拆掉而家運行緊嘅擷取工作同排程。
+
+第一版 CI/CD 設計見 [`CICD_DESIGN.md`](CICD_DESIGN.md)。
